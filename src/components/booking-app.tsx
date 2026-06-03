@@ -24,7 +24,6 @@ import type {
 
 type AvailabilityResponse = {
   date: string;
-  user: CurrentUser;
   settings: {
     slotMinutes: number;
     minDurationMinutes: number;
@@ -32,10 +31,10 @@ type AvailabilityResponse = {
     maxAdvanceDays: number;
     maxFutureBookings: number;
     durationPresets: readonly number[];
+    allowedDomain: string;
   };
   bookings: AvailabilityBooking[];
   blocks: AvailabilityBlock[];
-  myBookings: MyBooking[];
 };
 
 type Notice = {
@@ -43,7 +42,14 @@ type Notice = {
   text: string;
 };
 
+type StoredIdentity = {
+  organizerName: string;
+  organizerEmail: string;
+};
+
 const durationPresets = [30, 45, 60, 90, 120];
+const identityStorageKey = "topfly-padel.identity.v1";
+const tokenStorageKey = "topfly-padel.tokens.v1";
 
 function pad(value: number) {
   return value.toString().padStart(2, "0");
@@ -98,6 +104,29 @@ function timeOptions() {
   });
 }
 
+function defaultSelection() {
+  const now = new Date();
+  const today = dateKey(now);
+  const preferred = dateTimeFromParts(today, "18:00");
+
+  if (preferred > now) {
+    return { date: today, time: "18:00" };
+  }
+
+  const next = new Date(now.getTime() + 15 * 60_000);
+  next.setSeconds(0, 0);
+  const roundedMinutes = Math.ceil(next.getMinutes() / 15) * 15;
+  next.setMinutes(roundedMinutes === 60 ? 0 : roundedMinutes);
+  if (roundedMinutes === 60) {
+    next.setHours(next.getHours() + 1);
+  }
+
+  return {
+    date: dateKey(next),
+    time: `${pad(next.getHours())}:${pad(next.getMinutes())}`,
+  };
+}
+
 function dateTimeFromParts(day: string, time: string) {
   return new Date(`${day}T${time}:00`);
 }
@@ -115,19 +144,69 @@ async function readApiError(response: Response) {
 
 function syncLabel(status: string) {
   if (status === "SYNCED") return "Outlook ok";
-  if (status === "FAILED") return "Outlook da controllare";
+  if (status === "FAILED") return "Email non inviata";
   if (status === "SKIPPED") return "Outlook non configurato";
   return "Outlook in corso";
 }
 
-export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
-  const [selectedDate, setSelectedDate] = useState(dateKey(new Date()));
-  const [selectedTime, setSelectedTime] = useState("18:00");
+function readStoredIdentity(): StoredIdentity {
+  if (typeof window === "undefined") return { organizerName: "", organizerEmail: "" };
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(identityStorageKey) ?? "{}") as Partial<StoredIdentity>;
+    return {
+      organizerName: typeof parsed.organizerName === "string" ? parsed.organizerName : "",
+      organizerEmail: typeof parsed.organizerEmail === "string" ? parsed.organizerEmail : "",
+    };
+  } catch {
+    return { organizerName: "", organizerEmail: "" };
+  }
+}
+
+function readStoredTokens() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(tokenStorageKey) ?? "[]") as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((token): token is string => typeof token === "string").slice(0, 30)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredIdentity(identity: StoredIdentity) {
+  window.localStorage.setItem(identityStorageKey, JSON.stringify(identity));
+}
+
+function writeStoredTokens(tokens: string[]) {
+  window.localStorage.setItem(tokenStorageKey, JSON.stringify(tokens.slice(0, 30)));
+}
+
+export function BookingApp({
+  adminMode = false,
+  initialUser,
+}: {
+  adminMode?: boolean;
+  initialUser?: CurrentUser;
+}) {
+  const isAdmin = adminMode && initialUser?.role === "ADMIN";
+  const [initialSelection] = useState(defaultSelection);
+  const [selectedDate, setSelectedDate] = useState(initialSelection.date);
+  const [selectedTime, setSelectedTime] = useState(initialSelection.time);
   const [duration, setDuration] = useState(60);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
+  const [myBookings, setMyBookings] = useState<MyBooking[]>([]);
   const [audit, setAudit] = useState<AuditItem[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
+  const [editingToken, setEditingToken] = useState<string | null>(null);
+  const [isBookingFormOpen, setIsBookingFormOpen] = useState(false);
+  const [organizerName, setOrganizerName] = useState("");
+  const [organizerEmail, setOrganizerEmail] = useState("");
+  const [localTokens, setLocalTokens] = useState<string[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("10:00");
   const [blockReason, setBlockReason] = useState("Manutenzione");
@@ -155,10 +234,13 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
   const dayBookings = useMemo(() => availability?.bookings ?? [], [availability?.bookings]);
   const dayBlocks = useMemo(() => availability?.blocks ?? [], [availability?.blocks]);
   const activeMyBookingCount = useMemo(
-    () =>
-      availability?.myBookings.filter((booking) => booking.status === "CONFIRMED").length ?? 0,
-    [availability?.myBookings],
+    () => myBookings.filter((booking) => booking.status === "CONFIRMED").length,
+    [myBookings],
   );
+  const allowedDomain = availability?.settings.allowedDomain ?? "azienda.it";
+  const isExternalEmail =
+    organizerEmail.trim().includes("@") &&
+    !organizerEmail.trim().toLowerCase().endsWith(`@${allowedDomain}`);
 
   const selectionConflict = useMemo(() => {
     const booking = dayBookings.find((item) => rangeOverlaps(start, end, item.start, item.end));
@@ -183,14 +265,44 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
   }, [selectedDate]);
 
   const loadAudit = useCallback(async () => {
-    if (initialUser.role !== "ADMIN") return;
+    if (!isAdmin) return;
 
     const response = await fetch("/api/admin/audit", { cache: "no-store" });
     if (response.ok) {
       const json = (await response.json()) as { audit: AuditItem[] };
       setAudit(json.audit);
     }
-  }, [initialUser.role]);
+  }, [isAdmin]);
+
+  const loadMyBookings = useCallback(async (tokens: string[]) => {
+    if (!tokens.length) {
+      setMyBookings([]);
+      return;
+    }
+
+    const response = await fetch("/api/bookings/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens }),
+    });
+
+    if (response.ok) {
+      const json = (await response.json()) as { bookings: MyBooking[] };
+      setMyBookings(json.bookings);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const identity = readStoredIdentity();
+      setOrganizerName(identity.organizerName);
+      setOrganizerEmail(identity.organizerEmail);
+      setLocalTokens(readStoredTokens());
+      setStorageReady(true);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     startTransition(async () => {
@@ -207,6 +319,14 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
   }, [loadAudit, loadAvailability]);
 
   useEffect(() => {
+    if (!storageReady) return;
+
+    startTransition(async () => {
+      await loadMyBookings(localTokens);
+    });
+  }, [loadMyBookings, localTokens, storageReady]);
+
+  useEffect(() => {
     const timeline = timelineRef.current;
     const selected = timeline?.querySelector<HTMLElement>("[data-selected='true']");
 
@@ -218,43 +338,108 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
     );
   }, [availability?.blocks, availability?.bookings, duration, selectedDate, selectedTime]);
 
-  function refresh() {
-    startTransition(async () => {
-      await loadAvailability();
-      await loadAudit();
-    });
+  async function refresh(tokens = localTokens) {
+    await loadAvailability();
+    await loadAudit();
+    await loadMyBookings(tokens);
+  }
+
+  function rememberIdentity() {
+    const nextIdentity = {
+      organizerName: organizerName.trim(),
+      organizerEmail: organizerEmail.trim(),
+    };
+    writeStoredIdentity(nextIdentity);
+  }
+
+  function rememberToken(token: string) {
+    const nextTokens = [token, ...localTokens.filter((item) => item !== token)].slice(0, 30);
+    writeStoredTokens(nextTokens);
+    setLocalTokens(nextTokens);
+    return nextTokens;
+  }
+
+  function forgetLocalData() {
+    window.localStorage.removeItem(identityStorageKey);
+    window.localStorage.removeItem(tokenStorageKey);
+    setOrganizerName("");
+    setOrganizerEmail("");
+    setLocalTokens([]);
+    setMyBookings([]);
+    setEditingBookingId(null);
+    setEditingToken(null);
+    setNotice({ type: "info", text: "Dati salvati su questo dispositivo rimossi." });
   }
 
   async function saveBooking() {
     setNotice(null);
 
-    const response = await fetch(
-      editingBookingId ? `/api/bookings/${editingBookingId}` : "/api/bookings",
-      {
-        method: editingBookingId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+    if (!editingBookingId && !isBookingFormOpen) {
+      setIsBookingFormOpen(true);
+      return;
+    }
+
+    const isEditing = Boolean(editingBookingId);
+    const body = isEditing
+      ? {
           start: start.toISOString(),
           end: end.toISOString(),
-        }),
-      },
-    );
+          manageToken: editingToken ?? undefined,
+        }
+      : {
+          start: start.toISOString(),
+          end: end.toISOString(),
+          organizerName,
+          organizerEmail,
+        };
+
+    const response = await fetch(isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings", {
+      method: isEditing ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
 
     if (!response.ok) {
       setNotice({ type: "error", text: await readApiError(response) });
       return;
     }
 
+    const json = (await response.json()) as { booking: MyBooking };
+    let nextTokens = localTokens;
+
+    if (!isEditing) {
+      rememberIdentity();
+      if (json.booking.manageToken) {
+        nextTokens = rememberToken(json.booking.manageToken);
+      }
+    }
+
     setEditingBookingId(null);
+    setEditingToken(null);
+    setIsBookingFormOpen(false);
     setNotice({
-      type: "success",
-      text: "Fatto. Prenotazione confermata con invito Outlook e promemoria 1h.",
+      type: json.booking.outlookSyncStatus === "FAILED" ? "info" : "success",
+      text:
+        json.booking.outlookSyncStatus === "FAILED"
+          ? "Prenotazione confermata, ma l'email Outlook non e' stata inviata."
+          : "Fatto. Prenotazione confermata con link di gestione via email.",
     });
-    refresh();
+    await refresh(nextTokens);
   }
 
-  async function cancelBooking(id: string) {
-    const response = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
+  async function cancelBooking(booking: MyBooking | AvailabilityBooking) {
+    const manageToken = "manageToken" in booking ? booking.manageToken : undefined;
+
+    if (!isAdmin && !manageToken) {
+      setNotice({ type: "error", text: "Apri il link ricevuto via email per cancellare questa prenotazione." });
+      return;
+    }
+
+    const response = await fetch(`/api/bookings/${booking.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manageToken }),
+    });
 
     if (!response.ok) {
       setNotice({ type: "error", text: await readApiError(response) });
@@ -262,10 +447,17 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
     }
 
     setNotice({ type: "info", text: "Prenotazione cancellata." });
-    refresh();
+    await refresh();
   }
 
   function editBooking(booking: MyBooking | AvailabilityBooking) {
+    const manageToken = "manageToken" in booking ? booking.manageToken : undefined;
+
+    if (!isAdmin && !manageToken) {
+      setNotice({ type: "error", text: "Apri il link ricevuto via email per modificare questa prenotazione." });
+      return;
+    }
+
     const bookingStart = new Date(booking.start);
     const bookingEnd = new Date(booking.end);
 
@@ -273,6 +465,8 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
     setSelectedTime(`${pad(bookingStart.getHours())}:${pad(bookingStart.getMinutes())}`);
     setDuration(minutesBetween(bookingStart, bookingEnd));
     setEditingBookingId(booking.id);
+    setEditingToken(manageToken ?? null);
+    setIsBookingFormOpen(false);
     setNotice({ type: "info", text: "Modifica gli orari e salva." });
   }
 
@@ -293,7 +487,7 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
     }
 
     setNotice({ type: "success", text: "Blocco admin creato." });
-    refresh();
+    await refresh();
   }
 
   async function deleteBlock(id: string) {
@@ -305,10 +499,11 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
     }
 
     setNotice({ type: "info", text: "Blocco rimosso." });
-    refresh();
+    await refresh();
   }
 
   const canSave = !selectionConflict && !isPending;
+  const hasRememberedIdentity = Boolean(organizerName || organizerEmail || localTokens.length);
 
   return (
     <main className="app-shell">
@@ -323,18 +518,24 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
           />
           <div>
             <p className="muted-label">Padel aziendale</p>
-            <h1>Ciao {initialUser.name?.split(" ")[0] ?? initialUser.email.split("@")[0]}</h1>
+            <h1>
+              {isAdmin
+                ? `Admin ${initialUser?.name?.split(" ")[0] ?? initialUser?.email.split("@")[0]}`
+                : "Prenota il campo"}
+            </h1>
           </div>
         </div>
-        <button
-          className="icon-button"
-          onClick={() => signOut({ callbackUrl: "/signin" })}
-          type="button"
-          aria-label="Esci"
-          title="Esci"
-        >
-          <LogOut size={18} />
-        </button>
+        {isAdmin ? (
+          <button
+            className="icon-button"
+            onClick={() => signOut({ callbackUrl: "/signin" })}
+            type="button"
+            aria-label="Esci"
+            title="Esci"
+          >
+            <LogOut size={18} />
+          </button>
+        ) : null}
       </header>
 
       <section className="main-grid">
@@ -458,7 +659,7 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
 
             <div className="rules">
               <span>Max 14 giorni</span>
-              <span>Max 2 future</span>
+              <span>Max 2 future per email</span>
               <span>15-120 min</span>
             </div>
 
@@ -467,9 +668,38 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
             ) : (
               <div className="notice success">
                 <MailCheck size={16} />
-                Invito Outlook + promemoria 1h
+                Conferma via email + link modifica/cancella
               </div>
             )}
+
+            {isBookingFormOpen && !editingBookingId ? (
+              <div className="booking-form">
+                <label>
+                  Nome e cognome
+                  <input
+                    autoComplete="name"
+                    value={organizerName}
+                    onChange={(event) => setOrganizerName(event.target.value)}
+                    placeholder="Mario Rossi"
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    autoComplete="email"
+                    inputMode="email"
+                    value={organizerEmail}
+                    onChange={(event) => setOrganizerEmail(event.target.value)}
+                    placeholder={`nome@${allowedDomain}`}
+                  />
+                </label>
+                {isExternalEmail ? (
+                  <div className="notice info">
+                    Puoi usare questa email, ma quella aziendale aiuta a riconoscerti meglio.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
 
@@ -480,19 +710,25 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
               type="button"
             >
               <Check size={18} />
-              {editingBookingId ? "Salva modifica" : "Prenota"}
+              {editingBookingId
+                ? "Salva modifica"
+                : isBookingFormOpen
+                  ? "Conferma prenotazione"
+                  : "Prenota"}
             </button>
 
-            {editingBookingId ? (
+            {editingBookingId || isBookingFormOpen ? (
               <button
                 className="ghost-button full-width"
                 onClick={() => {
                   setEditingBookingId(null);
+                  setEditingToken(null);
+                  setIsBookingFormOpen(false);
                   setNotice(null);
                 }}
                 type="button"
               >
-                Annulla modifica
+                Annulla
               </button>
             ) : null}
           </section>
@@ -502,9 +738,19 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
               <span>Le mie prenotazioni</span>
               <span className="count-pill">{activeMyBookingCount}</span>
             </div>
+            {hasRememberedIdentity ? (
+              <div className="identity-tools">
+                <button className="text-button" onClick={() => setIsBookingFormOpen(true)} type="button">
+                  Cambia dati
+                </button>
+                <button className="text-button danger" onClick={forgetLocalData} type="button">
+                  Dimentica dati
+                </button>
+              </div>
+            ) : null}
             <div className="booking-list">
-              {availability?.myBookings.length ? (
-                availability.myBookings.map((booking) => (
+              {myBookings.length ? (
+                myBookings.map((booking) => (
                   <article className={`booking-item ${booking.status.toLowerCase()}`} key={booking.id}>
                     <div>
                       <strong>{localDateTime(new Date(booking.start))}</strong>
@@ -529,7 +775,7 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
                         </button>
                         <button
                           className="mini-button danger"
-                          onClick={() => cancelBooking(booking.id)}
+                          onClick={() => cancelBooking(booking)}
                           type="button"
                           aria-label="Cancella"
                           title="Cancella"
@@ -541,12 +787,12 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
                   </article>
                 ))
               ) : (
-                <p className="empty-state">Nessuna prenotazione attiva. Il campo aspetta te.</p>
+                <p className="empty-state">Nessuna prenotazione salvata su questo dispositivo.</p>
               )}
             </div>
           </section>
 
-          {initialUser.role === "ADMIN" ? (
+          {isAdmin ? (
             <section className="panel admin-panel">
               <div className="section-title">
                 <Shield size={18} />
@@ -631,7 +877,7 @@ export function BookingApp({ initialUser }: { initialUser: CurrentUser }) {
                         </button>
                         <button
                           className="mini-button danger"
-                          onClick={() => cancelBooking(booking.id)}
+                          onClick={() => cancelBooking(booking)}
                           type="button"
                         >
                           <Trash2 size={15} />

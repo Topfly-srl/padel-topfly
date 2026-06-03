@@ -1,4 +1,4 @@
-import type { Booking, User } from "@prisma/client";
+import type { Booking } from "@prisma/client";
 import { appConfig, hasGraphConfig } from "@/lib/config";
 
 type GraphSyncResult =
@@ -81,14 +81,31 @@ async function graphFetch(path: string, init: RequestInit = {}) {
   return response;
 }
 
-function eventPayload(booking: Booking, organizer: Pick<User, "email" | "name">) {
-  const organizerName = organizer.name ?? organizer.email;
+type OrganizerContact = {
+  email: string;
+  name: string;
+};
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?: string) {
+  const organizerName = escapeHtml(organizer.name);
+  const safeManageUrl = manageUrl ? escapeHtml(manageUrl) : null;
+  const manageCopy = manageUrl
+    ? `<p>Puoi modificare o cancellare la prenotazione da qui: <a href="${safeManageUrl}">${safeManageUrl}</a></p>`
+    : "<p>Per modifiche o cancellazioni, usa il link ricevuto nella conferma originale.</p>";
 
   return {
     subject: "Padel TOPFLY - Prenotazione campo",
     body: {
       contentType: "HTML",
-      content: `<p>${organizerName} ha prenotato il campo da padel aziendale.</p>`,
+      content: `<p>${organizerName} ha prenotato il campo da padel aziendale.</p>${manageCopy}`,
     },
     start: {
       dateTime: booking.start.toISOString(),
@@ -102,7 +119,7 @@ function eventPayload(booking: Booking, organizer: Pick<User, "email" | "name">)
       {
         emailAddress: {
           address: organizer.email,
-          name: organizerName,
+          name: organizer.name,
         },
         type: "required",
       },
@@ -119,7 +136,8 @@ function mailboxPath(path: string) {
 
 export async function createOutlookEvent(
   booking: Booking,
-  organizer: Pick<User, "email" | "name">,
+  organizer: OrganizerContact,
+  manageUrl?: string,
 ): Promise<GraphSyncResult> {
   const disabled = graphDisabled();
   if (disabled) return disabled;
@@ -127,7 +145,7 @@ export async function createOutlookEvent(
   try {
     const response = await graphFetch(mailboxPath("/calendar/events"), {
       method: "POST",
-      body: JSON.stringify(eventPayload(booking, organizer)),
+      body: JSON.stringify(eventPayload(booking, organizer, manageUrl)),
     });
     const json = (await response.json()) as { id?: string };
 
@@ -142,7 +160,8 @@ export async function createOutlookEvent(
 
 export async function updateOutlookEvent(
   booking: Booking,
-  organizer: Pick<User, "email" | "name">,
+  organizer: OrganizerContact,
+  manageUrl?: string,
 ): Promise<GraphSyncResult> {
   if (!booking.outlookEventId) {
     return createOutlookEvent(booking, organizer);
@@ -154,7 +173,7 @@ export async function updateOutlookEvent(
   try {
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}`), {
       method: "PATCH",
-      body: JSON.stringify(eventPayload(booking, organizer)),
+      body: JSON.stringify(eventPayload(booking, organizer, manageUrl)),
     });
 
     return { status: "SYNCED", eventId: booking.outlookEventId };

@@ -13,8 +13,6 @@ export type AvailabilityBooking = {
   end: string;
   status: BookingStatus;
   organizerName: string;
-  organizerEmail: string;
-  isMine: boolean;
   outlookSyncStatus: OutlookSyncStatus;
 };
 
@@ -28,6 +26,8 @@ export type AvailabilityBlock = {
 export type MyBooking = AvailabilityBooking & {
   createdAt: string;
   updatedAt: string;
+  manageToken?: string;
+  manageUrl?: string;
 };
 
 export type AuditItem = {

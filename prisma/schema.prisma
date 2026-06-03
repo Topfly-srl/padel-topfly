@@ -43,16 +43,21 @@ model Booking {
   start             DateTime
   end               DateTime
   status            BookingStatus     @default(CONFIRMED)
+  organizerName     String
+  organizerEmail    String
+  manageTokenHash   String?
+  manageTokenExpiresAt DateTime?
   outlookEventId    String?
   outlookSyncStatus OutlookSyncStatus @default(PENDING)
   outlookSyncError  String?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
-  organizerId       String
-  organizer         User              @relation("BookingOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+  organizerId       String?
+  organizer         User?             @relation("BookingOrganizer", fields: [organizerId], references: [id], onDelete: SetNull)
 
   @@index([start, end])
-  @@index([organizerId, status, end])
+  @@index([organizerEmail, status, end])
+  @@index([manageTokenHash])
 }
 
 model AdminBlock {

@@ -7,18 +7,18 @@ import { getCurrentUser } from "@/lib/server-auth";
 export default async function SignInPage() {
   const user = await getCurrentUser();
 
-  if (user) {
-    redirect("/");
+  if (user?.role === "ADMIN") {
+    redirect("/admin");
   }
 
   async function signInWithMicrosoft() {
     "use server";
-    await signIn("microsoft-entra-id", { redirectTo: "/" });
+    await signIn("microsoft-entra-id", { redirectTo: "/admin" });
   }
 
   async function signInDev() {
     "use server";
-    await signIn("dev-login", { redirectTo: "/" });
+    await signIn("dev-login", { redirectTo: "/admin" });
   }
 
   const microsoftReady = hasMicrosoftAuthConfig();
@@ -36,20 +36,24 @@ export default async function SignInPage() {
           />
         </div>
         <p className="eyebrow">Padel aziendale</p>
-        <h1>Entra e prenota il campo</h1>
+        <h1>Accesso admin</h1>
         <p className="signin-copy">
-          Accesso riservato agli account del dominio {appConfig.allowedDomain}.
+          Area riservata a chi gestisce blocchi, storico e override prenotazioni.
         </p>
+
+        {user ? (
+          <div className="notice error">Account Microsoft valido, ma non abilitato come admin.</div>
+        ) : null}
 
         {microsoftReady ? (
           <form action={signInWithMicrosoft}>
             <button className="primary-button full-width" type="submit">
-              Continua con Microsoft 365
+              Entra con Microsoft 365
             </button>
           </form>
         ) : (
           <div className="notice">
-            Configura Microsoft Entra ID per abilitare il login aziendale.
+            {"Configura Microsoft Entra ID per abilitare l'accesso admin."}
           </div>
         )}
 

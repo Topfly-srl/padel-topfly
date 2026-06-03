@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Booking, Prisma } from "@prisma/client";
 import { BookingStatus, Prisma as PrismaNamespace } from "@prisma/client";
 import { AppError } from "@/lib/errors";
 import {
@@ -7,7 +7,7 @@ import {
   rangesOverlap,
   validateBookingPolicy,
 } from "@/lib/booking-policy";
-import { createOutlookEvent, deleteOutlookEvent, updateOutlookEvent } from "@/lib/graph";
+import { appConfig, isAllowedCompanyEmail } from "@/lib/config";
 import {
   demoCancelBooking,
   demoCreateAdminBlock,
@@ -16,9 +16,18 @@ import {
   demoGetAdminAudit,
   demoGetAvailability,
   demoListBookings,
+  demoLookupBookings,
   demoUpdateBooking,
 } from "@/lib/demo-store";
-import { appConfig } from "@/lib/config";
+import { createOutlookEvent, deleteOutlookEvent, updateOutlookEvent } from "@/lib/graph";
+import {
+  createManageToken,
+  hashManageToken,
+  isManageTokenValid,
+  manageTokenExpiresAt,
+  normalizeEmail,
+  normalizePersonName,
+} from "@/lib/manage-token";
 import { prisma } from "@/lib/prisma";
 import { assertDateParam, zonedDayBounds } from "@/lib/time";
 import type {
@@ -29,34 +38,52 @@ import type {
   MyBooking,
 } from "@/lib/types";
 
-type BookingWithOrganizer = Prisma.BookingGetPayload<{
-  include: { organizer: { select: { email: true; name: true } } };
-}>;
+type AuditActor = {
+  id?: string | null;
+  email: string;
+};
 
-function serializeBooking(
-  booking: BookingWithOrganizer,
-  currentUser: CurrentUser,
-): AvailabilityBooking {
+export type PublicBookingInput = {
+  start: Date;
+  end: Date;
+  organizerName: string;
+  organizerEmail: string;
+  baseUrl?: string;
+};
+
+export type BookingAccess = {
+  adminUser?: CurrentUser | null;
+  manageToken?: string | null;
+  baseUrl?: string;
+};
+
+function buildManageUrl(baseUrl: string | undefined, bookingId: string, token: string | undefined) {
+  if (!baseUrl || !token) return undefined;
+  return `${baseUrl.replace(/\/$/, "")}/manage/${bookingId}?token=${encodeURIComponent(token)}`;
+}
+
+function serializeBooking(booking: Booking): AvailabilityBooking {
   return {
     id: booking.id,
     start: booking.start.toISOString(),
     end: booking.end.toISOString(),
     status: booking.status,
-    organizerName: booking.organizer.name ?? booking.organizer.email,
-    organizerEmail: booking.organizer.email,
-    isMine: booking.organizerId === currentUser.id,
+    organizerName: booking.organizerName,
     outlookSyncStatus: booking.outlookSyncStatus,
   };
 }
 
-function serializeMyBooking(
-  booking: BookingWithOrganizer,
-  currentUser: CurrentUser,
+function serializeManagedBooking(
+  booking: Booking,
+  manageToken?: string,
+  baseUrl?: string,
 ): MyBooking {
   return {
-    ...serializeBooking(booking, currentUser),
+    ...serializeBooking(booking),
     createdAt: booking.createdAt.toISOString(),
     updatedAt: booking.updatedAt.toISOString(),
+    manageToken,
+    manageUrl: buildManageUrl(baseUrl, booking.id, manageToken),
   };
 }
 
@@ -80,7 +107,7 @@ function auditJson(value: unknown) {
 
 async function audit(
   tx: Prisma.TransactionClient,
-  actor: CurrentUser,
+  actor: AuditActor,
   input: {
     action: string;
     entityType: string;
@@ -91,7 +118,7 @@ async function audit(
 ) {
   await tx.auditLog.create({
     data: {
-      actorId: actor.id,
+      actorId: actor.id ?? null,
       actorEmail: actor.email,
       action: input.action,
       entityType: input.entityType,
@@ -102,11 +129,24 @@ async function audit(
   });
 }
 
-async function syncBooking(booking: BookingWithOrganizer, mode: "create" | "update") {
+function bookingOrganizer(booking: Booking) {
+  return {
+    email: booking.organizerEmail,
+    name: booking.organizerName,
+  };
+}
+
+async function syncBooking(
+  booking: Booking,
+  mode: "create" | "update",
+  manageToken?: string,
+  baseUrl?: string,
+) {
+  const manageUrl = buildManageUrl(baseUrl, booking.id, manageToken);
   const result =
     mode === "create"
-      ? await createOutlookEvent(booking, booking.organizer)
-      : await updateOutlookEvent(booking, booking.organizer);
+      ? await createOutlookEvent(booking, bookingOrganizer(booking), manageUrl)
+      : await updateOutlookEvent(booking, bookingOrganizer(booking), manageUrl);
 
   return prisma.booking.update({
     where: { id: booking.id },
@@ -115,11 +155,10 @@ async function syncBooking(booking: BookingWithOrganizer, mode: "create" | "upda
       outlookSyncStatus: result.status,
       outlookSyncError: result.error ?? null,
     },
-    include: { organizer: { select: { email: true, name: true } } },
   });
 }
 
-async function markOutlookDeleted(booking: BookingWithOrganizer) {
+async function markOutlookDeleted(booking: Booking) {
   const result = await deleteOutlookEvent(booking);
 
   return prisma.booking.update({
@@ -128,8 +167,35 @@ async function markOutlookDeleted(booking: BookingWithOrganizer) {
       outlookSyncStatus: result.status,
       outlookSyncError: result.error ?? null,
     },
-    include: { organizer: { select: { email: true, name: true } } },
   });
+}
+
+function normalizePublicBookingInput(input: PublicBookingInput) {
+  const organizerName = normalizePersonName(input.organizerName);
+  const organizerEmail = normalizeEmail(input.organizerEmail);
+  const errors: string[] = [];
+
+  if (organizerName.split(" ").filter(Boolean).length < 2) {
+    errors.push("Inserisci nome e cognome.");
+  }
+
+  if (organizerName.length > 80) {
+    errors.push("Nome e cognome sono troppo lunghi.");
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(organizerEmail)) {
+    errors.push("Inserisci un'email valida.");
+  }
+
+  if (organizerEmail.length > 120) {
+    errors.push("L'email e' troppo lunga.");
+  }
+
+  if (errors.length > 0) {
+    throw new AppError(errors.join(" "), 422);
+  }
+
+  return { organizerName, organizerEmail };
 }
 
 async function validateNoConflicts(
@@ -137,37 +203,36 @@ async function validateNoConflicts(
   input: {
     start: Date;
     end: Date;
-    organizerId: string;
+    organizerEmail: string;
     ignoreBookingId?: string;
   },
 ) {
-  const [futureBookingCount, overlappingBookings, overlappingBlocks] =
-    await Promise.all([
-      tx.booking.count({
-        where: {
-          organizerId: input.organizerId,
-          status: "CONFIRMED",
-          end: { gte: new Date() },
-          id: input.ignoreBookingId ? { not: input.ignoreBookingId } : undefined,
-        },
-      }),
-      tx.booking.findMany({
-        where: {
-          status: "CONFIRMED",
-          id: input.ignoreBookingId ? { not: input.ignoreBookingId } : undefined,
-          start: { lt: input.end },
-          end: { gt: input.start },
-        },
-        select: { id: true },
-      }),
-      tx.adminBlock.findMany({
-        where: {
-          start: { lt: input.end },
-          end: { gt: input.start },
-        },
-        select: { id: true },
-      }),
-    ]);
+  const [futureBookingCount, overlappingBookings, overlappingBlocks] = await Promise.all([
+    tx.booking.count({
+      where: {
+        organizerEmail: input.organizerEmail,
+        status: "CONFIRMED",
+        end: { gte: new Date() },
+        id: input.ignoreBookingId ? { not: input.ignoreBookingId } : undefined,
+      },
+    }),
+    tx.booking.findMany({
+      where: {
+        status: "CONFIRMED",
+        id: input.ignoreBookingId ? { not: input.ignoreBookingId } : undefined,
+        start: { lt: input.end },
+        end: { gt: input.start },
+      },
+      select: { id: true },
+    }),
+    tx.adminBlock.findMany({
+      where: {
+        start: { lt: input.end },
+        end: { gt: input.start },
+      },
+      select: { id: true },
+    }),
+  ]);
 
   const errors = validateBookingPolicy({
     start: input.start,
@@ -188,23 +253,36 @@ async function validateNoConflicts(
   }
 }
 
-export async function getAvailability(dateValue: string | null, currentUser: CurrentUser) {
+function assertBookingAccess(booking: Booking, access: BookingAccess): AuditActor {
+  if (access.adminUser?.role === "ADMIN") {
+    return {
+      id: access.adminUser.id,
+      email: access.adminUser.email,
+    };
+  }
+
+  if (isManageTokenValid(booking, access.manageToken)) {
+    return { email: booking.organizerEmail };
+  }
+
+  throw new AppError("Link di gestione non valido o scaduto.", 403);
+}
+
+export async function getAvailability(dateValue: string | null) {
   if (!appConfig.databaseConfigured) {
-    return demoGetAvailability(dateValue, currentUser);
+    return demoGetAvailability(dateValue);
   }
 
   const date = assertDateParam(dateValue);
   const bounds = zonedDayBounds(date);
-  const now = new Date();
 
-  const [bookings, blocks, myBookings] = await Promise.all([
+  const [bookings, blocks] = await Promise.all([
     prisma.booking.findMany({
       where: {
         status: "CONFIRMED",
         start: { lt: bounds.end },
         end: { gt: bounds.start },
       },
-      include: { organizer: { select: { email: true, name: true } } },
       orderBy: { start: "asc" },
     }),
     prisma.adminBlock.findMany({
@@ -214,25 +292,48 @@ export async function getAvailability(dateValue: string | null, currentUser: Cur
       },
       orderBy: { start: "asc" },
     }),
-    prisma.booking.findMany({
-      where: {
-        organizerId: currentUser.id,
-        OR: [{ end: { gte: now } }, { status: "CANCELED" }],
-      },
-      include: { organizer: { select: { email: true, name: true } } },
-      orderBy: [{ status: "asc" }, { start: "asc" }],
-      take: 12,
-    }),
   ]);
 
   return {
     date,
-    user: currentUser,
-    settings: bookingPolicy,
-    bookings: bookings.map((booking) => serializeBooking(booking, currentUser)),
+    settings: {
+      ...bookingPolicy,
+      allowedDomain: appConfig.allowedDomain,
+    },
+    bookings: bookings.map(serializeBooking),
     blocks: blocks.map(serializeBlock),
-    myBookings: myBookings.map((booking) => serializeMyBooking(booking, currentUser)),
   };
+}
+
+export async function lookupBookings(tokens: string[], baseUrl?: string) {
+  if (!appConfig.databaseConfigured) {
+    return demoLookupBookings(tokens, baseUrl);
+  }
+
+  const cleanTokens = [...new Set(tokens.map((token) => token.trim()).filter(Boolean))].slice(0, 30);
+  const tokenByHash = new Map(cleanTokens.map((token) => [hashManageToken(token), token]));
+  const hashes = [...tokenByHash.keys()];
+
+  if (!hashes.length) return [];
+
+  const now = new Date();
+  const bookings = await prisma.booking.findMany({
+    where: {
+      manageTokenHash: { in: hashes },
+      manageTokenExpiresAt: { gt: now },
+      OR: [{ end: { gte: now } }, { status: "CANCELED" }],
+    },
+    orderBy: [{ status: "asc" }, { start: "asc" }],
+    take: 30,
+  });
+
+  return bookings.map((booking) =>
+    serializeManagedBooking(
+      booking,
+      booking.manageTokenHash ? tokenByHash.get(booking.manageTokenHash) : undefined,
+      baseUrl,
+    ),
+  );
 }
 
 export async function listBookings(currentUser: CurrentUser) {
@@ -240,50 +341,45 @@ export async function listBookings(currentUser: CurrentUser) {
     return demoListBookings(currentUser);
   }
 
-  const where =
-    currentUser.role === "ADMIN"
-      ? {}
-      : {
-          organizerId: currentUser.id,
-        };
-
   const bookings = await prisma.booking.findMany({
-    where,
-    include: { organizer: { select: { email: true, name: true } } },
     orderBy: { start: "desc" },
     take: 100,
   });
 
-  return bookings.map((booking) => serializeMyBooking(booking, currentUser));
+  return bookings.map((booking) => serializeManagedBooking(booking));
 }
 
-export async function createBooking(
-  currentUser: CurrentUser,
-  input: { start: Date; end: Date },
-) {
+export async function createBooking(input: PublicBookingInput) {
   if (!appConfig.databaseConfigured) {
-    return demoCreateBooking(currentUser, input);
+    return demoCreateBooking(input);
   }
+
+  const identity = normalizePublicBookingInput(input);
+  const manageToken = createManageToken();
+  const manageTokenHash = hashManageToken(manageToken);
+  const tokenExpiresAt = manageTokenExpiresAt(input.end);
 
   const booking = await prisma.$transaction(
     async (tx) => {
       await validateNoConflicts(tx, {
         start: input.start,
         end: input.end,
-        organizerId: currentUser.id,
+        organizerEmail: identity.organizerEmail,
       });
 
       const created = await tx.booking.create({
         data: {
           start: input.start,
           end: input.end,
-          organizerId: currentUser.id,
+          organizerName: identity.organizerName,
+          organizerEmail: identity.organizerEmail,
+          manageTokenHash,
+          manageTokenExpiresAt: tokenExpiresAt,
           outlookSyncStatus: "PENDING",
         },
-        include: { organizer: { select: { email: true, name: true } } },
       });
 
-      await audit(tx, currentUser, {
+      await audit(tx, { email: identity.organizerEmail }, {
         action: "BOOKING_CREATED",
         entityType: "Booking",
         entityId: created.id,
@@ -295,38 +391,33 @@ export async function createBooking(
     { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
   );
 
-  const synced = await syncBooking(booking, "create");
-  return serializeMyBooking(synced, currentUser);
+  const synced = await syncBooking(booking, "create", manageToken, input.baseUrl);
+  return serializeManagedBooking(synced, manageToken, input.baseUrl);
 }
 
 export async function updateBooking(
-  currentUser: CurrentUser,
+  access: BookingAccess,
   bookingId: string,
   input: { start?: Date; end?: Date; status?: BookingStatus },
 ) {
   if (!appConfig.databaseConfigured) {
-    return demoUpdateBooking(currentUser, bookingId, input);
+    return demoUpdateBooking(access, bookingId, input);
   }
 
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    include: { organizer: { select: { email: true, name: true } } },
-  });
+  const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
 
   if (!booking) {
     throw new AppError("Prenotazione non trovata.", 404);
   }
 
-  const canEdit = currentUser.role === "ADMIN" || booking.organizerId === currentUser.id;
-  if (!canEdit) {
-    throw new AppError("Puoi modificare solo le tue prenotazioni.", 403);
+  const actor = assertBookingAccess(booking, access);
+  const isAdmin = access.adminUser?.role === "ADMIN";
+
+  if (input.status && !isAdmin) {
+    throw new AppError("Usa il comando cancella per annullare la prenotazione.", 403);
   }
 
   const nextStatus = input.status ?? booking.status;
-  if (input.status && currentUser.role !== "ADMIN") {
-    throw new AppError("Solo gli admin possono cambiare lo stato manualmente.", 403);
-  }
-
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
 
@@ -336,7 +427,7 @@ export async function updateBooking(
         await validateNoConflicts(tx, {
           start: nextStart,
           end: nextEnd,
-          organizerId: booking.organizerId,
+          organizerEmail: booking.organizerEmail,
           ignoreBookingId: booking.id,
         });
       }
@@ -347,12 +438,12 @@ export async function updateBooking(
           start: nextStart,
           end: nextEnd,
           status: nextStatus,
+          manageTokenExpiresAt: manageTokenExpiresAt(nextEnd),
           outlookSyncStatus: nextStatus === "CONFIRMED" ? "PENDING" : booking.outlookSyncStatus,
         },
-        include: { organizer: { select: { email: true, name: true } } },
       });
 
-      await audit(tx, currentUser, {
+      await audit(tx, actor, {
         action: nextStatus === "CONFIRMED" ? "BOOKING_UPDATED" : "BOOKING_STATUS_CHANGED",
         entityType: "Booking",
         entityId: booking.id,
@@ -367,43 +458,36 @@ export async function updateBooking(
 
   const synced =
     updated.status === "CONFIRMED"
-      ? await syncBooking(updated, "update")
+      ? await syncBooking(updated, "update", access.manageToken ?? undefined, access.baseUrl)
       : await markOutlookDeleted(updated);
 
-  return serializeMyBooking(synced, currentUser);
+  return serializeManagedBooking(synced, access.manageToken ?? undefined, access.baseUrl);
 }
 
-export async function cancelBooking(currentUser: CurrentUser, bookingId: string) {
+export async function cancelBooking(access: BookingAccess, bookingId: string) {
   if (!appConfig.databaseConfigured) {
-    return demoCancelBooking(currentUser, bookingId);
+    return demoCancelBooking(access, bookingId);
   }
 
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    include: { organizer: { select: { email: true, name: true } } },
-  });
+  const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
 
   if (!booking) {
     throw new AppError("Prenotazione non trovata.", 404);
   }
 
-  const canCancel = currentUser.role === "ADMIN" || booking.organizerId === currentUser.id;
-  if (!canCancel) {
-    throw new AppError("Puoi cancellare solo le tue prenotazioni.", 403);
-  }
+  const actor = assertBookingAccess(booking, access);
 
   if (booking.status === "CANCELED") {
-    return serializeMyBooking(booking, currentUser);
+    return serializeManagedBooking(booking, access.manageToken ?? undefined, access.baseUrl);
   }
 
   const canceled = await prisma.$transaction(async (tx) => {
     const saved = await tx.booking.update({
       where: { id: booking.id },
       data: { status: "CANCELED" },
-      include: { organizer: { select: { email: true, name: true } } },
     });
 
-    await audit(tx, currentUser, {
+    await audit(tx, actor, {
       action: "BOOKING_CANCELED",
       entityType: "Booking",
       entityId: booking.id,
@@ -415,7 +499,7 @@ export async function cancelBooking(currentUser: CurrentUser, bookingId: string)
   });
 
   const synced = await markOutlookDeleted(canceled);
-  return serializeMyBooking(synced, currentUser);
+  return serializeManagedBooking(synced, access.manageToken ?? undefined, access.baseUrl);
 }
 
 export async function createAdminBlock(
@@ -527,4 +611,8 @@ export function hasRangeConflict(
   ranges: Array<{ start: Date; end: Date }>,
 ) {
   return ranges.some((range) => rangesOverlap(start, end, range.start, range.end));
+}
+
+export function isExternalEmail(email: string) {
+  return email.trim().includes("@") && !isAllowedCompanyEmail(normalizeEmail(email));
 }

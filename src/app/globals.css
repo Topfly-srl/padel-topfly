@@ -366,6 +366,24 @@ input {
   background: rgba(37, 99, 235, 0.1);
 }
 
+.booking-form {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  margin: 10px 0;
+  padding: 10px;
+}
+
+.booking-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .primary-button,
 .ghost-button {
   display: inline-flex;
@@ -388,6 +406,11 @@ input {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--foreground);
+  text-decoration: none;
+}
+
+.danger-action {
+  color: var(--danger);
 }
 
 .full-width {
@@ -441,6 +464,26 @@ input {
   gap: 6px;
 }
 
+.identity-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0;
+}
+
+.text-button.danger {
+  color: var(--danger);
+}
+
 .empty-state {
   margin: 0;
   border: 1px dashed var(--line);
@@ -492,6 +535,10 @@ input {
   width: min(420px, 100%);
   gap: 12px;
   padding: 22px;
+}
+
+.manage-card {
+  width: min(520px, 100%);
 }
 
 .signin-brand {
