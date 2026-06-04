@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Rubik } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const rubik = Rubik({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-rubik",
+  variable: "--font-app",
 });
 
 export const metadata: Metadata = {
@@ -28,7 +28,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="it">
-      <body className={rubik.variable}>{children}</body>
+      <body className={inter.variable}>{children}</body>
     </html>
   );
 }

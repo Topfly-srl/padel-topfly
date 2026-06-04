@@ -164,7 +164,7 @@ export async function updateOutlookEvent(
   manageUrl?: string,
 ): Promise<GraphSyncResult> {
   if (!booking.outlookEventId) {
-    return createOutlookEvent(booking, organizer);
+    return createOutlookEvent(booking, organizer, manageUrl);
   }
 
   const disabled = graphDisabled();

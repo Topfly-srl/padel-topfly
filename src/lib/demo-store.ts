@@ -1,4 +1,9 @@
-import { bookingPolicy, rangesOverlap, validateBookingPolicy } from "@/lib/booking-policy";
+import {
+  bookingPolicy,
+  isAlignedToSlot,
+  rangesOverlap,
+  validateBookingPolicy,
+} from "@/lib/booking-policy";
 import { appConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
 import {
@@ -119,8 +124,16 @@ function normalizePublicInput(input: DemoCreateInput) {
     errors.push("Inserisci nome e cognome.");
   }
 
+  if (organizerName.length > 80) {
+    errors.push("Nome e cognome sono troppo lunghi.");
+  }
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(organizerEmail)) {
     errors.push("Inserisci un'email valida.");
+  }
+
+  if (organizerEmail.length > 120) {
+    errors.push("L'email e' troppo lunga.");
   }
 
   if (errors.length > 0) {
@@ -289,7 +302,12 @@ export async function demoUpdateBooking(
   booking.status = nextStatus;
   booking.manageTokenExpiresAt = manageTokenExpiresAt(nextEnd);
   booking.updatedAt = new Date();
-  addAudit(actorEmail, "BOOKING_UPDATED", "Booking", booking.id);
+  addAudit(
+    actorEmail,
+    nextStatus === "CONFIRMED" ? "BOOKING_UPDATED" : "BOOKING_STATUS_CHANGED",
+    "Booking",
+    booking.id,
+  );
 
   return managedBookingToApi(booking, access.manageToken ?? undefined, access.baseUrl);
 }
@@ -299,6 +317,10 @@ export async function demoCancelBooking(access: DemoAccess, bookingId: string) {
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
 
   const actorEmail = assertDemoAccess(booking, access);
+  if (booking.status === "CANCELED") {
+    return managedBookingToApi(booking, access.manageToken ?? undefined, access.baseUrl);
+  }
+
   booking.status = "CANCELED";
   booking.updatedAt = new Date();
   addAudit(actorEmail, "BOOKING_CANCELED", "Booking", booking.id);
@@ -312,6 +334,9 @@ export async function demoCreateAdminBlock(
 ) {
   if (input.start >= input.end) {
     throw new AppError("Il blocco deve avere un orario di fine valido.", 422);
+  }
+  if (!isAlignedToSlot(input.start) || !isAlignedToSlot(input.end)) {
+    throw new AppError("Il blocco deve usare step da 15 minuti.", 422);
   }
   if (!input.reason.trim()) throw new AppError("Inserisci un motivo per il blocco.", 422);
   if (

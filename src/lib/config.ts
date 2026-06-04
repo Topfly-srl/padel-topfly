@@ -1,8 +1,15 @@
 import { z } from "zod";
 
+const optionalUrl = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().url().optional(),
+);
+
 const envSchema = z.object({
+  APP_ENV: z.enum(["development", "preview", "production"]).optional(),
   APP_ALLOWED_DOMAIN: z.string().default("azienda.it"),
   APP_ADMIN_EMAILS: z.string().default(""),
+  APP_PUBLIC_ORIGIN: optionalUrl,
   APP_TIME_ZONE: z.string().default("Europe/Rome"),
   AUTH_DEV_MODE: z.string().default("false"),
   DEV_USER_EMAIL: z.string().default("dev@azienda.it"),
@@ -18,6 +25,16 @@ const envSchema = z.object({
 });
 
 const env = envSchema.parse(process.env);
+const isProductionDeployment =
+  process.env.VERCEL_ENV === "production" || env.APP_ENV === "production";
+
+if (isProductionDeployment && env.AUTH_DEV_MODE === "true") {
+  throw new Error("AUTH_DEV_MODE non puo' essere attivo in produzione.");
+}
+
+if (isProductionDeployment && !env.DATABASE_URL) {
+  throw new Error("DATABASE_URL e' obbligatorio in produzione.");
+}
 
 export const appConfig = {
   allowedDomain: env.APP_ALLOWED_DOMAIN.trim().toLowerCase(),
@@ -26,6 +43,7 @@ export const appConfig = {
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean),
   ),
+  publicOrigin: env.APP_PUBLIC_ORIGIN?.trim().replace(/\/$/, ""),
   timeZone: env.APP_TIME_ZONE,
   authDevMode: env.AUTH_DEV_MODE === "true",
   databaseConfigured: Boolean(env.DATABASE_URL),

@@ -1,6 +1,7 @@
 import { addDays, format, parseISO } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { appConfig } from "@/lib/config";
+import { AppError } from "@/lib/errors";
 
 const dateParamPattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -8,7 +9,7 @@ export function assertDateParam(value: string | null) {
   const date = value ?? formatInTimeZone(new Date(), appConfig.timeZone, "yyyy-MM-dd");
 
   if (!dateParamPattern.test(date)) {
-    throw new Error("Formato data non valido.");
+    throw new AppError("Formato data non valido.", 400);
   }
 
   return date;
@@ -26,12 +27,12 @@ export function zonedDayBounds(date: string) {
 
 export function toDateOrThrow(value: unknown, label: string) {
   if (typeof value !== "string") {
-    throw new Error(`${label} non valido.`);
+    throw new AppError(`${label} non valido.`, 422);
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new Error(`${label} non valido.`);
+    throw new AppError(`${label} non valido.`, 422);
   }
 
   return date;

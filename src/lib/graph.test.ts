@@ -1,0 +1,66 @@
+import type { Booking } from "@prisma/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+describe("Microsoft Graph sync", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("mantiene il link gestione quando aggiorna una booking senza evento esistente", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string; method?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString(), method: init?.method });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({ id: "event_1" }), { status: 201 });
+      }),
+    );
+
+    const { updateOutlookEvent } = await import("@/lib/graph");
+    const now = new Date("2026-06-03T10:00:00.000Z");
+    const booking: Booking = {
+      id: "booking_1",
+      start: new Date("2026-06-04T16:00:00.000Z"),
+      end: new Date("2026-06-04T17:00:00.000Z"),
+      status: "CONFIRMED",
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@topfly.it",
+      manageTokenHash: null,
+      manageTokenExpiresAt: null,
+      outlookEventId: null,
+      outlookSyncStatus: "PENDING",
+      outlookSyncError: null,
+      createdAt: now,
+      updatedAt: now,
+      organizerId: null,
+    };
+    const manageUrl = "https://padel.topfly.it/manage/booking_1?token=abc";
+
+    const result = await updateOutlookEvent(
+      booking,
+      { email: booking.organizerEmail, name: booking.organizerName },
+      manageUrl,
+    );
+
+    const eventCall = calls.find((call) => call.url.includes("/calendar/events"));
+    expect(result).toEqual({ status: "SYNCED", eventId: "event_1" });
+    expect(eventCall).toBeDefined();
+    expect(JSON.parse(eventCall!.body!).body.content).toContain(manageUrl);
+  });
+});

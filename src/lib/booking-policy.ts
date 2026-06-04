@@ -1,10 +1,16 @@
+import { addDays, format, parseISO } from "date-fns";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { bookingDurationOptions } from "@/lib/booking-constants";
+import { appConfig } from "@/lib/config";
+
 export const bookingPolicy = {
   slotMinutes: 15,
   minDurationMinutes: 15,
   maxDurationMinutes: 120,
   maxAdvanceDays: 14,
   maxFutureBookings: 2,
-  durationPresets: [30, 45, 60, 90, 120],
+  durationOptions: bookingDurationOptions,
+  durationPresets: bookingDurationOptions,
 } as const;
 
 export type BookingValidationInput = {
@@ -35,11 +41,18 @@ export function isAlignedToSlot(date: Date) {
   );
 }
 
+export function maxBookableStartAt(now = new Date()) {
+  const today = formatInTimeZone(now, appConfig.timeZone, "yyyy-MM-dd");
+  const parsedToday = parseISO(`${today}T00:00:00`);
+  const firstBlockedDay = format(addDays(parsedToday, bookingPolicy.maxAdvanceDays + 1), "yyyy-MM-dd");
+
+  return fromZonedTime(`${firstBlockedDay}T00:00:00`, appConfig.timeZone);
+}
+
 export function validateBookingPolicy(input: BookingValidationInput) {
   const now = input.now ?? new Date();
   const errors: string[] = [];
   const duration = minutesBetween(input.start, input.end);
-  const maxAdvanceMs = bookingPolicy.maxAdvanceDays * 24 * 60 * 60 * 1000;
 
   if (Number.isNaN(input.start.getTime()) || Number.isNaN(input.end.getTime())) {
     errors.push("Scegli un orario valido.");
@@ -54,7 +67,7 @@ export function validateBookingPolicy(input: BookingValidationInput) {
     errors.push("Non puoi prenotare nel passato.");
   }
 
-  if (input.start.getTime() - now.getTime() > maxAdvanceMs) {
+  if (input.start >= maxBookableStartAt(now)) {
     errors.push("Puoi prenotare al massimo 14 giorni in anticipo.");
   }
 

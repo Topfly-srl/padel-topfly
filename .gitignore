@@ -7,3 +7,4 @@ output/playwright/
 .env*.local
 !.env.example
 *.tsbuildinfo
+.DS_Store

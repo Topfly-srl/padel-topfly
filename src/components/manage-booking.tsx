@@ -4,6 +4,7 @@ import { Check, Clock3, Trash2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { bookingDurationOptions } from "@/lib/booking-constants";
 import type { MyBooking } from "@/lib/types";
 
 type Notice = {
@@ -84,6 +85,8 @@ export function ManageBooking({
   const [selectedDate, setSelectedDate] = useState(dateKey(new Date()));
   const [selectedTime, setSelectedTime] = useState("18:00");
   const [duration, setDuration] = useState(60);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const [isPending, startTransition] = useTransition();
   const options = useMemo(() => timeOptions(), []);
   const start = useMemo(
@@ -124,44 +127,62 @@ export function ManageBooking({
   }, [bookingId, manageToken]);
 
   async function updateBooking() {
+    if (isSaving || isCanceling) return;
+
     setNotice(null);
-    const response = await fetch(`/api/bookings/${bookingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        start: start.toISOString(),
-        end: end.toISOString(),
-        manageToken,
-      }),
-    });
+    setIsSaving(true);
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
+    try {
+      const response = await fetch(`/api/bookings/${bookingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: start.toISOString(),
+          end: end.toISOString(),
+          manageToken,
+        }),
+      });
+
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      const json = (await response.json()) as { booking: MyBooking };
+      setBooking(json.booking);
+      setNotice({ type: "success", text: "Prenotazione aggiornata." });
+    } finally {
+      setIsSaving(false);
     }
-
-    const json = (await response.json()) as { booking: MyBooking };
-    setBooking(json.booking);
-    setNotice({ type: "success", text: "Prenotazione aggiornata." });
   }
 
   async function cancelBooking() {
+    if (isSaving || isCanceling) return;
+
     setNotice(null);
-    const response = await fetch(`/api/bookings/${bookingId}`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ manageToken }),
-    });
+    setIsCanceling(true);
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
+    try {
+      const response = await fetch(`/api/bookings/${bookingId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manageToken }),
+      });
+
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      const json = (await response.json()) as { booking: MyBooking };
+      setBooking(json.booking);
+      setNotice({ type: "info", text: "Prenotazione cancellata." });
+    } finally {
+      setIsCanceling(false);
     }
-
-    const json = (await response.json()) as { booking: MyBooking };
-    setBooking(json.booking);
-    setNotice({ type: "info", text: "Prenotazione cancellata." });
   }
+
+  const actionsDisabled = isPending || isSaving || isCanceling;
 
   return (
     <main className="signin-shell">
@@ -179,9 +200,11 @@ export function ManageBooking({
         {booking ? (
           <>
             <h1>{booking.status === "CONFIRMED" ? "Modifica il tuo slot" : "Prenotazione cancellata"}</h1>
-            <p className="signin-copy">
-              Ora attuale: {localDateTime(new Date(booking.start))} - {localDateTime(new Date(booking.end))}
-            </p>
+            <div className="manage-current">
+              <span>Prenotazione attuale</span>
+              <strong>{localDateTime(new Date(booking.start))}</strong>
+              <small>{localDateTime(new Date(booking.end))}</small>
+            </div>
 
             {booking.status === "CONFIRMED" ? (
               <>
@@ -194,35 +217,67 @@ export function ManageBooking({
                       onChange={(event) => setSelectedDate(event.target.value)}
                     />
                   </label>
-                  <label>
-                    Inizio
-                    <select value={selectedTime} onChange={(event) => setSelectedTime(event.target.value)}>
-                      {options.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                 </div>
-                <label className="stack-label">
-                  Durata
-                  <select value={duration} onChange={(event) => setDuration(Number(event.target.value))}>
-                    {Array.from({ length: 8 }, (_, index) => 15 + index * 15).map((minutes) => (
-                      <option key={minutes} value={minutes}>
-                        {minutes} min
-                      </option>
-                    ))}
-                  </select>
-                </label>
+
+                <div className="booking-controls compact-controls">
+                  <div>
+                    <div className="control-heading">
+                      <span>Durata</span>
+                    </div>
+                    <div className="duration-row" aria-label="Durata prenotazione">
+                      {bookingDurationOptions.map((minutes) => (
+                        <button
+                          className={`duration-chip ${duration === minutes ? "active" : ""}`}
+                          key={minutes}
+                          onClick={() => setDuration(minutes)}
+                          type="button"
+                        >
+                          {minutes}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="control-heading timeline-heading">
+                    <span>Orario di inizio</span>
+                    <strong>
+                      {selectedTime} - {pad(end.getHours())}:{pad(end.getMinutes())}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="timeline manage-timeline" aria-label="Orario di inizio">
+                  {options.map((option) => (
+                    <button
+                      aria-pressed={option === selectedTime}
+                      className={`time-slot ${option === selectedTime ? "selected-start" : ""}`}
+                      key={option}
+                      onClick={() => setSelectedTime(option)}
+                      type="button"
+                    >
+                      <span>{option}</span>
+                    </button>
+                  ))}
+                </div>
+
                 {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
-                <button className="primary-button full-width" disabled={isPending} onClick={updateBooking} type="button">
+                <button
+                  className="primary-button full-width"
+                  disabled={actionsDisabled}
+                  onClick={updateBooking}
+                  type="button"
+                >
                   <Check size={18} />
-                  Salva modifica
+                  {isSaving ? "Salvo..." : "Salva modifica"}
                 </button>
-                <button className="ghost-button full-width danger-action" onClick={cancelBooking} type="button">
+                <button
+                  className="ghost-button full-width danger-action"
+                  disabled={actionsDisabled}
+                  onClick={cancelBooking}
+                  type="button"
+                >
                   <Trash2 size={16} />
-                  Cancella prenotazione
+                  {isCanceling ? "Cancello..." : "Cancella prenotazione"}
                 </button>
               </>
             ) : (

@@ -43,3 +43,16 @@ Per l'area `/admin`, disattiva `AUTH_DEV_MODE`, registra l'app in Microsoft Entr
 - `MS_GRAPH_*`
 
 La mailbox del campo, ad esempio `padel@azienda.it`, viene usata per creare gli eventi Outlook con reminder 1h prima e link modifica/cancellazione.
+
+## Deploy
+
+Prima di pubblicare su Vercel:
+
+- configura `DATABASE_URL` su Neon e lancia `npx prisma migrate deploy`;
+- imposta `AUTH_DEV_MODE="false"` o rimuovila del tutto;
+- imposta `APP_PUBLIC_ORIGIN` con l'URL pubblico dell'app, ad esempio `https://padel.topfly.it`;
+- imposta `APP_ALLOWED_DOMAIN` e `APP_ADMIN_EMAILS` con dominio e admin reali;
+- configura `AUTH_SECRET`, Microsoft Entra ID e `MS_GRAPH_*`;
+- verifica che `VERCEL_ENV="production"` o `APP_ENV="production"` blocchi l'avvio se mancano database o se il dev login e' ancora attivo.
+
+Il sito usa un rate limit applicativo su Postgres per create/lookup/manage delle prenotazioni pubbliche, quindi la migrazione `RateLimitBucket` deve essere applicata anche in staging/produzione.

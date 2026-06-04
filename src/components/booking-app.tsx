@@ -14,6 +14,7 @@ import {
 import Image from "next/image";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { bookingDurationOptions } from "@/lib/booking-constants";
 import type {
   AuditItem,
   AvailabilityBlock,
@@ -30,6 +31,7 @@ type AvailabilityResponse = {
     maxDurationMinutes: number;
     maxAdvanceDays: number;
     maxFutureBookings: number;
+    durationOptions: readonly number[];
     durationPresets: readonly number[];
     allowedDomain: string;
   };
@@ -47,7 +49,6 @@ type StoredIdentity = {
   organizerEmail: string;
 };
 
-const durationPresets = [30, 45, 60, 90, 120];
 const identityStorageKey = "topfly-padel.identity.v1";
 const tokenStorageKey = "topfly-padel.tokens.v1";
 
@@ -81,6 +82,14 @@ function localDateTime(date: Date) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+  }).format(date);
+}
+
+function localDay(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
   }).format(date);
 }
 
@@ -135,6 +144,10 @@ function rangeOverlaps(start: Date, end: Date, itemStart: string, itemEnd: strin
   const rightStart = new Date(itemStart);
   const rightEnd = new Date(itemEnd);
   return start < rightEnd && end > rightStart;
+}
+
+function rangeMatches(start: Date, end: Date, itemStart: string, itemEnd: string) {
+  return start.getTime() === new Date(itemStart).getTime() && end.getTime() === new Date(itemEnd).getTime();
 }
 
 async function readApiError(response: Response) {
@@ -225,6 +238,7 @@ export function BookingApp({
   );
 
   const options = useMemo(() => timeOptions(), []);
+  const durationOptions = availability?.settings.durationOptions ?? bookingDurationOptions;
   const start = useMemo(
     () => dateTimeFromParts(selectedDate, selectedTime),
     [selectedDate, selectedTime],
@@ -242,15 +256,29 @@ export function BookingApp({
     organizerEmail.trim().includes("@") &&
     !organizerEmail.trim().toLowerCase().endsWith(`@${allowedDomain}`);
 
+  const selectedOwnBooking = useMemo(
+    () =>
+      myBookings.find(
+        (booking) =>
+          booking.status === "CONFIRMED" &&
+          rangeMatches(start, end, booking.start, booking.end),
+      ) ?? null,
+    [end, myBookings, start],
+  );
+  const isConfirmedSelection = Boolean(selectedOwnBooking) && !editingBookingId;
+  const ignoredBookingId = editingBookingId ?? selectedOwnBooking?.id ?? null;
+
   const selectionConflict = useMemo(() => {
-    const booking = dayBookings.find((item) => rangeOverlaps(start, end, item.start, item.end));
+    const booking = dayBookings.find(
+      (item) => item.id !== ignoredBookingId && rangeOverlaps(start, end, item.start, item.end),
+    );
     if (booking) return `Occupato da ${booking.organizerName}`;
 
     const block = dayBlocks.find((item) => rangeOverlaps(start, end, item.start, item.end));
     if (block) return `Bloccato: ${block.reason}`;
 
     return null;
-  }, [dayBlocks, dayBookings, end, start]);
+  }, [dayBlocks, dayBookings, end, ignoredBookingId, start]);
 
   const loadAvailability = useCallback(async () => {
     const response = await fetch(`/api/availability?date=${selectedDate}`, {
@@ -357,18 +385,6 @@ export function BookingApp({
     writeStoredTokens(nextTokens);
     setLocalTokens(nextTokens);
     return nextTokens;
-  }
-
-  function forgetLocalData() {
-    window.localStorage.removeItem(identityStorageKey);
-    window.localStorage.removeItem(tokenStorageKey);
-    setOrganizerName("");
-    setOrganizerEmail("");
-    setLocalTokens([]);
-    setMyBookings([]);
-    setEditingBookingId(null);
-    setEditingToken(null);
-    setNotice({ type: "info", text: "Dati salvati su questo dispositivo rimossi." });
   }
 
   async function saveBooking() {
@@ -502,8 +518,7 @@ export function BookingApp({
     await refresh();
   }
 
-  const canSave = !selectionConflict && !isPending;
-  const hasRememberedIdentity = Boolean(organizerName || organizerEmail || localTokens.length);
+  const canSave = !selectionConflict && !isPending && !isConfirmedSelection;
 
   return (
     <main className="app-shell">
@@ -572,43 +587,31 @@ export function BookingApp({
               {isPending ? <span className="loading-pill">Aggiorno</span> : null}
             </div>
 
-            <div className="selector-row">
-              <label>
-                Inizio
-                <select value={selectedTime} onChange={(event) => setSelectedTime(event.target.value)}>
-                  {options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
+            <div className="booking-controls">
+              <div>
+                <div className="control-heading">
+                  <span>Durata</span>
+                </div>
+                <div className="duration-row" aria-label="Durata prenotazione">
+                  {durationOptions.map((minutes) => (
+                    <button
+                      className={`duration-chip ${duration === minutes ? "active" : ""}`}
+                      key={minutes}
+                      onClick={() => setDuration(minutes)}
+                      type="button"
+                    >
+                      {minutes}m
+                    </button>
                   ))}
-                </select>
-              </label>
-              <label>
-                Durata
-                <select
-                  value={duration}
-                  onChange={(event) => setDuration(Number(event.target.value))}
-                >
-                  {Array.from({ length: 8 }, (_, index) => 15 + index * 15).map((minutes) => (
-                    <option key={minutes} value={minutes}>
-                      {minutes} min
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+                </div>
+              </div>
 
-            <div className="duration-row" aria-label="Durate rapide">
-              {durationPresets.map((minutes) => (
-                <button
-                  className={`duration-chip ${duration === minutes ? "active" : ""}`}
-                  key={minutes}
-                  onClick={() => setDuration(minutes)}
-                  type="button"
-                >
-                  {minutes}m
-                </button>
-              ))}
+              <div className="control-heading timeline-heading">
+                <span>Orario di inizio</span>
+                <strong>
+                  {localTime(start)} - {localTime(end)}
+                </strong>
+              </div>
             </div>
 
             <div className="timeline" aria-label="Disponibilita del giorno" ref={timelineRef}>
@@ -622,16 +625,18 @@ export function BookingApp({
                   rangeOverlaps(slotStart, slotEnd, item.start, item.end),
                 );
                 const isSelected = rangeOverlaps(slotStart, slotEnd, start.toISOString(), end.toISOString());
+                const isSelectedStart = option === selectedTime;
 
                 return (
                   <button
                     className={`time-slot ${booking ? "busy" : ""} ${block ? "blocked" : ""} ${
-                      isSelected ? "selected" : ""
+                      isSelectedStart ? "selected-start" : isSelected ? "selected-range" : ""
                     }`}
                     data-selected={isSelected ? "true" : undefined}
                     disabled={Boolean(booking || block)}
                     key={option}
                     onClick={() => setSelectedTime(option)}
+                    aria-pressed={isSelectedStart}
                     type="button"
                     title={booking ? `Prenotato da ${booking.organizerName}` : block?.reason}
                   >
@@ -663,8 +668,34 @@ export function BookingApp({
               <span>15-120 min</span>
             </div>
 
-            {selectionConflict ? (
+            {selectedOwnBooking && isConfirmedSelection ? (
+              <div className="confirmed-summary">
+                <div className="notice success">
+                  <Check size={16} />
+                  <div>
+                    <strong>Prenotazione confermata</strong>
+                    <span>{syncLabel(selectedOwnBooking.outlookSyncStatus)}</span>
+                  </div>
+                </div>
+                <div className="summary-actions">
+                  <button className="ghost-button full-width" onClick={() => editBooking(selectedOwnBooking)} type="button">
+                    <Edit3 size={16} />
+                    Modifica
+                  </button>
+                  <button
+                    className="ghost-button full-width danger-action"
+                    onClick={() => cancelBooking(selectedOwnBooking)}
+                    type="button"
+                  >
+                    <Trash2 size={16} />
+                    Cancella
+                  </button>
+                </div>
+              </div>
+            ) : selectionConflict ? (
               <div className="notice error">{selectionConflict}</div>
+            ) : notice ? (
+              <div className={`notice ${notice.type}`}>{notice.text}</div>
             ) : (
               <div className="notice success">
                 <MailCheck size={16} />
@@ -701,21 +732,23 @@ export function BookingApp({
               </div>
             ) : null}
 
-            {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
-
-            <button
-              className="primary-button full-width"
-              disabled={!canSave}
-              onClick={saveBooking}
-              type="button"
-            >
-              <Check size={18} />
-              {editingBookingId
-                ? "Salva modifica"
-                : isBookingFormOpen
-                  ? "Conferma prenotazione"
-                  : "Prenota"}
-            </button>
+            {isConfirmedSelection ? null : (
+              <button
+                className="primary-button full-width"
+                disabled={!canSave}
+                onClick={saveBooking}
+                type="button"
+              >
+                <Check size={18} />
+                {selectionConflict
+                  ? "Slot occupato"
+                  : editingBookingId
+                    ? "Salva modifica"
+                    : isBookingFormOpen
+                      ? "Conferma prenotazione"
+                      : "Prenota"}
+              </button>
+            )}
 
             {editingBookingId || isBookingFormOpen ? (
               <button
@@ -738,29 +771,24 @@ export function BookingApp({
               <span>Le mie prenotazioni</span>
               <span className="count-pill">{activeMyBookingCount}</span>
             </div>
-            {hasRememberedIdentity ? (
-              <div className="identity-tools">
-                <button className="text-button" onClick={() => setIsBookingFormOpen(true)} type="button">
-                  Cambia dati
-                </button>
-                <button className="text-button danger" onClick={forgetLocalData} type="button">
-                  Dimentica dati
-                </button>
-              </div>
-            ) : null}
             <div className="booking-list">
               {myBookings.length ? (
                 myBookings.map((booking) => (
-                  <article className={`booking-item ${booking.status.toLowerCase()}`} key={booking.id}>
+                  <article
+                    className={`booking-item compact ${booking.status.toLowerCase()} ${
+                      selectedOwnBooking?.id === booking.id ? "selected-booking" : ""
+                    }`}
+                    key={booking.id}
+                  >
                     <div>
-                      <strong>{localDateTime(new Date(booking.start))}</strong>
-                      <span>
-                        {localTime(new Date(booking.start))} - {localTime(new Date(booking.end))}
-                      </span>
+                      <strong>
+                        {localDay(new Date(booking.start))}, {localTime(new Date(booking.start))} -{" "}
+                        {localTime(new Date(booking.end))}
+                      </strong>
                       <small>
-                        {booking.status === "CONFIRMED" ? "Confermata" : "Cancellata"}
+                        {booking.status === "CONFIRMED" ? "Confermata" : "Cancellata"} ·{" "}
+                        {syncLabel(booking.outlookSyncStatus)}
                       </small>
-                      <small>{syncLabel(booking.outlookSyncStatus)}</small>
                     </div>
                     {booking.status === "CONFIRMED" ? (
                       <div className="item-actions">

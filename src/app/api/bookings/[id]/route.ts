@@ -2,18 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { cancelBooking, updateBooking } from "@/lib/booking-service";
 import { routeError } from "@/lib/errors";
+import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 import { getCurrentUser } from "@/lib/server-auth";
 import { toDateOrThrow } from "@/lib/time";
+
+const manageTokenSchema = z.string().trim().min(1).max(200);
 
 const updateBookingSchema = z.object({
   start: z.string().optional(),
   end: z.string().optional(),
   status: z.enum(["CONFIRMED", "CANCELED"]).optional(),
-  manageToken: z.string().optional(),
+  manageToken: manageTokenSchema.optional(),
 });
 
 const deleteBookingSchema = z.object({
-  manageToken: z.string().optional(),
+  manageToken: manageTokenSchema.optional(),
 });
 
 type RouteContext = {
@@ -22,12 +25,18 @@ type RouteContext = {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    assertTrustedOrigin(request);
     const user = await getCurrentUser();
+    const adminUser = user?.role === "ADMIN" ? user : null;
+    if (!adminUser) {
+      await assertRateLimit(request, "booking:manage");
+    }
+
     const { id } = await context.params;
     const body = updateBookingSchema.parse(await request.json());
     const booking = await updateBooking(
       {
-        adminUser: user?.role === "ADMIN" ? user : null,
+        adminUser,
         manageToken: body.manageToken,
         baseUrl: request.nextUrl.origin,
       },
@@ -48,13 +57,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
     const request = _request;
+    assertTrustedOrigin(request);
     const user = await getCurrentUser();
+    const adminUser = user?.role === "ADMIN" ? user : null;
+    if (!adminUser) {
+      await assertRateLimit(request, "booking:manage");
+    }
+
     const { id } = await context.params;
     const body = deleteBookingSchema.parse((await request.json().catch(() => ({}))) ?? {});
+    const queryToken = request.nextUrl.searchParams.get("token");
+    const manageToken = body.manageToken ?? (queryToken ? manageTokenSchema.parse(queryToken) : null);
     const booking = await cancelBooking(
       {
-        adminUser: user?.role === "ADMIN" ? user : null,
-        manageToken: body.manageToken ?? request.nextUrl.searchParams.get("token"),
+        adminUser,
+        manageToken,
         baseUrl: request.nextUrl.origin,
       },
       id,
