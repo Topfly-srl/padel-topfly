@@ -12,6 +12,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run prisma:generate
 RUN npm run build
+RUN npm prune --omit=dev && npm cache clean --force
 
 FROM node:22-alpine AS runner
 
@@ -22,8 +23,7 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
