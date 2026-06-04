@@ -5,6 +5,9 @@ coverage/
 output/playwright/
 .env
 .env*.local
+.env.production
+.env.staging
 !.env.example
+!.env.production.example
 *.tsbuildinfo
 .DS_Store

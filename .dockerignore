@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+coverage
+dist
+output
+.env
+.env*.local
+.env.production
+.env.staging
+.DS_Store
+npm-debug.log*
+README.md
