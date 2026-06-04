@@ -148,8 +148,6 @@ button:disabled {
 }
 
 .summary-card {
-  position: sticky;
-  top: 14px;
   padding: 14px;
 }
 
@@ -741,6 +739,16 @@ input:focus {
   .main-grid {
     grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
     align-items: start;
+  }
+
+  .side-stack {
+    position: sticky;
+    top: 14px;
+    align-self: start;
+    max-height: calc(100vh - 28px);
+    overflow-y: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
   }
 
   .timeline {
