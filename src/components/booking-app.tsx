@@ -666,9 +666,15 @@ export function BookingApp({
             </div>
 
             <div className="rules">
-              <span>Max 14 giorni</span>
-              <span>Max 2 future per email</span>
-              <span>15-120 min</span>
+              <span>
+                <strong>Anticipo</strong> 14 giorni
+              </span>
+              <span>
+                <strong>Limite</strong> 2 future per email
+              </span>
+              <span>
+                <strong>Durata</strong> 15-120 min
+              </span>
             </div>
 
             {selectedOwnBooking && isConfirmedSelection ? (

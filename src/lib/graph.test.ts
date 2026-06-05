@@ -69,4 +69,67 @@ describe("Microsoft Graph sync", () => {
     expect(eventPayload.body.content).toContain("Gestisci prenotazione");
     expect(eventPayload.body.content).toContain(manageUrl);
   });
+
+  it("manda una cancellazione Outlook con contenuto dedicato", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string; method?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString(), method: init?.method });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { deleteOutlookEvent } = await import("@/lib/graph");
+    const now = new Date("2026-06-03T10:00:00.000Z");
+    const booking: Booking = {
+      id: "booking_1",
+      start: new Date("2026-06-04T16:00:00.000Z"),
+      end: new Date("2026-06-04T17:00:00.000Z"),
+      status: "CANCELED",
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@topfly.it",
+      manageTokenHash: null,
+      manageTokenExpiresAt: null,
+      outlookEventId: "event_1",
+      outlookSyncStatus: "PENDING",
+      outlookSyncError: null,
+      createdAt: now,
+      updatedAt: now,
+      organizerId: null,
+    };
+
+    const result = await deleteOutlookEvent(booking);
+    const patchCall = calls.find(
+      (call) => call.url.includes("/events/event_1") && call.method === "PATCH",
+    );
+    const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
+
+    expect(result).toEqual({ status: "SYNCED", eventId: "event_1" });
+    expect(patchCall).toBeDefined();
+    expect(cancelCall).toBeDefined();
+
+    const patchPayload = JSON.parse(patchCall!.body!);
+    const cancelPayload = JSON.parse(cancelCall!.body!);
+    expect(patchPayload.subject).toBe("Padel TOPFLY - Prenotazione cancellata");
+    expect(patchPayload.body.content).toContain("Prenotazione campo cancellata");
+    expect(patchPayload.body.content).toContain("Il campo torna disponibile");
+    expect(patchPayload.showAs).toBe("free");
+    expect(patchPayload.isReminderOn).toBe(false);
+    expect(cancelPayload.comment).toContain("prenotazione del campo TOPFLY");
+  });
 });

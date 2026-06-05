@@ -116,13 +116,15 @@ function formatDuration(start: Date, end: Date) {
 }
 
 function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?: string) {
+  const isCanceled = booking.status === "CANCELED";
   const organizerName = escapeHtml(organizer.name);
   const safeManageUrl = manageUrl ? escapeHtml(manageUrl) : null;
   const dateLabel = escapeHtml(formatEventDate(booking.start));
   const startLabel = escapeHtml(formatEventTime(booking.start));
   const endLabel = escapeHtml(formatEventTime(booking.end));
   const durationLabel = escapeHtml(`${formatDuration(booking.start, booking.end)} min`);
-  const manageCopy = safeManageUrl
+  const actionCopy =
+    !isCanceled && safeManageUrl
     ? `
       <p style="margin: 22px 0 10px;">
         <a href="${safeManageUrl}" style="display: inline-block; background: #f80d17; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
@@ -133,31 +135,46 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
         Link diretto: <a href="${safeManageUrl}" style="color: #b91c1c;">${safeManageUrl}</a>
       </p>
     `
-    : `
+    : !isCanceled
+      ? `
       <p style="margin: 18px 0 0; color: #6b7280;">
         Per modifiche o cancellazioni, usa il link ricevuto nella conferma originale.
       </p>
-    `;
+    `
+      : "";
+  const headerColor = isCanceled ? "#4b5563" : "#f80d17";
+  const heading = isCanceled
+    ? "Prenotazione campo cancellata"
+    : "Prenotazione campo confermata";
+  const intro = isCanceled
+    ? `la tua prenotazione del campo da padel aziendale &egrave; stata cancellata.`
+    : `la tua prenotazione del campo da padel aziendale &egrave; confermata.`;
+  const statusCopy = isCanceled
+    ? "Il campo torna disponibile per gli altri colleghi."
+    : "Ti arriver&agrave; un promemoria Outlook 1 ora prima.";
+  const footerCopy = isCanceled
+    ? "Non devi fare altro: questa fascia non risulta pi&ugrave; prenotata a tuo nome."
+    : "Se cambi programma, modifica o cancella la prenotazione: cos&igrave; lasci libero il campo per gli altri.";
 
   return {
-    subject: "Padel TOPFLY - Campo prenotato",
+    subject: isCanceled ? "Padel TOPFLY - Prenotazione cancellata" : "Padel TOPFLY - Campo prenotato",
     body: {
       contentType: "HTML",
       content: `
         <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
-          <div style="background: #f80d17; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
+          <div style="background: ${headerColor}; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
             <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;">
               TOPFLY GPS Solutions
             </div>
             <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">
-              Prenotazione campo confermata
+              ${heading}
             </div>
           </div>
 
           <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
             <p style="margin: 0 0 16px; font-size: 16px;">
               Ciao ${organizerName},<br>
-              la tua prenotazione del campo da padel aziendale &egrave; confermata.
+              ${intro}
             </p>
 
             <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
@@ -176,13 +193,13 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
             </table>
 
             <p style="margin: 16px 0 0; color: #4b5563;">
-              Ti arriver&agrave; un promemoria Outlook 1 ora prima.
+              ${statusCopy}
             </p>
 
-            ${manageCopy}
+            ${actionCopy}
 
             <p style="margin: 18px 0 0; color: #6b7280; font-size: 13px;">
-              Se cambi programma, modifica o cancella la prenotazione: cos&igrave; lasci libero il campo per gli altri.
+              ${footerCopy}
             </p>
           </div>
         </div>
@@ -205,9 +222,9 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
         type: "required",
       },
     ],
-    isReminderOn: true,
+    isReminderOn: !isCanceled,
     reminderMinutesBeforeStart: 60,
-    showAs: "busy",
+    showAs: isCanceled ? "free" : "busy",
   };
 }
 
@@ -276,8 +293,19 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
   if (disabled) return { ...disabled, eventId: booking.outlookEventId };
 
   try {
+    const organizer = { email: booking.organizerEmail, name: booking.organizerName };
+
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}`), {
-      method: "DELETE",
+      method: "PATCH",
+      body: JSON.stringify(eventPayload(booking, organizer)),
+    });
+
+    await graphFetch(mailboxPath(`/events/${booking.outlookEventId}/cancel`), {
+      method: "POST",
+      body: JSON.stringify({
+        comment:
+          "La prenotazione del campo TOPFLY e' stata cancellata. Il campo torna disponibile.",
+      }),
     });
 
     return { status: "SYNCED", eventId: booking.outlookEventId };
