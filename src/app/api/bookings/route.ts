@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createBooking, listBookings } from "@/lib/booking-service";
 import { routeError } from "@/lib/errors";
+import { getPublicBaseUrl } from "@/lib/public-url";
 import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 import { assertAdmin, requireApiUser } from "@/lib/server-auth";
 import { toDateOrThrow } from "@/lib/time";
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
       end: toDateOrThrow(body.end, "Fine"),
       organizerName: body.organizerName,
       organizerEmail: body.organizerEmail,
-      baseUrl: request.nextUrl.origin,
+      baseUrl: getPublicBaseUrl(request),
     });
 
     return NextResponse.json({ booking }, { status: 201 });

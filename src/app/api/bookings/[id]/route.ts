@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { cancelBooking, updateBooking } from "@/lib/booking-service";
 import { routeError } from "@/lib/errors";
+import { getPublicBaseUrl } from "@/lib/public-url";
 import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 import { getCurrentUser } from "@/lib/server-auth";
 import { toDateOrThrow } from "@/lib/time";
@@ -38,7 +39,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       {
         adminUser,
         manageToken: body.manageToken,
-        baseUrl: request.nextUrl.origin,
+        baseUrl: getPublicBaseUrl(request),
       },
       id,
       {
@@ -72,7 +73,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       {
         adminUser,
         manageToken,
-        baseUrl: request.nextUrl.origin,
+        baseUrl: getPublicBaseUrl(request),
       },
       id,
     );

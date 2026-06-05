@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { lookupBookings } from "@/lib/booking-service";
 import { routeError } from "@/lib/errors";
+import { getPublicBaseUrl } from "@/lib/public-url";
 import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 
 const lookupSchema = z.object({
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
     await assertRateLimit(request, "booking:lookup");
 
     const body = lookupSchema.parse(await request.json());
-    const bookings = await lookupBookings(body.tokens, request.nextUrl.origin);
+    const bookings = await lookupBookings(body.tokens, getPublicBaseUrl(request));
 
     return NextResponse.json({ bookings });
   } catch (error) {
