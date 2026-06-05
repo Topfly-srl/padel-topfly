@@ -61,6 +61,12 @@ describe("Microsoft Graph sync", () => {
     const eventCall = calls.find((call) => call.url.includes("/calendar/events"));
     expect(result).toEqual({ status: "SYNCED", eventId: "event_1" });
     expect(eventCall).toBeDefined();
-    expect(JSON.parse(eventCall!.body!).body.content).toContain(manageUrl);
+
+    const eventPayload = JSON.parse(eventCall!.body!);
+    expect(eventPayload.subject).toBe("Padel TOPFLY - Campo prenotato");
+    expect(eventPayload.body.content).toContain("Prenotazione campo confermata");
+    expect(eventPayload.body.content).toContain("18:00 - 19:00");
+    expect(eventPayload.body.content).toContain("Gestisci prenotazione");
+    expect(eventPayload.body.content).toContain(manageUrl);
   });
 });

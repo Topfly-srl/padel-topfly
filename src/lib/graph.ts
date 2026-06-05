@@ -94,18 +94,99 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
+function formatEventDate(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    timeZone: appConfig.timeZone,
+  }).format(date);
+}
+
+function formatEventTime(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: appConfig.timeZone,
+  }).format(date);
+}
+
+function formatDuration(start: Date, end: Date) {
+  return Math.round((end.getTime() - start.getTime()) / 60_000);
+}
+
 function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?: string) {
   const organizerName = escapeHtml(organizer.name);
   const safeManageUrl = manageUrl ? escapeHtml(manageUrl) : null;
-  const manageCopy = manageUrl
-    ? `<p>Puoi modificare o cancellare la prenotazione da qui: <a href="${safeManageUrl}">${safeManageUrl}</a></p>`
-    : "<p>Per modifiche o cancellazioni, usa il link ricevuto nella conferma originale.</p>";
+  const dateLabel = escapeHtml(formatEventDate(booking.start));
+  const startLabel = escapeHtml(formatEventTime(booking.start));
+  const endLabel = escapeHtml(formatEventTime(booking.end));
+  const durationLabel = escapeHtml(`${formatDuration(booking.start, booking.end)} min`);
+  const manageCopy = safeManageUrl
+    ? `
+      <p style="margin: 22px 0 10px;">
+        <a href="${safeManageUrl}" style="display: inline-block; background: #f80d17; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
+          Gestisci prenotazione
+        </a>
+      </p>
+      <p style="margin: 0; color: #6b7280; font-size: 13px;">
+        Link diretto: <a href="${safeManageUrl}" style="color: #b91c1c;">${safeManageUrl}</a>
+      </p>
+    `
+    : `
+      <p style="margin: 18px 0 0; color: #6b7280;">
+        Per modifiche o cancellazioni, usa il link ricevuto nella conferma originale.
+      </p>
+    `;
 
   return {
-    subject: "Padel TOPFLY - Prenotazione campo",
+    subject: "Padel TOPFLY - Campo prenotato",
     body: {
       contentType: "HTML",
-      content: `<p>${organizerName} ha prenotato il campo da padel aziendale.</p>${manageCopy}`,
+      content: `
+        <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+          <div style="background: #f80d17; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
+            <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;">
+              TOPFLY GPS Solutions
+            </div>
+            <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">
+              Prenotazione campo confermata
+            </div>
+          </div>
+
+          <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
+            <p style="margin: 0 0 16px; font-size: 16px;">
+              Ciao ${organizerName},<br>
+              la tua prenotazione del campo da padel aziendale &egrave; confermata.
+            </p>
+
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
+              <tr>
+                <td style="padding: 14px 16px; color: #6b7280; font-size: 13px; width: 36%;">Giorno</td>
+                <td style="padding: 14px 16px; font-weight: 700;">${dateLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Orario</td>
+                <td style="padding: 0 16px 14px; font-weight: 700;">${startLabel} - ${endLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Durata</td>
+                <td style="padding: 0 16px 14px; font-weight: 700;">${durationLabel}</td>
+              </tr>
+            </table>
+
+            <p style="margin: 16px 0 0; color: #4b5563;">
+              Ti arriver&agrave; un promemoria Outlook 1 ora prima.
+            </p>
+
+            ${manageCopy}
+
+            <p style="margin: 18px 0 0; color: #6b7280; font-size: 13px;">
+              Se cambi programma, modifica o cancella la prenotazione: cos&igrave; lasci libero il campo per gli altri.
+            </p>
+          </div>
+        </div>
+      `,
     },
     start: {
       dateTime: booking.start.toISOString(),
