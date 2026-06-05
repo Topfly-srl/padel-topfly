@@ -267,9 +267,13 @@ export function BookingApp({
 
   const dayBookings = useMemo(() => availability?.bookings ?? [], [availability?.bookings]);
   const dayBlocks = useMemo(() => availability?.blocks ?? [], [availability?.blocks]);
-  const activeMyBookingCount = useMemo(
-    () => myBookings.filter((booking) => booking.status === "CONFIRMED").length,
+  const activeMyBookings = useMemo(
+    () => myBookings.filter((booking) => booking.status === "CONFIRMED"),
     [myBookings],
+  );
+  const activeMyBookingCount = useMemo(
+    () => activeMyBookings.length,
+    [activeMyBookings],
   );
   const allowedDomain = availability?.settings.allowedDomain ?? "azienda.it";
   const isExternalEmail =
@@ -626,9 +630,6 @@ export function BookingApp({
 
               <div className="control-heading timeline-heading">
                 <span>Orario di inizio</span>
-                <strong>
-                  {localTime(start)} - {localTime(end)}
-                </strong>
               </div>
             </div>
 
@@ -800,8 +801,8 @@ export function BookingApp({
               <span className="count-pill">{activeMyBookingCount}</span>
             </div>
             <div className="booking-list">
-              {myBookings.length ? (
-                myBookings.map((booking) => (
+              {activeMyBookings.length ? (
+                activeMyBookings.map((booking) => (
                   <article
                     className={`booking-item compact ${booking.status.toLowerCase()} ${
                       selectedOwnBooking?.id === booking.id ? "selected-booking" : ""
@@ -820,32 +821,30 @@ export function BookingApp({
                           : ""}
                       </small>
                     </div>
-                    {booking.status === "CONFIRMED" ? (
-                      <div className="item-actions">
-                        <button
-                          className="mini-button"
-                          onClick={() => editBooking(booking)}
-                          type="button"
-                          aria-label="Modifica"
-                          title="Modifica"
-                        >
-                          <Edit3 size={15} />
-                        </button>
-                        <button
-                          className="mini-button danger"
-                          onClick={() => cancelBooking(booking)}
-                          type="button"
-                          aria-label="Cancella"
-                          title="Cancella"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    ) : null}
+                    <div className="item-actions">
+                      <button
+                        className="mini-button"
+                        onClick={() => editBooking(booking)}
+                        type="button"
+                        aria-label="Modifica"
+                        title="Modifica"
+                      >
+                        <Edit3 size={15} />
+                      </button>
+                      <button
+                        className="mini-button danger"
+                        onClick={() => cancelBooking(booking)}
+                        type="button"
+                        aria-label="Cancella"
+                        title="Cancella"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </article>
                 ))
               ) : (
-                <p className="empty-state">Nessuna prenotazione salvata su questo dispositivo.</p>
+                <p className="empty-state">Nessuna prenotazione attiva salvata su questo dispositivo.</p>
               )}
             </div>
           </section>

@@ -292,23 +292,8 @@ input:focus {
   font-size: 0.78rem;
 }
 
-.control-heading strong {
-  margin-left: auto;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--foreground);
-  padding: 4px 9px;
-  font-size: 0.76rem;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
 .timeline-heading {
   margin-bottom: -2px;
-}
-
-.timeline-heading strong {
-  color: var(--brand-2);
 }
 
 .duration-row {

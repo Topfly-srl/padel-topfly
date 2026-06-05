@@ -246,9 +246,6 @@ export function ManageBooking({
 
                   <div className="control-heading timeline-heading">
                     <span>Orario di inizio</span>
-                    <strong>
-                      {selectedTime} - {pad(end.getHours())}:{pad(end.getMinutes())}
-                    </strong>
                   </div>
                 </div>
 
