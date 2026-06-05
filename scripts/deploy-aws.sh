@@ -5,8 +5,9 @@ set -euo pipefail
 AWS_USER="${AWS_USER:-ubuntu}"
 APP_DIR="${APP_DIR:-/opt/padel-topfly}"
 REPO_URL="${REPO_URL:-https://github.com/Topfly-srl/padel-topfly.git}"
+DOCKER_COMPOSE="${DOCKER_COMPOSE:-sudo docker compose}"
 
-ssh "${AWS_USER}@${AWS_HOST}" "APP_DIR='${APP_DIR}' REPO_URL='${REPO_URL}' bash -s" <<'REMOTE'
+ssh "${AWS_USER}@${AWS_HOST}" "APP_DIR='${APP_DIR}' REPO_URL='${REPO_URL}' DOCKER_COMPOSE='${DOCKER_COMPOSE}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -31,6 +32,8 @@ if [ ! -f .env.production ]; then
   exit 1
 fi
 
-docker compose -f docker-compose.production.yml up -d --build
-docker compose -f docker-compose.production.yml ps
+DOCKER_COMPOSE="${DOCKER_COMPOSE:-sudo docker compose}"
+
+$DOCKER_COMPOSE -f docker-compose.production.yml up -d --build
+$DOCKER_COMPOSE -f docker-compose.production.yml ps
 REMOTE

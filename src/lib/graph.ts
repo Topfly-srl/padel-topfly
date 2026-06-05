@@ -228,6 +228,48 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
   };
 }
 
+function mailPayload(booking: Booking, organizer: OrganizerContact) {
+  const payload = eventPayload(booking, organizer);
+
+  return {
+    message: {
+      subject: payload.subject,
+      body: payload.body,
+      toRecipients: [
+        {
+          emailAddress: {
+            address: organizer.email,
+            name: organizer.name,
+          },
+        },
+      ],
+    },
+    saveToSentItems: true,
+  };
+}
+
+async function sendCancellationMail(booking: Booking, organizer: OrganizerContact) {
+  await graphFetch(mailboxPath("/sendMail"), {
+    method: "POST",
+    body: JSON.stringify(mailPayload(booking, organizer)),
+  });
+}
+
+function cancelComment(booking: Booking) {
+  const dateLabel = formatEventDate(booking.start);
+  const startLabel = formatEventTime(booking.start);
+  const endLabel = formatEventTime(booking.end);
+
+  return [
+    "Prenotazione cancellata.",
+    "",
+    `Giorno: ${dateLabel}`,
+    `Orario: ${startLabel} - ${endLabel}`,
+    "",
+    "Il campo torna disponibile.",
+  ].join("\n");
+}
+
 function mailboxPath(path: string) {
   return `/users/${encodeURIComponent(appConfig.graph.mailbox!)}${path}`;
 }
@@ -294,19 +336,27 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
 
   try {
     const organizer = { email: booking.organizerEmail, name: booking.organizerName };
+    let cancellationMailError: string | undefined;
 
-    await graphFetch(mailboxPath(`/events/${booking.outlookEventId}`), {
-      method: "PATCH",
-      body: JSON.stringify(eventPayload(booking, organizer)),
-    });
+    try {
+      await sendCancellationMail(booking, organizer);
+    } catch (error) {
+      cancellationMailError =
+        error instanceof Error ? error.message : "Graph cancellation mail failed";
+    }
 
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}/cancel`), {
       method: "POST",
-      body: JSON.stringify({
-        comment:
-          "La prenotazione del campo TOPFLY e' stata cancellata. Il campo torna disponibile.",
-      }),
+      body: JSON.stringify({ comment: cancelComment(booking) }),
     });
+
+    if (cancellationMailError) {
+      return {
+        status: "FAILED",
+        eventId: booking.outlookEventId,
+        error: `Mail cancellazione non inviata: ${cancellationMailError}`,
+      };
+    }
 
     return { status: "SYNCED", eventId: booking.outlookEventId };
   } catch (error) {

@@ -58,6 +58,12 @@ function readApiError(response: Response) {
     .catch(() => "Richiesta non riuscita.");
 }
 
+function cancellationSuccessText(status: string) {
+  if (status === "SYNCED") return "Prenotazione cancellata. Avviso Outlook inviato.";
+  if (status === "FAILED") return "Prenotazione cancellata. Avviso Outlook non inviato.";
+  return "Prenotazione cancellata.";
+}
+
 function rememberToken(token: string) {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(tokenStorageKey) ?? "[]") as unknown;
@@ -176,7 +182,7 @@ export function ManageBooking({
 
       const json = (await response.json()) as { booking: MyBooking };
       setBooking(json.booking);
-      setNotice({ type: "info", text: "Prenotazione cancellata." });
+      setNotice({ type: "info", text: cancellationSuccessText(json.booking.outlookSyncStatus) });
     } finally {
       setIsCanceling(false);
     }

@@ -155,17 +155,29 @@ async function readApiError(response: Response) {
   return json?.error ?? "Richiesta non riuscita.";
 }
 
-function syncLabel(status: string) {
-  if (status === "SYNCED") return "Invito Outlook inviato";
-  if (status === "FAILED") return "Email non inviata";
-  if (status === "PENDING") return "Invito Outlook in preparazione";
+function syncLabel(status: string, bookingStatus?: string) {
+  const isCanceled = bookingStatus === "CANCELED";
+
+  if (status === "SYNCED") return isCanceled ? "Avviso Outlook inviato" : "Invito Outlook inviato";
+  if (status === "FAILED") {
+    return isCanceled ? "Avviso cancellazione non inviato" : "Email non inviata";
+  }
+  if (status === "PENDING") {
+    return isCanceled ? "Avviso Outlook in preparazione" : "Invito Outlook in preparazione";
+  }
   return null;
 }
 
 function bookingSuccessText(status: string) {
   if (status === "SYNCED") return "Fatto. Prenotazione confermata con invito Outlook.";
-  if (status === "FAILED") return "Prenotazione confermata, ma l'email Outlook non e' stata inviata.";
+  if (status === "FAILED") return "Prenotazione confermata, ma l'invito Outlook non e' stato inviato.";
   return "Fatto. Prenotazione confermata.";
+}
+
+function cancellationSuccessText(status: string) {
+  if (status === "SYNCED") return "Prenotazione cancellata. Avviso Outlook inviato.";
+  if (status === "FAILED") return "Prenotazione cancellata. Avviso Outlook non inviato.";
+  return "Prenotazione cancellata.";
 }
 
 function readStoredIdentity(): StoredIdentity {
@@ -439,10 +451,10 @@ export function BookingApp({
     setEditingBookingId(null);
     setEditingToken(null);
     setIsBookingFormOpen(false);
-      setNotice({
-        type: json.booking.outlookSyncStatus === "FAILED" ? "info" : "success",
-        text: bookingSuccessText(json.booking.outlookSyncStatus),
-      });
+    setNotice({
+      type: json.booking.outlookSyncStatus === "FAILED" ? "info" : "success",
+      text: bookingSuccessText(json.booking.outlookSyncStatus),
+    });
     await refresh(nextTokens);
   }
 
@@ -465,7 +477,8 @@ export function BookingApp({
       return;
     }
 
-    setNotice({ type: "info", text: "Prenotazione cancellata." });
+    const json = (await response.json()) as { booking: MyBooking };
+    setNotice({ type: "info", text: cancellationSuccessText(json.booking.outlookSyncStatus) });
     await refresh();
   }
 
@@ -667,13 +680,13 @@ export function BookingApp({
 
             <div className="rules">
               <span>
-                <strong>Anticipo</strong> 14 giorni
+                <strong>Quando</strong> fino a 14 giorni
               </span>
               <span>
-                <strong>Limite</strong> 2 future per email
+                <strong>Limite</strong> 2 prenotazioni future
               </span>
               <span>
-                <strong>Durata</strong> 15-120 min
+                <strong>Durata</strong> da 15 a 120 min
               </span>
             </div>
 
@@ -683,8 +696,10 @@ export function BookingApp({
                   <Check size={16} />
                   <div>
                     <strong>Prenotazione confermata</strong>
-                    {syncLabel(selectedOwnBooking.outlookSyncStatus) ? (
-                      <span>{syncLabel(selectedOwnBooking.outlookSyncStatus)}</span>
+                    {syncLabel(selectedOwnBooking.outlookSyncStatus, selectedOwnBooking.status) ? (
+                      <span>
+                        {syncLabel(selectedOwnBooking.outlookSyncStatus, selectedOwnBooking.status)}
+                      </span>
                     ) : null}
                   </div>
                 </div>
@@ -798,7 +813,9 @@ export function BookingApp({
                       </strong>
                       <small>
                         {booking.status === "CONFIRMED" ? "Confermata" : "Cancellata"}
-                        {syncLabel(booking.outlookSyncStatus) ? ` · ${syncLabel(booking.outlookSyncStatus)}` : ""}
+                        {syncLabel(booking.outlookSyncStatus, booking.status)
+                          ? ` · ${syncLabel(booking.outlookSyncStatus, booking.status)}`
+                          : ""}
                       </small>
                     </div>
                     {booking.status === "CONFIRMED" ? (

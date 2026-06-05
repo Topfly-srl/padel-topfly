@@ -15,7 +15,7 @@ URL produzione:
 - Database: Postgres locale in Docker, volume `padel_topfly_pgdata`.
 - Login utenti: nessun login, prenotazione pubblica con nome/cognome + email.
 - Login admin: Microsoft Entra ID attivo su `/admin`.
-- Outlook/Graph: non ancora configurato in produzione.
+- Outlook/Graph: attivo in produzione con mailbox `padel@topflysolutions.com`.
 
 ## Funzionalita'
 
@@ -23,7 +23,7 @@ URL produzione:
 - Form obbligatorio con nome/cognome ed email.
 - Email non aziendali ammesse, con warning non bloccante lato UI.
 - Nome del prenotante visibile sugli slot occupati, email mai esposta pubblicamente.
-- Link/token di gestione salvato localmente e inviabile via Outlook quando Graph sara' configurato.
+- Link/token di gestione salvato localmente e incluso negli inviti Outlook.
 - Modifica/cancellazione delle proprie prenotazioni tramite token.
 - Area admin protetta da Microsoft 365 per blocchi, storico e override.
 - Limiti applicativi:
@@ -37,7 +37,7 @@ URL produzione:
 - Next.js App Router + TypeScript.
 - Prisma + Postgres.
 - Auth.js / NextAuth con Microsoft Entra ID solo per area admin.
-- Microsoft Graph per inviti Outlook e promemoria, da configurare.
+- Microsoft Graph per inviti Outlook, promemoria e avvisi di cancellazione.
 - Docker Compose in produzione:
   - `app`: Next.js;
   - `postgres`: database locale;
@@ -87,6 +87,9 @@ Deploy manuale sul server:
 
 ```bash
 cd /opt/padel-topfly
+mkdir -p backups
+sudo docker compose -f docker-compose.production.yml exec -T postgres \
+  pg_dump -U padel -d padel_topfly > backups/padel_topfly_$(date +%Y%m%d-%H%M%S).sql
 git pull origin main
 sudo docker compose -f docker-compose.production.yml up -d --build
 sudo docker compose -f docker-compose.production.yml ps
@@ -149,7 +152,8 @@ Segreti da conservare in Bitwarden, mai in chat o Git:
 - `POSTGRES_PASSWORD`
 - `DATABASE_URL`
 - `MICROSOFT_ENTRA_ID_SECRET`
-- futuri `MS_GRAPH_*`
+- `MS_GRAPH_CLIENT_SECRET`
+- tenant/client ID Microsoft Entra e Graph
 
 ## Microsoft Entra Admin
 
@@ -179,24 +183,38 @@ Solo le email in `APP_ADMIN_EMAILS` ricevono ruolo `ADMIN`.
 
 ## Microsoft Graph Outlook
 
-Graph non e' ancora attivo in produzione.
-
-Quando verra' configurato, compilare:
+Graph e' attivo in produzione con mailbox dedicata:
 
 ```env
-MS_GRAPH_TENANT_ID=
-MS_GRAPH_CLIENT_ID=
-MS_GRAPH_CLIENT_SECRET=
+MS_GRAPH_TENANT_ID=...
+MS_GRAPH_CLIENT_ID=...
+MS_GRAPH_CLIENT_SECRET=...
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
 ```
 
-Obiettivo:
+Permessi Microsoft Graph richiesti sull'app registration:
+
+- `Calendars.ReadWrite` Application, con consenso amministratore;
+- `Mail.Send` Application, con consenso amministratore.
+
+Funzioni attese:
 
 - creare evento Outlook per ogni prenotazione;
 - inviare invito all'email inserita nel form;
 - includere reminder 1h;
 - includere link gestione nel corpo evento;
-- aggiornare/cancellare evento quando cambia la prenotazione.
+- aggiornare evento quando cambia la prenotazione;
+- cancellare evento Outlook quando la prenotazione viene annullata;
+- inviare una mail HTML brandizzata quando la prenotazione viene annullata.
+
+Verifica rapida da server:
+
+```bash
+cd /opt/padel-topfly
+sudo docker compose -f docker-compose.production.yml logs app --tail=120
+```
+
+Se una prenotazione resta con stato Outlook `FAILED`, controllare `outlookSyncError` nel DB o nei log app.
 
 ## Documentazione Operativa
 

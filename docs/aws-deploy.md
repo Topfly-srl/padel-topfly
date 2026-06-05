@@ -164,7 +164,7 @@ MICROSOFT_ENTRA_ID_TENANT_ID=...
 MS_GRAPH_TENANT_ID=
 MS_GRAPH_CLIENT_ID=
 MS_GRAPH_CLIENT_SECRET=
-MS_GRAPH_MAILBOX=
+MS_GRAPH_MAILBOX=padel@topflysolutions.com
 ```
 
 Attenzione:
@@ -175,6 +175,16 @@ Attenzione:
 - `APP_DOMAIN=:80` e' valido solo per test temporanei via IP e HTTP.
 
 ## Deploy Manuale
+
+Prima di deployare una patch importante, creare un backup DB:
+
+```bash
+cd /opt/padel-topfly
+mkdir -p backups
+sudo docker compose -f docker-compose.production.yml exec -T postgres \
+  pg_dump -U padel -d padel_topfly > backups/padel_topfly_$(date +%Y%m%d-%H%M%S).sql
+ls -lh backups | tail
+```
 
 Sul server:
 
@@ -212,8 +222,14 @@ Lo script:
 
 1. clona o aggiorna la repo;
 2. verifica che `.env.production` esista;
-3. esegue `docker compose up -d --build`;
+3. esegue `sudo docker compose up -d --build`;
 4. mostra lo stato container.
+
+Se Docker non richiede `sudo`, usare:
+
+```bash
+AWS_HOST=18.194.7.194 AWS_USER=ubuntu DOCKER_COMPOSE="docker compose" ./scripts/deploy-aws.sh
+```
 
 ## Aggiornare Solo Env
 
@@ -315,6 +331,22 @@ Salvare in Bitwarden una nota "Padel TOPFLY - Produzione" con:
 - path server `/opt/padel-topfly`;
 - contenuto `.env.production`;
 - dati Microsoft Entra;
-- eventuali dati Graph quando saranno configurati.
+- dati Microsoft Graph;
+- mailbox `padel@topflysolutions.com`;
+- ultima data di backup DB manuale.
 
 Non salvare segreti in Git e non incollarli in chat.
+
+## Microsoft Graph
+
+Permessi richiesti sull'app registration:
+
+- `Calendars.ReadWrite` Application;
+- `Mail.Send` Application;
+- consenso amministratore concesso per entrambi.
+
+La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
+La cancellazione invia anche una mail HTML brandizzata e poi cancella l'evento Outlook.
+
+Se dopo una cancellazione compare `Avviso cancellazione non inviato`, controllare che `Mail.Send`
+sia presente e con consenso admin.
