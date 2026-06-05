@@ -44,6 +44,13 @@ function localDateTime(date: Date) {
   }).format(date);
 }
 
+function localTime(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function timeOptions() {
   return Array.from({ length: 96 }, (_, index) => {
     const minutes = index * 15;
@@ -246,6 +253,12 @@ export function ManageBooking({
 
                   <div className="control-heading timeline-heading">
                     <span>Orario di inizio</span>
+                  </div>
+                  <div className="selected-range-note" aria-live="polite">
+                    <span>Selezione</span>
+                    <strong>
+                      {localTime(start)} - {localTime(end)}
+                    </strong>
                   </div>
                 </div>
 

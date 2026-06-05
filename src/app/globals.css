@@ -296,6 +296,25 @@ input:focus {
   margin-bottom: -2px;
 }
 
+.selected-range-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.selected-range-note strong {
+  color: var(--foreground);
+  font-weight: 450;
+  white-space: nowrap;
+}
+
 .duration-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

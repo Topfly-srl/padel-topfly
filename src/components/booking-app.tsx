@@ -631,6 +631,12 @@ export function BookingApp({
               <div className="control-heading timeline-heading">
                 <span>Orario di inizio</span>
               </div>
+              <div className="selected-range-note" aria-live="polite">
+                <span>Selezione</span>
+                <strong>
+                  {localTime(start)} - {localTime(end)}
+                </strong>
+              </div>
             </div>
 
             <div className="timeline" aria-label="Disponibilita del giorno" ref={timelineRef}>
