@@ -192,10 +192,11 @@ MS_GRAPH_CLIENT_SECRET=...
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
 ```
 
-Permessi Microsoft Graph richiesti sull'app registration:
+Permessi Microsoft Graph sull'app registration:
 
 - `Calendars.ReadWrite` Application, con consenso amministratore;
-- `Mail.Send` Application, con consenso amministratore.
+- `Mail.Send` Application, con consenso amministratore, consigliato per la mail HTML
+  brandizzata di cancellazione.
 
 Funzioni attese:
 
@@ -215,6 +216,8 @@ sudo docker compose -f docker-compose.production.yml logs app --tail=120
 ```
 
 Se una prenotazione resta con stato Outlook `FAILED`, controllare `outlookSyncError` nel DB o nei log app.
+Se invece `outlookSyncStatus` e' `SYNCED` ma `outlookSyncError` contiene un warning su
+`Mail.Send`, la cancellazione calendario e' riuscita ma la mail HTML custom non e' partita.
 
 ## Documentazione Operativa
 

@@ -339,14 +339,16 @@ Non salvare segreti in Git e non incollarli in chat.
 
 ## Microsoft Graph
 
-Permessi richiesti sull'app registration:
+Permessi Graph sull'app registration:
 
 - `Calendars.ReadWrite` Application;
-- `Mail.Send` Application;
+- `Mail.Send` Application, consigliato per la mail HTML brandizzata di cancellazione;
 - consenso amministratore concesso per entrambi.
 
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
-La cancellazione invia anche una mail HTML brandizzata e poi cancella l'evento Outlook.
+La cancellazione aggiorna l'evento, invia una mail HTML brandizzata quando `Mail.Send`
+e' disponibile e poi cancella l'evento Outlook.
 
-Se dopo una cancellazione compare `Avviso cancellazione non inviato`, controllare che `Mail.Send`
-sia presente e con consenso admin.
+Se la cancellazione calendario arriva ma la mail HTML custom no, controllare che `Mail.Send`
+Application sia presente e con consenso admin. L'app mantiene comunque la cancellazione come
+riuscita e salva il problema in `outlookSyncError`.

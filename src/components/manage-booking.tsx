@@ -59,8 +59,8 @@ function readApiError(response: Response) {
 }
 
 function cancellationSuccessText(status: string) {
-  if (status === "SYNCED") return "Prenotazione cancellata. Avviso Outlook inviato.";
-  if (status === "FAILED") return "Prenotazione cancellata. Avviso Outlook non inviato.";
+  if (status === "SYNCED") return "Prenotazione cancellata. Cancellazione Outlook inviata.";
+  if (status === "FAILED") return "Prenotazione cancellata. Cancellazione Outlook non riuscita.";
   return "Prenotazione cancellata.";
 }
 

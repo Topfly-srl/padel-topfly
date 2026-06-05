@@ -255,18 +255,22 @@ async function sendCancellationMail(booking: Booking, organizer: OrganizerContac
   });
 }
 
-function cancelComment(booking: Booking) {
+function cancelComment(booking: Booking, organizer: OrganizerContact) {
   const dateLabel = formatEventDate(booking.start);
   const startLabel = formatEventTime(booking.start);
   const endLabel = formatEventTime(booking.end);
+  const durationLabel = `${formatDuration(booking.start, booking.end)} min`;
 
   return [
-    "Prenotazione cancellata.",
+    `Ciao ${organizer.name},`,
+    "",
+    "la tua prenotazione del campo da padel TOPFLY e' stata cancellata.",
     "",
     `Giorno: ${dateLabel}`,
     `Orario: ${startLabel} - ${endLabel}`,
+    `Durata: ${durationLabel}`,
     "",
-    "Il campo torna disponibile.",
+    "Il campo torna disponibile per gli altri colleghi.",
   ].join("\n");
 }
 
@@ -336,25 +340,41 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
 
   try {
     const organizer = { email: booking.organizerEmail, name: booking.organizerName };
-    let cancellationMailError: string | undefined;
+    const warnings: string[] = [];
+
+    try {
+      await graphFetch(mailboxPath(`/events/${booking.outlookEventId}`), {
+        method: "PATCH",
+        body: JSON.stringify(eventPayload(booking, organizer)),
+      });
+    } catch (error) {
+      warnings.push(
+        `Evento cancellazione non aggiornato: ${
+          error instanceof Error ? error.message : "Graph update before cancel failed"
+        }`,
+      );
+    }
 
     try {
       await sendCancellationMail(booking, organizer);
     } catch (error) {
-      cancellationMailError =
-        error instanceof Error ? error.message : "Graph cancellation mail failed";
+      warnings.push(
+        `Mail custom cancellazione non inviata: ${
+          error instanceof Error ? error.message : "Graph cancellation mail failed"
+        }`,
+      );
     }
 
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}/cancel`), {
       method: "POST",
-      body: JSON.stringify({ comment: cancelComment(booking) }),
+      body: JSON.stringify({ comment: cancelComment(booking, organizer) }),
     });
 
-    if (cancellationMailError) {
+    if (warnings.length > 0) {
       return {
-        status: "FAILED",
+        status: "SYNCED",
         eventId: booking.outlookEventId,
-        error: `Mail cancellazione non inviata: ${cancellationMailError}`,
+        error: warnings.join(" | "),
       };
     }
 

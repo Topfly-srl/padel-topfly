@@ -70,7 +70,7 @@ describe("Microsoft Graph sync", () => {
     expect(eventPayload.body.content).toContain(manageUrl);
   });
 
-  it("manda una mail custom e poi cancella l'evento Outlook", async () => {
+  it("aggiorna l'evento, manda una mail custom e poi cancella l'evento Outlook", async () => {
     vi.resetModules();
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
     vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
@@ -114,24 +114,36 @@ describe("Microsoft Graph sync", () => {
     };
 
     const result = await deleteOutlookEvent(booking);
+    const patchCall = calls.find(
+      (call) => call.url.includes("/events/event_1") && call.method === "PATCH",
+    );
     const sendMailCall = calls.find((call) => call.url.includes("/sendMail"));
     const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
 
     expect(result).toEqual({ status: "SYNCED", eventId: "event_1" });
+    expect(patchCall).toBeDefined();
     expect(sendMailCall).toBeDefined();
     expect(cancelCall).toBeDefined();
 
+    const eventPayload = JSON.parse(patchCall!.body!);
     const mailPayload = JSON.parse(sendMailCall!.body!);
     const cancelPayload = JSON.parse(cancelCall!.body!);
+    expect(eventPayload.subject).toBe("Padel TOPFLY - Prenotazione cancellata");
+    expect(eventPayload.body.content).toContain("Prenotazione campo cancellata");
+    expect(eventPayload.showAs).toBe("free");
+    expect(eventPayload.isReminderOn).toBe(false);
     expect(mailPayload.message.subject).toBe("Padel TOPFLY - Prenotazione cancellata");
     expect(mailPayload.message.body.content).toContain("Prenotazione campo cancellata");
     expect(mailPayload.message.body.content).toContain("Il campo torna disponibile");
     expect(mailPayload.message.body.content).not.toContain("Gestisci prenotazione");
     expect(mailPayload.message.toRecipients[0].emailAddress.address).toBe("mario@topfly.it");
-    expect(cancelPayload.comment).toContain("Prenotazione cancellata.");
+    expect(cancelPayload.comment).toContain(
+      "la tua prenotazione del campo da padel TOPFLY e' stata cancellata.",
+    );
+    expect(cancelPayload.comment).toContain("Durata: 60 min");
   });
 
-  it("cancella comunque l'evento se la mail custom non parte", async () => {
+  it("segna sync riuscito con warning se la mail custom non parte ma il cancel Outlook riesce", async () => {
     vi.resetModules();
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
     vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
@@ -183,9 +195,9 @@ describe("Microsoft Graph sync", () => {
     const result = await deleteOutlookEvent(booking);
     const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
 
-    expect(result.status).toBe("FAILED");
+    expect(result.status).toBe("SYNCED");
     expect(result.eventId).toBe("event_1");
-    expect(result.error).toContain("Mail cancellazione non inviata");
+    expect(result.error).toContain("Mail custom cancellazione non inviata");
     expect(cancelCall).toBeDefined();
   });
 });

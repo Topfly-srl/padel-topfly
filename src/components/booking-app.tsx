@@ -158,12 +158,14 @@ async function readApiError(response: Response) {
 function syncLabel(status: string, bookingStatus?: string) {
   const isCanceled = bookingStatus === "CANCELED";
 
-  if (status === "SYNCED") return isCanceled ? "Avviso Outlook inviato" : "Invito Outlook inviato";
+  if (status === "SYNCED") {
+    return isCanceled ? "Cancellazione Outlook inviata" : "Invito Outlook inviato";
+  }
   if (status === "FAILED") {
-    return isCanceled ? "Avviso cancellazione non inviato" : "Email non inviata";
+    return isCanceled ? "Cancellazione Outlook non riuscita" : "Email non inviata";
   }
   if (status === "PENDING") {
-    return isCanceled ? "Avviso Outlook in preparazione" : "Invito Outlook in preparazione";
+    return isCanceled ? "Cancellazione Outlook in preparazione" : "Invito Outlook in preparazione";
   }
   return null;
 }
@@ -175,8 +177,8 @@ function bookingSuccessText(status: string) {
 }
 
 function cancellationSuccessText(status: string) {
-  if (status === "SYNCED") return "Prenotazione cancellata. Avviso Outlook inviato.";
-  if (status === "FAILED") return "Prenotazione cancellata. Avviso Outlook non inviato.";
+  if (status === "SYNCED") return "Prenotazione cancellata. Cancellazione Outlook inviata.";
+  if (status === "FAILED") return "Prenotazione cancellata. Cancellazione Outlook non riuscita.";
   return "Prenotazione cancellata.";
 }
 
