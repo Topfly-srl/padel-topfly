@@ -348,6 +348,8 @@ Permessi Graph sull'app registration:
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
 La cancellazione aggiorna l'evento, invia una mail HTML brandizzata quando `Mail.Send`
 e' disponibile e poi cancella l'evento Outlook.
+La mail automatica con prefisso `Canceled:` e' generata da Outlook: l'app controlla solo
+il commento testuale, che deve restare breve e chiaro.
 
 Se la cancellazione calendario arriva ma la mail HTML custom no, controllare che `Mail.Send`
 Application sia presente e con consenso admin. L'app mantiene comunque la cancellazione come

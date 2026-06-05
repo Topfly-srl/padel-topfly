@@ -255,22 +255,11 @@ async function sendCancellationMail(booking: Booking, organizer: OrganizerContac
   });
 }
 
-function cancelComment(booking: Booking, organizer: OrganizerContact) {
-  const dateLabel = formatEventDate(booking.start);
-  const startLabel = formatEventTime(booking.start);
-  const endLabel = formatEventTime(booking.end);
-  const durationLabel = `${formatDuration(booking.start, booking.end)} min`;
-
+function cancelComment(organizer: OrganizerContact) {
   return [
     `Ciao ${organizer.name},`,
     "",
-    "la tua prenotazione del campo da padel TOPFLY e' stata cancellata.",
-    "",
-    `Giorno: ${dateLabel}`,
-    `Orario: ${startLabel} - ${endLabel}`,
-    `Durata: ${durationLabel}`,
-    "",
-    "Il campo torna disponibile per gli altri colleghi.",
+    "la tua prenotazione del campo da padel TOPFLY e' stata cancellata. Il campo torna disponibile.",
   ].join("\n");
 }
 
@@ -367,7 +356,7 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
 
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}/cancel`), {
       method: "POST",
-      body: JSON.stringify({ comment: cancelComment(booking, organizer) }),
+      body: JSON.stringify({ comment: cancelComment(organizer) }),
     });
 
     if (warnings.length > 0) {

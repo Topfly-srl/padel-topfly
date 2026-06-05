@@ -140,7 +140,8 @@ describe("Microsoft Graph sync", () => {
     expect(cancelPayload.comment).toContain(
       "la tua prenotazione del campo da padel TOPFLY e' stata cancellata.",
     );
-    expect(cancelPayload.comment).toContain("Durata: 60 min");
+    expect(cancelPayload.comment).toContain("Il campo torna disponibile.");
+    expect(cancelPayload.comment).not.toContain("Durata:");
   });
 
   it("segna sync riuscito con warning se la mail custom non parte ma il cancel Outlook riesce", async () => {
