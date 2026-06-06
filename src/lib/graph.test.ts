@@ -201,10 +201,8 @@ describe("Microsoft Graph sync", () => {
     expect(eventPayload.body.content).toContain("Prenotazione campo cancellata");
     expect(eventPayload.showAs).toBe("free");
     expect(eventPayload.isReminderOn).toBe(false);
-    expect(cancelPayload.comment).toContain(
-      "la tua prenotazione del campo da padel TOPFLY e' stata cancellata.",
-    );
-    expect(cancelPayload.comment).toContain("Il campo torna disponibile.");
+    expect(cancelPayload.comment).toContain("la tua prenotazione del campo Padel TOPFLY");
+    expect(cancelPayload.comment).toContain("Il campo torna disponibile per gli altri colleghi.");
     expect(cancelPayload.comment).not.toContain("Durata:");
   });
 

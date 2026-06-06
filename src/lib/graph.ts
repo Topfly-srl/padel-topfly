@@ -232,7 +232,8 @@ function cancelComment(organizer: OrganizerContact) {
   return [
     `Ciao ${organizer.name},`,
     "",
-    "la tua prenotazione del campo da padel TOPFLY e' stata cancellata. Il campo torna disponibile.",
+    "la tua prenotazione del campo Padel TOPFLY e' stata cancellata.",
+    "Il campo torna disponibile per gli altri colleghi.",
   ].join("\n");
 }
 
