@@ -228,33 +228,6 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
   };
 }
 
-function mailPayload(booking: Booking, organizer: OrganizerContact) {
-  const payload = eventPayload(booking, organizer);
-
-  return {
-    message: {
-      subject: payload.subject,
-      body: payload.body,
-      toRecipients: [
-        {
-          emailAddress: {
-            address: organizer.email,
-            name: organizer.name,
-          },
-        },
-      ],
-    },
-    saveToSentItems: true,
-  };
-}
-
-async function sendCancellationMail(booking: Booking, organizer: OrganizerContact) {
-  await graphFetch(mailboxPath("/sendMail"), {
-    method: "POST",
-    body: JSON.stringify(mailPayload(booking, organizer)),
-  });
-}
-
 function cancelComment(organizer: OrganizerContact) {
   return [
     `Ciao ${organizer.name},`,
@@ -340,16 +313,6 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
       warnings.push(
         `Evento cancellazione non aggiornato: ${
           error instanceof Error ? error.message : "Graph update before cancel failed"
-        }`,
-      );
-    }
-
-    try {
-      await sendCancellationMail(booking, organizer);
-    } catch (error) {
-      warnings.push(
-        `Mail custom cancellazione non inviata: ${
-          error instanceof Error ? error.message : "Graph cancellation mail failed"
         }`,
       );
     }

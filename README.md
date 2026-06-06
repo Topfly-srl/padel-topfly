@@ -194,9 +194,10 @@ MS_GRAPH_MAILBOX=padel@topflysolutions.com
 
 Permessi Microsoft Graph sull'app registration:
 
-- `Calendars.ReadWrite` Application, con consenso amministratore;
-- `Mail.Send` Application, con consenso amministratore, consigliato per la mail HTML
-  brandizzata di cancellazione.
+- `Calendars.ReadWrite` Application, con consenso amministratore.
+
+`Mail.Send` non e' richiesto dalla V1: la conferma e la cancellazione passano dagli
+inviti/eventi Outlook, evitando una seconda email separata quando l'utente cancella.
 
 Funzioni attese:
 
@@ -205,8 +206,7 @@ Funzioni attese:
 - includere reminder 1h;
 - includere link gestione nel corpo evento;
 - aggiornare evento quando cambia la prenotazione;
-- cancellare evento Outlook quando la prenotazione viene annullata;
-- inviare una mail HTML brandizzata quando la prenotazione viene annullata.
+- cancellare evento Outlook quando la prenotazione viene annullata.
 
 Verifica rapida da server:
 
@@ -216,8 +216,9 @@ sudo docker compose -f docker-compose.production.yml logs app --tail=120
 ```
 
 Se una prenotazione resta con stato Outlook `FAILED`, controllare `outlookSyncError` nel DB o nei log app.
-Se invece `outlookSyncStatus` e' `SYNCED` ma `outlookSyncError` contiene un warning su
-`Mail.Send`, la cancellazione calendario e' riuscita ma la mail HTML custom non e' partita.
+Se invece `outlookSyncStatus` e' `SYNCED` ma `outlookSyncError` contiene un warning,
+la cancellazione calendario e' riuscita ma un aggiornamento accessorio dell'evento non e'
+andato a buon fine.
 
 ## Documentazione Operativa
 

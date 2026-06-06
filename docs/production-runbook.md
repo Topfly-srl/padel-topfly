@@ -182,8 +182,9 @@ App registration: `Padel TOPFLY Admin`.
 Permessi Graph richiesti:
 
 - `Calendars.ReadWrite` Application, consenso admin concesso.
-- `Mail.Send` Application, consenso admin concesso, consigliato per la mail HTML di
-  cancellazione.
+
+`Mail.Send` non e' richiesto dalla V1: l'app usa gli inviti/eventi Outlook per conferme,
+modifiche e cancellazioni, senza inviare una seconda email custom separata.
 
 La mailbox usata dall'app e':
 
@@ -201,11 +202,9 @@ Conferme:
 Cancellazioni:
 
 - aggiornano l'evento con contenuto di cancellazione;
-- inviano mail HTML brandizzata tramite Graph `sendMail`, se il permesso `Mail.Send` e'
-  disponibile;
 - cancellano l'evento Outlook tramite Graph `event/cancel`;
-- se la mail custom fallisce, la cancellazione calendario resta valida e il warning viene
-  salvato in `outlookSyncError`.
+- se l'aggiornamento accessorio dell'evento fallisce, la cancellazione calendario resta
+  valida e il warning viene salvato in `outlookSyncError`.
 
 Verifica Graph da server senza stampare segreti:
 
