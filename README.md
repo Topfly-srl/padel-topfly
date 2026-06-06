@@ -83,7 +83,19 @@ La produzione vive su Lightsail in:
 /opt/padel-topfly
 ```
 
-Deploy manuale sul server:
+Deploy consigliato:
+
+- push su `main`;
+- GitHub Actions workflow `Deploy Production`;
+- autodeploy attivo quando la repository variable `PRODUCTION_AUTO_DEPLOY=true` e i
+  secrets SSH Lightsail sono configurati.
+
+Il workflow crea un backup Postgres, aggiorna `/opt/padel-topfly`, ricostruisce Docker
+Compose ed esegue un health check su <https://padel.topflysolutions.com>.
+
+Setup dettagliato: [`docs/production-runbook.md`](docs/production-runbook.md).
+
+Fallback manuale sul server:
 
 ```bash
 cd /opt/padel-topfly

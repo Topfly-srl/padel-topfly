@@ -1,0 +1,94 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Lightsail
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch' || vars.PRODUCTION_AUTO_DEPLOY == 'true'
+
+    steps:
+      - name: Validate configuration
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in LIGHTSAIL_HOST LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: ${name}"
+              missing=1
+            fi
+          done
+
+          exit "${missing}"
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${LIGHTSAIL_SSH_PRIVATE_KEY}" > ~/.ssh/lightsail_deploy_key
+          printf '%s\n' "${LIGHTSAIL_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/lightsail_deploy_key ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/padel-topfly
+          mkdir -p backups
+
+          if sudo docker compose -f docker-compose.production.yml ps --services --filter "status=running" | grep -qx postgres; then
+            sudo docker compose -f docker-compose.production.yml exec -T postgres \
+              pg_dump -U padel -d padel_topfly > "backups/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+          else
+            echo "Postgres is not running; skipping pre-deploy DB dump."
+          fi
+
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          sudo docker compose -f docker-compose.production.yml up -d --build
+          sudo docker compose -f docker-compose.production.yml ps
+          sudo docker compose -f docker-compose.production.yml logs app --tail=80
+          REMOTE
+
+      - name: Production health check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error --location --retry 12 --retry-delay 5 \
+            https://padel.topflysolutions.com > /dev/null

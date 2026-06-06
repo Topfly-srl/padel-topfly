@@ -174,6 +174,17 @@ Attenzione:
 - Errato: `APP_DOMAIN=:padel.topflysolutions.com`.
 - `APP_DOMAIN=:80` e' valido solo per test temporanei via IP e HTTP.
 
+## Deploy Con GitHub Actions
+
+Il metodo consigliato e' usare il workflow GitHub Actions `Deploy Production`.
+
+Quando i repository secrets SSH sono configurati e la repository variable
+`PRODUCTION_AUTO_DEPLOY=true` e' presente, ogni push su `main` aggiorna automaticamente
+Lightsail.
+
+La procedura completa per creare la chiave SSH dedicata, configurare secrets/variable e
+usare il fallback manuale e' in [`docs/production-runbook.md`](production-runbook.md).
+
 ## Deploy Manuale
 
 Prima di deployare una patch importante, creare un backup DB:

@@ -42,9 +42,11 @@ Risorse:
 - Mailbox/calendario dedicato `padel@topflysolutions.com` attivo.
 - Inviti Outlook automatici attivi.
 - Reminder Outlook 1h attivo.
+- Workflow GitHub Actions `Deploy Production` pronto nel repo.
 
 ## Cosa Non E' Ancora Fatto
 
+- Secrets/variable GitHub Actions per autodeploy da configurare.
 - Backup automatici non ancora configurati.
 - Monitoraggio/alerting non ancora configurato.
 - Eventuale pagina/documento interno per annunciare il link ai dipendenti.
@@ -94,7 +96,78 @@ npm run build
 git status --short
 ```
 
-Dopo commit/push su `main`, server:
+Dopo commit/push su `main`, GitHub Actions puo' deployare automaticamente su Lightsail
+tramite workflow `Deploy Production`.
+
+### Setup Una Tantum Autodeploy
+
+Il deploy automatico usa una chiave SSH dedicata salvata nei GitHub Actions secrets.
+Non usare la chiave personale Lightsail se puoi evitarlo.
+
+Da una sessione SSH su Lightsail:
+
+```bash
+ssh-keygen -t ed25519 -f /tmp/padel-github-actions -C "github-actions-padel-topfly" -N ""
+mkdir -p ~/.ssh
+cat /tmp/padel-github-actions.pub >> ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+cat /tmp/padel-github-actions
+rm /tmp/padel-github-actions /tmp/padel-github-actions.pub
+```
+
+Copia il blocco privato stampato da `cat /tmp/padel-github-actions` in GitHub:
+
+- repo `Topfly-srl/padel-topfly`;
+- `Settings`;
+- `Secrets and variables`;
+- `Actions`;
+- `New repository secret`;
+- nome `LIGHTSAIL_SSH_PRIVATE_KEY`.
+
+Non incollare questa chiave in chat. Salvala anche in Bitwarden come nota segreta.
+
+Sempre in GitHub Actions secrets aggiungi:
+
+```txt
+LIGHTSAIL_HOST=18.194.7.194
+LIGHTSAIL_USER=ubuntu
+```
+
+Per il known host, da terminale locale o da Lightsail:
+
+```bash
+ssh-keyscan -H 18.194.7.194
+```
+
+Copia tutto l'output in un repository secret:
+
+```txt
+LIGHTSAIL_KNOWN_HOSTS=<output ssh-keyscan>
+```
+
+Per abilitare il deploy automatico a ogni push su `main`, aggiungi una repository variable:
+
+```txt
+PRODUCTION_AUTO_DEPLOY=true
+```
+
+Senza questa variabile, il workflow resta disponibile solo dal pulsante manuale
+`Run workflow`. Questa protezione evita deploy automatici prima di aver configurato bene
+i secrets.
+
+### Cosa Fa Il Workflow
+
+1. valida che i secrets SSH siano presenti;
+2. entra su Lightsail via SSH;
+3. crea un dump Postgres in `/opt/padel-topfly/backups`;
+4. esegue `git pull --ff-only origin main`;
+5. ricostruisce Docker Compose;
+6. esegue health check su <https://padel.topflysolutions.com>.
+
+### Fallback Manuale
+
+Se GitHub Actions non e' configurato o fallisce, server:
 
 ```bash
 cd /opt/padel-topfly
@@ -171,7 +244,7 @@ Costo atteso dopo eventuale periodo gratuito: circa il costo mensile del piano L
 1. Salvare `.env.production` e dati server in Bitwarden.
 2. Fare smoke test completo con 2-3 colleghi.
 3. Verificare mail conferma e mail cancellazione Outlook dopo ogni patch Graph.
-4. Creare un backup database prima di ogni deploy che tocca prenotazioni o Graph.
+4. Abilitare GitHub Actions autodeploy con chiave SSH dedicata.
 5. Valutare snapshot manuale o backup database schedulato.
 6. Preparare messaggio interno con link e regole d'uso.
 
