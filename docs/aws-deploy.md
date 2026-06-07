@@ -124,8 +124,9 @@ Hardening attivo per il servizio `app`:
 - `security_opt: no-new-privileges:true`;
 - `cap_drop: ALL`.
 
-Caddy imposta gli header di sicurezza principali e sovrascrive `X-Real-IP` /
-`X-Forwarded-For` con il client IP reale prima di inoltrare la richiesta all'app.
+Next imposta gli header di sicurezza sulle risposte applicative. Caddy li mantiene
+anche a livello proxy e sovrascrive `X-Real-IP` / `X-Forwarded-For` con il client IP
+reale prima di inoltrare la richiesta all'app.
 
 ## Env Produzione
 

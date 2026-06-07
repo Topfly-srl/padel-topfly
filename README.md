@@ -12,8 +12,8 @@ URL produzione:
 - Static IP: `18.194.7.194`.
 - DNS: record `A` `padel.topflysolutions.com -> 18.194.7.194` gestito da cPanel/Serverplan.
 - HTTPS: gestito automaticamente da Caddy con certificato Let's Encrypt.
-- Security headers: configurati in Caddy; verificare dopo ogni deploy con `curl -I`.
-  `X-Powered-By` e' disattivato da Next.
+- Security headers: configurati in Next e Caddy; verificare dopo ogni deploy con
+  `curl -I`. `X-Powered-By` e' disattivato da Next e rimosso da Caddy.
 - Database: Postgres locale in Docker, volume `padel_topfly_pgdata`.
 - Login utenti: nessun login, prenotazione pubblica con nome/cognome + email.
 - Login admin: Microsoft Entra ID attivo su `/admin`.

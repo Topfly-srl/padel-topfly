@@ -40,8 +40,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 - Static IP associato.
 - DNS aziendale configurato via cPanel/Serverplan.
 - HTTPS attivo con redirect automatico da HTTP.
-- Security headers Caddy configurati.
-- Header `X-Powered-By` Next disattivato.
+- Security headers configurati in Next e Caddy.
+- Header `X-Powered-By` Next disattivato e rimosso da Caddy.
 - Postgres locale persistente su volume Docker.
 - Migrazioni Prisma eseguite automaticamente all'avvio app.
 - Login pubblico eliminato per gli utenti normali.

@@ -71,7 +71,8 @@ Location:
 Evidence:
 
 - prima del fix la risposta runtime esponeva `X-Powered-By: Next.js`;
-- Caddy non impostava CSP, clickjacking defense, nosniff, referrer policy o permissions policy.
+- Next/Caddy non impostavano CSP, clickjacking defense, nosniff, referrer policy o
+  permissions policy in modo verificabile in produzione.
 
 Impact:
 
@@ -82,7 +83,7 @@ Impact:
 Fix:
 
 - aggiunto `poweredByHeader: false`;
-- aggiunti header Caddy:
+- aggiunti header sicurezza sia in Next sia in Caddy:
   - `Content-Security-Policy`;
   - `X-Content-Type-Options: nosniff`;
   - `X-Frame-Options: DENY`;
