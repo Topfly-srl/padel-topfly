@@ -107,6 +107,7 @@ jobs:
           set -euo pipefail
 
           cd /opt/padel-topfly
+          echo "Remote host: $(hostname)"
           BACKUP_DIR="/var/backups/padel-topfly"
           sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "${BACKUP_DIR}"
 
@@ -120,9 +121,14 @@ jobs:
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
+          echo "Remote commit: $(git rev-parse --short HEAD)"
 
           sudo docker compose -f docker-compose.production.yml up -d --build
           sudo docker compose -f docker-compose.production.yml restart caddy
+          sudo docker compose -f docker-compose.production.yml exec -T app \
+            sh -lc 'grep -q "Content-Security-Policy" next.config.ts && echo "Next security headers: present"'
+          sudo docker compose -f docker-compose.production.yml exec -T caddy \
+            caddy validate --config /etc/caddy/Caddyfile
           sudo docker compose -f docker-compose.production.yml ps
           REMOTE
 
@@ -146,3 +152,15 @@ jobs:
 
           curl --fail --silent --show-error --location --retry 12 --retry-delay 5 \
             https://padel.topflysolutions.com > /dev/null
+
+          headers="$(curl --fail --silent --show-error --head https://padel.topflysolutions.com)"
+          printf '%s\n' "${headers}" | grep -qi '^content-security-policy:'
+          printf '%s\n' "${headers}" | grep -qi '^x-content-type-options: nosniff'
+          printf '%s\n' "${headers}" | grep -qi '^x-frame-options: DENY'
+          printf '%s\n' "${headers}" | grep -qi '^referrer-policy: strict-origin-when-cross-origin'
+          printf '%s\n' "${headers}" | grep -qi '^permissions-policy:'
+
+          if printf '%s\n' "${headers}" | grep -qi '^x-powered-by:'; then
+            echo "::error::Production still exposes X-Powered-By"
+            exit 1
+          fi
