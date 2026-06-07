@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 import { createAdminBlock } from "@/lib/booking-service";
-import { routeError } from "@/lib/errors";
+import { jsonResponse, routeError } from "@/lib/errors";
 import { assertTrustedOrigin } from "@/lib/request-guard";
 import { assertAdmin, requireApiUser } from "@/lib/server-auth";
 import { toDateOrThrow } from "@/lib/time";
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       reason: body.reason,
     });
 
-    return NextResponse.json({ block }, { status: 201 });
+    return jsonResponse({ block }, { status: 201 });
   } catch (error) {
     return routeError(error);
   }

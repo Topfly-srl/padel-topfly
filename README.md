@@ -12,10 +12,14 @@ URL produzione:
 - Static IP: `18.194.7.194`.
 - DNS: record `A` `padel.topflysolutions.com -> 18.194.7.194` gestito da cPanel/Serverplan.
 - HTTPS: gestito automaticamente da Caddy con certificato Let's Encrypt.
+- Security headers: configurati in Caddy; verificare dopo ogni deploy con `curl -I`.
+  `X-Powered-By` e' disattivato da Next.
 - Database: Postgres locale in Docker, volume `padel_topfly_pgdata`.
 - Login utenti: nessun login, prenotazione pubblica con nome/cognome + email.
 - Login admin: Microsoft Entra ID attivo su `/admin`.
 - Outlook/Graph: attivo in produzione con mailbox `padel@topflysolutions.com`.
+- Deploy: GitHub Actions autodeploy attivo su push `main`.
+- Security audit: [`docs/security-audit.md`](docs/security-audit.md).
 
 ## Funzionalita'
 
@@ -37,7 +41,7 @@ URL produzione:
 - Next.js App Router + TypeScript.
 - Prisma + Postgres.
 - Auth.js / NextAuth con Microsoft Entra ID solo per area admin.
-- Microsoft Graph per inviti Outlook, promemoria e avvisi di cancellazione.
+- Microsoft Graph per inviti Outlook, promemoria e cancellazioni native Outlook.
 - Docker Compose in produzione:
   - `app`: Next.js;
   - `postgres`: database locale;
@@ -87,11 +91,16 @@ Deploy consigliato:
 
 - push su `main`;
 - GitHub Actions workflow `Deploy Production`;
-- autodeploy attivo quando la repository variable `PRODUCTION_AUTO_DEPLOY=true` e i
-  secrets SSH Lightsail sono configurati.
+- autodeploy attivo con repository variable `PRODUCTION_AUTO_DEPLOY=true` e secrets SSH
+  Lightsail configurati.
 
-Il workflow crea un backup Postgres, aggiorna `/opt/padel-topfly`, ricostruisce Docker
-Compose ed esegue un health check su <https://padel.topflysolutions.com>.
+Il workflow esegue prima CI (`lint`, test, build, Prisma validate e audit npm), crea un
+backup Postgres fuori dal repo in `/var/backups/padel-topfly` quando Postgres e' gia'
+attivo, aggiorna `/opt/padel-topfly`, ricostruisce Docker Compose ed esegue un health
+check su <https://padel.topflysolutions.com>.
+
+La produzione usa hardening Docker per il container `app`: utente non-root,
+`no-new-privileges` e capabilities Linux rimosse.
 
 Setup dettagliato: [`docs/production-runbook.md`](docs/production-runbook.md).
 
@@ -99,10 +108,11 @@ Fallback manuale sul server:
 
 ```bash
 cd /opt/padel-topfly
-mkdir -p backups
+BACKUP_DIR=/var/backups/padel-topfly
+sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "$BACKUP_DIR"
 sudo docker compose -f docker-compose.production.yml exec -T postgres \
-  pg_dump -U padel -d padel_topfly > backups/padel_topfly_$(date +%Y%m%d-%H%M%S).sql
-git pull origin main
+  pg_dump -U padel -d padel_topfly > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+git pull --ff-only origin main
 sudo docker compose -f docker-compose.production.yml up -d --build
 sudo docker compose -f docker-compose.production.yml ps
 ```
@@ -131,7 +141,9 @@ Prima di modificare `.env.production`, creare sempre un backup:
 
 ```bash
 cd /opt/padel-topfly
-sudo cp .env.production .env.production.backup.$(date +%Y%m%d-%H%M%S)
+BACKUP_DIR=/var/backups/padel-topfly
+sudo install -d -m 750 "$BACKUP_DIR"
+sudo cp .env.production "$BACKUP_DIR/.env.production.backup.$(date +%Y%m%d-%H%M%S)"
 sudo nano .env.production
 ```
 
@@ -166,6 +178,8 @@ Segreti da conservare in Bitwarden, mai in chat o Git:
 - `MICROSOFT_ENTRA_ID_SECRET`
 - `MS_GRAPH_CLIENT_SECRET`
 - tenant/client ID Microsoft Entra e Graph
+
+Checklist completa: [`docs/bitwarden-checklist.md`](docs/bitwarden-checklist.md).
 
 ## Microsoft Entra Admin
 
@@ -210,6 +224,12 @@ Permessi Microsoft Graph sull'app registration:
 
 `Mail.Send` non e' richiesto dalla V1: la conferma e la cancellazione passano dagli
 inviti/eventi Outlook, evitando una seconda email separata quando l'utente cancella.
+Se il permesso `Mail.Send` e' ancora presente in Entra, puo' essere rimosso dopo smoke
+test positivo.
+
+Per ridurre il blast radius del permesso Application, limitare `Calendars.ReadWrite` alla
+sola mailbox `padel@topflysolutions.com` tramite Exchange Application Access Policy o
+RBAC for Applications.
 
 Funzioni attese:
 
@@ -236,3 +256,6 @@ andato a buon fine.
 
 - Runbook AWS/Lightsail: [`docs/aws-deploy.md`](docs/aws-deploy.md)
 - Stato produzione e checklist: [`docs/production-runbook.md`](docs/production-runbook.md)
+- Security audit: [`docs/security-audit.md`](docs/security-audit.md)
+- Checklist Bitwarden: [`docs/bitwarden-checklist.md`](docs/bitwarden-checklist.md)
+- Istruzioni agenti/Codex: [`AGENTS.md`](AGENTS.md)

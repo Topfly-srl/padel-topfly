@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { deleteAdminBlock } from "@/lib/booking-service";
-import { routeError } from "@/lib/errors";
+import { jsonResponse, routeError } from "@/lib/errors";
 import { assertTrustedOrigin } from "@/lib/request-guard";
 import { assertAdmin, requireApiUser } from "@/lib/server-auth";
 
@@ -17,7 +17,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
     const block = await deleteAdminBlock(user, id);
 
-    return NextResponse.json({ block });
+    return jsonResponse({ block });
   } catch (error) {
     return routeError(error);
   }

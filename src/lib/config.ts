@@ -36,6 +36,28 @@ if (isProductionDeployment && !env.DATABASE_URL) {
   throw new Error("DATABASE_URL e' obbligatorio in produzione.");
 }
 
+if (isProductionDeployment) {
+  const missingProductionEnv = [
+    ["APP_PUBLIC_ORIGIN", env.APP_PUBLIC_ORIGIN],
+    ["APP_ADMIN_EMAILS", env.APP_ADMIN_EMAILS.trim()],
+    ["MICROSOFT_ENTRA_ID_ID", env.MICROSOFT_ENTRA_ID_ID],
+    ["MICROSOFT_ENTRA_ID_SECRET", env.MICROSOFT_ENTRA_ID_SECRET],
+    ["MICROSOFT_ENTRA_ID_TENANT_ID", env.MICROSOFT_ENTRA_ID_TENANT_ID],
+    ["MS_GRAPH_TENANT_ID", env.MS_GRAPH_TENANT_ID],
+    ["MS_GRAPH_CLIENT_ID", env.MS_GRAPH_CLIENT_ID],
+    ["MS_GRAPH_CLIENT_SECRET", env.MS_GRAPH_CLIENT_SECRET],
+    ["MS_GRAPH_MAILBOX", env.MS_GRAPH_MAILBOX],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+
+  if (missingProductionEnv.length > 0) {
+    throw new Error(
+      `Configurazione produzione incompleta: ${missingProductionEnv.join(", ")}.`,
+    );
+  }
+}
+
 export const appConfig = {
   allowedDomain: env.APP_ALLOWED_DOMAIN.trim().toLowerCase(),
   adminEmails: new Set(
@@ -45,6 +67,7 @@ export const appConfig = {
   ),
   publicOrigin: env.APP_PUBLIC_ORIGIN?.trim().replace(/\/$/, ""),
   timeZone: env.APP_TIME_ZONE,
+  isProduction: isProductionDeployment,
   authDevMode: env.AUTH_DEV_MODE === "true",
   databaseConfigured: Boolean(env.DATABASE_URL),
   devUser: {

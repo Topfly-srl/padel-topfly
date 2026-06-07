@@ -14,10 +14,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci:
+    name: CI checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
   deploy:
     name: Deploy to Lightsail
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: ci
     if: github.event_name == 'workflow_dispatch' || vars.PRODUCTION_AUTO_DEPLOY == 'true'
 
     steps:
@@ -41,6 +78,7 @@ jobs:
           exit "${missing}"
 
       - name: Configure SSH
+        id: configure_ssh
         shell: bash
         env:
           LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
@@ -67,11 +105,12 @@ jobs:
           set -euo pipefail
 
           cd /opt/padel-topfly
-          mkdir -p backups
+          BACKUP_DIR="/var/backups/padel-topfly"
+          sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "${BACKUP_DIR}"
 
           if sudo docker compose -f docker-compose.production.yml ps --services --filter "status=running" | grep -qx postgres; then
             sudo docker compose -f docker-compose.production.yml exec -T postgres \
-              pg_dump -U padel -d padel_topfly > "backups/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+              pg_dump -U padel -d padel_topfly > "${BACKUP_DIR}/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
           else
             echo "Postgres is not running; skipping pre-deploy DB dump."
           fi
@@ -82,8 +121,20 @@ jobs:
 
           sudo docker compose -f docker-compose.production.yml up -d --build
           sudo docker compose -f docker-compose.production.yml ps
-          sudo docker compose -f docker-compose.production.yml logs app --tail=80
           REMOTE
+
+      - name: Collect app logs on failure
+        if: failure() && steps.configure_ssh.outcome == 'success'
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" \
+            'cd /opt/padel-topfly && sudo docker compose -f docker-compose.production.yml logs app --tail=120'
 
       - name: Production health check
         shell: bash

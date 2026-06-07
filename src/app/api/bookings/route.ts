@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 import { createBooking, listBookings } from "@/lib/booking-service";
-import { routeError } from "@/lib/errors";
+import { jsonResponse, routeError } from "@/lib/errors";
+import { normalizeEmail } from "@/lib/manage-token";
 import { getPublicBaseUrl } from "@/lib/public-url";
 import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 import { assertAdmin, requireApiUser } from "@/lib/server-auth";
@@ -20,7 +21,7 @@ export async function GET() {
     assertAdmin(user);
     const bookings = await listBookings(user);
 
-    return NextResponse.json({ bookings });
+    return jsonResponse({ bookings });
   } catch (error) {
     return routeError(error);
   }
@@ -32,6 +33,8 @@ export async function POST(request: NextRequest) {
     await assertRateLimit(request, "booking:create");
 
     const body = createBookingSchema.parse(await request.json());
+    await assertRateLimit(request, "booking:create-email", normalizeEmail(body.organizerEmail));
+
     const booking = await createBooking({
       start: toDateOrThrow(body.start, "Inizio"),
       end: toDateOrThrow(body.end, "Fine"),
@@ -40,7 +43,7 @@ export async function POST(request: NextRequest) {
       baseUrl: getPublicBaseUrl(request),
     });
 
-    return NextResponse.json({ booking }, { status: 201 });
+    return jsonResponse({ booking }, { status: 201 });
   } catch (error) {
     return routeError(error);
   }

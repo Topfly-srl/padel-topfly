@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+export const noStoreHeaders = {
+  "Cache-Control": "no-store, max-age=0",
+};
+
 export class AppError extends Error {
   constructor(
     message: string,
@@ -10,28 +14,41 @@ export class AppError extends Error {
   }
 }
 
+export function jsonResponse(body: unknown, init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+
+  for (const [key, value] of Object.entries(noStoreHeaders)) {
+    headers.set(key, value);
+  }
+
+  return NextResponse.json(body, {
+    ...init,
+    headers,
+  });
+}
+
 export function routeError(error: unknown) {
   if (error instanceof Response) {
     return error;
   }
 
   if (error instanceof AppError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return jsonResponse({ error: error.message }, { status: error.status });
   }
 
   if (error instanceof ZodError) {
-    return NextResponse.json(
+    return jsonResponse(
       { error: error.issues[0]?.message ?? "Dati richiesta non validi." },
       { status: 422 },
     );
   }
 
   if (error instanceof SyntaxError) {
-    return NextResponse.json({ error: "JSON richiesta non valido." }, { status: 400 });
+    return jsonResponse({ error: "JSON richiesta non valido." }, { status: 400 });
   }
 
   console.error(error);
-  return NextResponse.json(
+  return jsonResponse(
     { error: "Qualcosa e' andato storto. Riprova tra poco." },
     { status: 500 },
   );

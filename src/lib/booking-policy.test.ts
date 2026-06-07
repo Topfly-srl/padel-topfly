@@ -96,4 +96,21 @@ describe("booking policy", () => {
     expect(bookingDurationOptions).toEqual([15, 30, 45, 60, 75, 90, 105, 120]);
     expect(bookingPolicy.durationOptions).toEqual(bookingDurationOptions);
   });
+
+  it.each([45, 75, 90, 105, 120])(
+    "mantiene coerente la copertura visuale per durate da %i minuti",
+    (minutes) => {
+      const start = new Date("2026-06-04T18:00:00.000Z");
+      const end = new Date(start.getTime() + minutes * 60_000);
+      const slots = Array.from({ length: 9 }, (_, index) => {
+        const slotStart = new Date(start.getTime() + index * 15 * 60_000);
+        const slotEnd = new Date(slotStart.getTime() + 15 * 60_000);
+        return rangesOverlap(slotStart, slotEnd, start, end);
+      });
+
+      expect(slots.filter(Boolean)).toHaveLength(minutes / 15);
+      expect(slots[0]).toBe(true);
+      expect(slots[minutes / 15]).toBe(false);
+    },
+  );
 });

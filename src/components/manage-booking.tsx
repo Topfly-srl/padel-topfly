@@ -5,11 +5,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { bookingDurationOptions } from "@/lib/booking-constants";
-import type { MyBooking } from "@/lib/types";
+import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/types";
 
 type Notice = {
   type: "success" | "error" | "info";
   text: string;
+};
+
+type AvailabilityResponse = {
+  bookings: AvailabilityBooking[];
+  blocks: AvailabilityBlock[];
 };
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
@@ -28,6 +33,12 @@ function addMinutes(date: Date, minutes: number) {
 
 function dateTimeFromParts(day: string, time: string) {
   return new Date(`${day}T${time}:00`);
+}
+
+function rangeOverlaps(start: Date, end: Date, itemStart: string, itemEnd: string) {
+  const rightStart = new Date(itemStart);
+  const rightEnd = new Date(itemEnd);
+  return start < rightEnd && end > rightStart;
 }
 
 function minutesBetween(start: Date, end: Date) {
@@ -94,6 +105,7 @@ export function ManageBooking({
   manageToken: string;
 }) {
   const [booking, setBooking] = useState<MyBooking | null>(null);
+  const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [selectedDate, setSelectedDate] = useState(dateKey(new Date()));
   const [selectedTime, setSelectedTime] = useState("18:00");
@@ -107,6 +119,19 @@ export function ManageBooking({
     [selectedDate, selectedTime],
   );
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
+  const selectionConflict = useMemo(() => {
+    if (!availability || !booking || booking.status !== "CONFIRMED") return null;
+
+    const conflictingBooking = availability.bookings.find(
+      (item) => item.id !== booking.id && rangeOverlaps(start, end, item.start, item.end),
+    );
+    if (conflictingBooking) return `Occupato da ${conflictingBooking.organizerName}`;
+
+    const conflictingBlock = availability.blocks.find((item) => rangeOverlaps(start, end, item.start, item.end));
+    if (conflictingBlock) return `Bloccato: ${conflictingBlock.reason}`;
+
+    return null;
+  }, [availability, booking, end, start]);
 
   useEffect(() => {
     startTransition(async () => {
@@ -139,10 +164,32 @@ export function ManageBooking({
     });
   }, [bookingId, manageToken]);
 
+  useEffect(() => {
+    if (!booking || booking.status !== "CONFIRMED") return;
+
+    let canceled = false;
+
+    startTransition(async () => {
+      const response = await fetch(`/api/availability?date=${selectedDate}`, { cache: "no-store" });
+      if (!response.ok || canceled) return;
+      setAvailability((await response.json()) as AvailabilityResponse);
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [booking, selectedDate]);
+
   async function updateBooking() {
     if (isSaving || isCanceling) return;
 
     setNotice(null);
+
+    if (selectionConflict) {
+      setNotice({ type: "error", text: selectionConflict });
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -172,6 +219,10 @@ export function ManageBooking({
   async function cancelBooking() {
     if (isSaving || isCanceling) return;
 
+    if (!window.confirm("Vuoi cancellare questa prenotazione?")) {
+      return;
+    }
+
     setNotice(null);
     setIsCanceling(true);
 
@@ -196,6 +247,7 @@ export function ManageBooking({
   }
 
   const actionsDisabled = isPending || isSaving || isCanceling;
+  const saveDisabled = actionsDisabled || Boolean(selectionConflict);
 
   return (
     <main className="signin-shell">
@@ -237,9 +289,10 @@ export function ManageBooking({
                     <div className="control-heading">
                       <span>Durata</span>
                     </div>
-                    <div className="duration-row" aria-label="Durata prenotazione">
+                    <div className="duration-row" role="group" aria-label="Durata prenotazione">
                       {bookingDurationOptions.map((minutes) => (
                         <button
+                          aria-pressed={duration === minutes}
                           className={`duration-chip ${duration === minutes ? "active" : ""}`}
                           key={minutes}
                           onClick={() => setDuration(minutes)}
@@ -262,24 +315,45 @@ export function ManageBooking({
                   </div>
                 </div>
 
-                <div className="timeline manage-timeline" aria-label="Orario di inizio">
-                  {options.map((option) => (
-                    <button
-                      aria-pressed={option === selectedTime}
-                      className={`time-slot ${option === selectedTime ? "selected-start" : ""}`}
-                      key={option}
-                      onClick={() => setSelectedTime(option)}
-                      type="button"
-                    >
-                      <span>{option}</span>
-                    </button>
-                  ))}
+                <div className="timeline manage-timeline" role="group" aria-label="Orario di inizio">
+                  {options.map((option) => {
+                    const slotStart = dateTimeFromParts(selectedDate, option);
+                    const slotEnd = addMinutes(slotStart, 15);
+                    const conflictingBooking = availability?.bookings.find(
+                      (item) => item.id !== booking.id && rangeOverlaps(slotStart, slotEnd, item.start, item.end),
+                    );
+                    const conflictingBlock = availability?.blocks.find((item) =>
+                      rangeOverlaps(slotStart, slotEnd, item.start, item.end),
+                    );
+                    const isSelected = rangeOverlaps(slotStart, slotEnd, start.toISOString(), end.toISOString());
+                    const isSelectedStart = option === selectedTime;
+                    const disabled = Boolean(conflictingBooking || conflictingBlock);
+
+                    return (
+                      <button
+                        aria-pressed={isSelectedStart}
+                        className={`time-slot ${conflictingBooking ? "busy" : ""} ${
+                          conflictingBlock ? "blocked" : ""
+                        } ${isSelectedStart ? "selected-start" : isSelected ? "selected-range" : ""}`}
+                        disabled={disabled}
+                        key={option}
+                        onClick={() => setSelectedTime(option)}
+                        title={conflictingBooking ? `Prenotato da ${conflictingBooking.organizerName}` : conflictingBlock?.reason}
+                        type="button"
+                      >
+                        <span>{option}</span>
+                        {conflictingBooking ? <small>{conflictingBooking.organizerName}</small> : null}
+                        {conflictingBlock ? <small>{conflictingBlock.reason}</small> : null}
+                      </button>
+                    );
+                  })}
                 </div>
 
+                {selectionConflict ? <div className="notice error">{selectionConflict}</div> : null}
                 {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
                 <button
                   className="primary-button full-width"
-                  disabled={actionsDisabled}
+                  disabled={saveDisabled}
                   onClick={updateBooking}
                   type="button"
                 >

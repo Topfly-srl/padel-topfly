@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "clean": "node -e \"const fs=require('fs'); for (const path of ['.next','coverage','output/playwright']) fs.rmSync(path,{recursive:true,force:true});\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"

@@ -101,8 +101,32 @@ function serializeBlock(block: {
   };
 }
 
+const hiddenAuditFields = new Set([
+  "manageTokenHash",
+  "manageTokenExpiresAt",
+  "outlookEventId",
+  "outlookSyncError",
+]);
+
+export function sanitizeAuditValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeAuditValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !hiddenAuditFields.has(key))
+        .map(([key, nestedValue]) => [key, sanitizeAuditValue(nestedValue)]),
+    );
+  }
+
+  return value;
+}
+
 function auditJson(value: unknown) {
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  const serializableValue = JSON.parse(JSON.stringify(value));
+  return sanitizeAuditValue(serializableValue) as Prisma.InputJsonValue;
 }
 
 async function audit(
@@ -168,6 +192,17 @@ async function markOutlookDeleted(booking: Booking) {
       outlookSyncError: result.error ?? null,
     },
   });
+}
+
+export function shouldRetryOutlookDelete(
+  booking: Pick<Booking, "status" | "outlookEventId" | "outlookSyncStatus">,
+) {
+  return (
+    booking.status === "CANCELED" &&
+    Boolean(booking.outlookEventId) &&
+    booking.outlookSyncStatus !== "SYNCED" &&
+    booking.outlookSyncStatus !== "SKIPPED"
+  );
 }
 
 function normalizePublicBookingInput(input: PublicBookingInput) {
@@ -478,7 +513,11 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
   const actor = assertBookingAccess(booking, access);
 
   if (booking.status === "CANCELED") {
-    return serializeManagedBooking(booking, access.manageToken ?? undefined, access.baseUrl);
+    const synced = shouldRetryOutlookDelete(booking)
+      ? await markOutlookDeleted(booking)
+      : booking;
+
+    return serializeManagedBooking(synced, access.manageToken ?? undefined, access.baseUrl);
   }
 
   const canceled = await prisma.$transaction(async (tx) => {
@@ -522,41 +561,44 @@ export async function createAdminBlock(
     throw new AppError("Inserisci un motivo per il blocco.", 422);
   }
 
-  const block = await prisma.$transaction(async (tx) => {
-    const overlappingBookings = await tx.booking.findMany({
-      where: {
-        status: "CONFIRMED",
-        start: { lt: input.end },
-        end: { gt: input.start },
-      },
-      select: { id: true },
-    });
+  const block = await prisma.$transaction(
+    async (tx) => {
+      const overlappingBookings = await tx.booking.findMany({
+        where: {
+          status: "CONFIRMED",
+          start: { lt: input.end },
+          end: { gt: input.start },
+        },
+        select: { id: true },
+      });
 
-    if (overlappingBookings.length > 0) {
-      throw new AppError(
-        "Ci sono prenotazioni confermate in questa fascia. Cancellale o spostale prima.",
-        422,
-      );
-    }
+      if (overlappingBookings.length > 0) {
+        throw new AppError(
+          "Ci sono prenotazioni confermate in questa fascia. Cancellale o spostale prima.",
+          422,
+        );
+      }
 
-    const saved = await tx.adminBlock.create({
-      data: {
-        start: input.start,
-        end: input.end,
-        reason: input.reason.trim(),
-        createdById: currentUser.id,
-      },
-    });
+      const saved = await tx.adminBlock.create({
+        data: {
+          start: input.start,
+          end: input.end,
+          reason: input.reason.trim(),
+          createdById: currentUser.id,
+        },
+      });
 
-    await audit(tx, currentUser, {
-      action: "ADMIN_BLOCK_CREATED",
-      entityType: "AdminBlock",
-      entityId: saved.id,
-      after: saved,
-    });
+      await audit(tx, currentUser, {
+        action: "ADMIN_BLOCK_CREATED",
+        entityType: "AdminBlock",
+        entityId: saved.id,
+        after: saved,
+      });
 
-    return saved;
-  });
+      return saved;
+    },
+    { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+  );
 
   return serializeBlock(block);
 }

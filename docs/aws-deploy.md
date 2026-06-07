@@ -118,6 +118,15 @@ Il database locale e' persistente grazie al volume Docker:
 padel_topfly_pgdata
 ```
 
+Hardening attivo per il servizio `app`:
+
+- container eseguito come utente non-root;
+- `security_opt: no-new-privileges:true`;
+- `cap_drop: ALL`.
+
+Caddy imposta gli header di sicurezza principali e sovrascrive `X-Real-IP` /
+`X-Forwarded-For` con il client IP reale prima di inoltrare la richiesta all'app.
+
 ## Env Produzione
 
 Creare il file sul server:
@@ -176,14 +185,17 @@ Attenzione:
 
 ## Deploy Con GitHub Actions
 
-Il metodo consigliato e' usare il workflow GitHub Actions `Deploy Production`.
+Il metodo consigliato e attualmente attivo e' il workflow GitHub Actions
+`Deploy Production`.
 
 Quando i repository secrets SSH sono configurati e la repository variable
 `PRODUCTION_AUTO_DEPLOY=true` e' presente, ogni push su `main` aggiorna automaticamente
-Lightsail.
+Lightsail dopo CI (`lint`, test, build, Prisma validate e audit npm).
 
-La procedura completa per creare la chiave SSH dedicata, configurare secrets/variable e
-usare il fallback manuale e' in [`docs/production-runbook.md`](production-runbook.md).
+Nel repo TOPFLY questi valori sono gia' configurati e il workflow e' stato testato con
+esito positivo. La procedura completa per ruotare la chiave SSH dedicata, configurare di
+nuovo secrets/variable e usare il fallback manuale e' in
+[`docs/production-runbook.md`](production-runbook.md).
 
 ## Deploy Manuale
 
@@ -191,17 +203,18 @@ Prima di deployare una patch importante, creare un backup DB:
 
 ```bash
 cd /opt/padel-topfly
-mkdir -p backups
+BACKUP_DIR=/var/backups/padel-topfly
+sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "$BACKUP_DIR"
 sudo docker compose -f docker-compose.production.yml exec -T postgres \
-  pg_dump -U padel -d padel_topfly > backups/padel_topfly_$(date +%Y%m%d-%H%M%S).sql
-ls -lh backups | tail
+  pg_dump -U padel -d padel_topfly > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+ls -lh "$BACKUP_DIR" | tail
 ```
 
 Sul server:
 
 ```bash
 cd /opt/padel-topfly
-git pull origin main
+git pull --ff-only origin main
 sudo docker compose -f docker-compose.production.yml up -d --build
 sudo docker compose -f docker-compose.production.yml ps
 ```
@@ -233,8 +246,10 @@ Lo script:
 
 1. clona o aggiorna la repo;
 2. verifica che `.env.production` esista;
-3. esegue `sudo docker compose up -d --build`;
-4. mostra lo stato container.
+3. crea un backup DB in `/var/backups/padel-topfly` se Postgres e' gia' in esecuzione;
+4. esegue `git pull --ff-only origin main`;
+5. esegue `sudo docker compose up -d --build`;
+6. mostra lo stato container.
 
 Se Docker non richiede `sudo`, usare:
 
@@ -248,7 +263,9 @@ Prima backup:
 
 ```bash
 cd /opt/padel-topfly
-sudo cp .env.production .env.production.backup.$(date +%Y%m%d-%H%M%S)
+BACKUP_DIR=/var/backups/padel-topfly
+sudo install -d -m 750 "$BACKUP_DIR"
+sudo cp .env.production "$BACKUP_DIR/.env.production.backup.$(date +%Y%m%d-%H%M%S)"
 sudo nano .env.production
 ```
 
@@ -335,6 +352,8 @@ Controllare:
 
 ## Bitwarden
 
+Checklist dettagliata: [`docs/bitwarden-checklist.md`](bitwarden-checklist.md).
+
 Salvare in Bitwarden una nota "Padel TOPFLY - Produzione" con:
 
 - URL produzione;
@@ -344,6 +363,9 @@ Salvare in Bitwarden una nota "Padel TOPFLY - Produzione" con:
 - dati Microsoft Entra;
 - dati Microsoft Graph;
 - mailbox `padel@topflysolutions.com`;
+- deploy key GitHub Actions dedicata;
+- known hosts GitHub Actions;
+- repository variable `PRODUCTION_AUTO_DEPLOY=true`;
 - ultima data di backup DB manuale.
 
 Non salvare segreti in Git e non incollarli in chat.
@@ -357,8 +379,16 @@ Permessi Graph sull'app registration:
 
 `Mail.Send` non e' richiesto dalla V1: conferme, modifiche e cancellazioni usano gli
 inviti/eventi Outlook, senza una seconda email custom separata.
+Se `Mail.Send` e' ancora presente in Entra, rimuoverlo dopo smoke test positivo.
 
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
 La cancellazione aggiorna l'evento e poi cancella l'evento Outlook.
 La mail automatica con prefisso `Canceled:` e' generata da Outlook: l'app controlla solo
 il commento testuale, che deve restare breve e chiaro.
+
+Hardening Microsoft 365 raccomandato:
+
+- rimuovere `Mail.Send`, se ancora presente;
+- limitare `Calendars.ReadWrite` Application alla sola mailbox `padel@topflysolutions.com`
+  con Exchange Application Access Policy o RBAC for Applications;
+- verificare che la mailbox sia tecnica/condivisa e non usata come account personale.

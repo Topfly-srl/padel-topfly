@@ -1,6 +1,5 @@
-import { NextResponse } from "next/server";
 import { getAdminAudit } from "@/lib/booking-service";
-import { routeError } from "@/lib/errors";
+import { jsonResponse, routeError } from "@/lib/errors";
 import { assertAdmin, requireApiUser } from "@/lib/server-auth";
 
 export async function GET() {
@@ -9,7 +8,7 @@ export async function GET() {
     assertAdmin(user);
 
     const audit = await getAdminAudit();
-    return NextResponse.json({ audit });
+    return jsonResponse({ audit });
   } catch (error) {
     return routeError(error);
   }

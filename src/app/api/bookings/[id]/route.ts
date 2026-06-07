@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 import { cancelBooking, updateBooking } from "@/lib/booking-service";
-import { routeError } from "@/lib/errors";
+import { jsonResponse, routeError } from "@/lib/errors";
 import { getPublicBaseUrl } from "@/lib/public-url";
 import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 import { getCurrentUser } from "@/lib/server-auth";
@@ -49,7 +49,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
     );
 
-    return NextResponse.json({ booking });
+    return jsonResponse({ booking });
   } catch (error) {
     return routeError(error);
   }
@@ -78,7 +78,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       id,
     );
 
-    return NextResponse.json({ booking });
+    return jsonResponse({ booking });
   } catch (error) {
     return routeError(error);
   }

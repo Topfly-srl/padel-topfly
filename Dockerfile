@@ -29,7 +29,11 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 
-RUN chmod +x ./docker/entrypoint.sh
+RUN addgroup -S app && adduser -S app -G app \
+  && chmod +x ./docker/entrypoint.sh \
+  && chown -R app:app /app
+
+USER app
 
 EXPOSE 3000
 CMD ["./docker/entrypoint.sh"]

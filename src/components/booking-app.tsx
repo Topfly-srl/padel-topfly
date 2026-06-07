@@ -6,8 +6,9 @@ import {
   Clock3,
   Edit3,
   Lock,
+  Mail,
   LogOut,
-  MailCheck,
+  MailWarning,
   Shield,
   Trash2,
 } from "lucide-react";
@@ -40,7 +41,7 @@ type AvailabilityResponse = {
 };
 
 type Notice = {
-  type: "success" | "error" | "info";
+  type: "success" | "error" | "info" | "warning";
   text: string;
 };
 
@@ -66,6 +67,12 @@ function addMinutes(date: Date, minutes: number) {
 
 function minutesBetween(start: Date, end: Date) {
   return Math.round((end.getTime() - start.getTime()) / 60_000);
+}
+
+function durationLabel(minutes: number) {
+  if (minutes === 60) return "1 ora";
+  if (minutes % 60 === 0) return `${minutes / 60} ore`;
+  return `${minutes} min`;
 }
 
 function localTime(date: Date) {
@@ -176,6 +183,10 @@ function bookingSuccessText(status: string) {
   return "Fatto. Prenotazione confermata.";
 }
 
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function cancellationSuccessText(status: string) {
   if (status === "SYNCED") return "Prenotazione cancellata. Cancellazione Outlook inviata.";
   if (status === "FAILED") return "Prenotazione cancellata. Cancellazione Outlook non riuscita.";
@@ -279,6 +290,7 @@ export function BookingApp({
   const isExternalEmail =
     organizerEmail.trim().includes("@") &&
     !organizerEmail.trim().toLowerCase().endsWith(`@${allowedDomain}`);
+  const isBookingFormValid = !isBookingFormOpen || (organizerName.trim().length > 1 && isValidEmail(organizerEmail));
 
   const selectedOwnBooking = useMemo(
     () =>
@@ -291,6 +303,10 @@ export function BookingApp({
   );
   const isConfirmedSelection = Boolean(selectedOwnBooking) && !editingBookingId;
   const ignoredBookingId = editingBookingId ?? selectedOwnBooking?.id ?? null;
+  const selectedOwnSyncText = selectedOwnBooking
+    ? syncLabel(selectedOwnBooking.outlookSyncStatus, selectedOwnBooking.status)
+    : null;
+  const selectedOwnSyncFailed = selectedOwnBooking?.outlookSyncStatus === "FAILED";
 
   const selectionConflict = useMemo(() => {
     const booking = dayBookings.find(
@@ -458,7 +474,7 @@ export function BookingApp({
     setEditingToken(null);
     setIsBookingFormOpen(false);
     setNotice({
-      type: json.booking.outlookSyncStatus === "FAILED" ? "info" : "success",
+      type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
       text: bookingSuccessText(json.booking.outlookSyncStatus),
     });
     await refresh(nextTokens);
@@ -469,6 +485,10 @@ export function BookingApp({
 
     if (!isAdmin && !manageToken) {
       setNotice({ type: "error", text: "Apri il link ricevuto via email per cancellare questa prenotazione." });
+      return;
+    }
+
+    if (!window.confirm("Vuoi cancellare questa prenotazione?")) {
       return;
     }
 
@@ -529,6 +549,10 @@ export function BookingApp({
   }
 
   async function deleteBlock(id: string) {
+    if (!window.confirm("Vuoi rimuovere questo blocco admin?")) {
+      return;
+    }
+
     const response = await fetch(`/api/admin/blocks/${id}`, { method: "DELETE" });
 
     if (!response.ok) {
@@ -540,7 +564,7 @@ export function BookingApp({
     await refresh();
   }
 
-  const canSave = !selectionConflict && !isPending && !isConfirmedSelection;
+  const canSave = !selectionConflict && !isPending && !isConfirmedSelection && isBookingFormValid;
 
   return (
     <main className="app-shell">
@@ -582,7 +606,7 @@ export function BookingApp({
               <CalendarDays size={18} />
               <span>Scegli giorno</span>
             </div>
-            <div className="date-strip" aria-label="Giorni disponibili">
+            <div className="date-strip" role="group" aria-label="Giorni disponibili">
               {dates.map((date) => {
                 const key = dateKey(date);
                 return (
@@ -590,6 +614,7 @@ export function BookingApp({
                     className={`date-chip ${key === selectedDate ? "active" : ""}`}
                     key={key}
                     onClick={() => setSelectedDate(key)}
+                    aria-pressed={key === selectedDate}
                     type="button"
                   >
                     <span>{humanDay(date)}</span>
@@ -614,12 +639,13 @@ export function BookingApp({
                 <div className="control-heading">
                   <span>Durata</span>
                 </div>
-                <div className="duration-row" aria-label="Durata prenotazione">
+                <div className="duration-row" role="group" aria-label="Durata prenotazione">
                   {durationOptions.map((minutes) => (
                     <button
                       className={`duration-chip ${duration === minutes ? "active" : ""}`}
                       key={minutes}
                       onClick={() => setDuration(minutes)}
+                      aria-pressed={duration === minutes}
                       type="button"
                     >
                       {minutes}m
@@ -639,7 +665,7 @@ export function BookingApp({
               </div>
             </div>
 
-            <div className="timeline" aria-label="Disponibilita del giorno" ref={timelineRef}>
+            <div className="timeline" role="group" aria-label="Disponibilita del giorno" ref={timelineRef}>
               {options.map((option) => {
                 const slotStart = dateTimeFromParts(selectedDate, option);
                 const slotEnd = addMinutes(slotStart, 15);
@@ -677,38 +703,24 @@ export function BookingApp({
 
         <aside className="side-stack">
           <section className="summary-card">
-            <div className="summary-top">
-              <div>
-                <p className="muted-label">Riepilogo</p>
-                <h2>
-                  {localDateTime(start)} - {localTime(end)}
-                </h2>
-              </div>
-              <div className={`status-dot ${selectionConflict ? "bad" : "good"}`} />
-            </div>
-
-            <div className="rules">
-              <span>
-                <strong>Quando</strong> fino a 14 giorni
-              </span>
-              <span>
-                <strong>Limite</strong> 2 prenotazioni future
-              </span>
-              <span>
-                <strong>Durata</strong> da 15 a 120 min
-              </span>
-            </div>
-
             {selectedOwnBooking && isConfirmedSelection ? (
               <div className="confirmed-summary">
-                <div className="notice success">
-                  <Check size={16} />
+                <p className="muted-label">Riepilogo</p>
+                <div className={`summary-state ${selectedOwnSyncFailed ? "sync-warning" : ""}`}>
+                  <span className={`summary-state-icon ${selectedOwnSyncFailed ? "warning" : "success"}`}>
+                    {selectedOwnSyncFailed ? <MailWarning size={17} /> : <Check size={17} />}
+                  </span>
                   <div>
-                    <strong>Prenotazione confermata</strong>
-                    {syncLabel(selectedOwnBooking.outlookSyncStatus, selectedOwnBooking.status) ? (
-                      <span>
-                        {syncLabel(selectedOwnBooking.outlookSyncStatus, selectedOwnBooking.status)}
-                      </span>
+                    <h2>Prenotazione confermata</h2>
+                    <p>
+                      {localDay(start)} · {localTime(start)} - {localTime(end)}
+                    </p>
+                    {selectedOwnSyncText ? (
+                      <small className={selectedOwnSyncFailed ? "sync-warning-text" : undefined}>
+                        {selectedOwnSyncFailed
+                          ? `${selectedOwnSyncText}. La prenotazione resta valida.`
+                          : selectedOwnSyncText}
+                      </small>
                     ) : null}
                   </div>
                 </div>
@@ -727,15 +739,38 @@ export function BookingApp({
                   </button>
                 </div>
               </div>
-            ) : selectionConflict ? (
-              <div className="notice error">{selectionConflict}</div>
-            ) : notice ? (
-              <div className={`notice ${notice.type}`}>{notice.text}</div>
             ) : (
-              <div className="notice success">
-                <MailCheck size={16} />
-                Conferma via email + link modifica/cancella
-              </div>
+              <>
+                <div className="summary-top">
+                  <div>
+                    <p className="muted-label">Riepilogo</p>
+                    <h2>{selectionConflict ? "Slot non disponibile" : localDay(start)}</h2>
+                  </div>
+                  {selectionConflict ? null : <span className="summary-duration">{durationLabel(duration)}</span>}
+                </div>
+                <p className="summary-time">
+                  {selectionConflict
+                    ? `${localDay(start)} · ${localTime(start)} - ${localTime(end)}`
+                    : `${localTime(start)} - ${localTime(end)}`}
+                </p>
+
+                {selectionConflict ? (
+                  <div className="notice error">{selectionConflict}</div>
+                ) : notice ? (
+                  <div className={`notice ${notice.type}`}>{notice.text}</div>
+                ) : (
+                  <div className="summary-next">
+                    <span aria-hidden="true">
+                      <Mail size={17} />
+                    </span>
+                    <div>
+                      <strong>Conferma via email</strong>
+                      <small>Con link per modificare o cancellare.</small>
+                    </div>
+                  </div>
+                )}
+
+              </>
             )}
 
             {isBookingFormOpen && !editingBookingId ? (
@@ -744,6 +779,8 @@ export function BookingApp({
                   Nome e cognome
                   <input
                     autoComplete="name"
+                    required
+                    aria-invalid={isBookingFormOpen && organizerName.trim().length === 0}
                     value={organizerName}
                     onChange={(event) => setOrganizerName(event.target.value)}
                     placeholder="Mario Rossi"
@@ -754,6 +791,9 @@ export function BookingApp({
                   <input
                     autoComplete="email"
                     inputMode="email"
+                    type="email"
+                    required
+                    aria-invalid={isBookingFormOpen && organizerEmail.trim().length > 0 && !isValidEmail(organizerEmail)}
                     value={organizerEmail}
                     onChange={(event) => setOrganizerEmail(event.target.value)}
                     placeholder={`nome@${allowedDomain}`}
@@ -767,7 +807,7 @@ export function BookingApp({
               </div>
             ) : null}
 
-            {isConfirmedSelection ? null : (
+            {isConfirmedSelection || selectionConflict ? null : (
               <button
                 className="primary-button full-width"
                 disabled={!canSave}
@@ -935,13 +975,21 @@ export function BookingApp({
                         </span>
                       </div>
                       <div className="item-actions">
-                        <button className="mini-button" onClick={() => editBooking(booking)} type="button">
+                        <button
+                          className="mini-button"
+                          onClick={() => editBooking(booking)}
+                          type="button"
+                          aria-label={`Modifica prenotazione di ${booking.organizerName}`}
+                          title="Modifica prenotazione"
+                        >
                           <Edit3 size={15} />
                         </button>
                         <button
                           className="mini-button danger"
                           onClick={() => cancelBooking(booking)}
                           type="button"
+                          aria-label={`Cancella prenotazione di ${booking.organizerName}`}
+                          title="Cancella prenotazione"
                         >
                           <Trash2 size={15} />
                         </button>
