@@ -36,7 +36,7 @@ sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "${BACKUP_DIR}"
 if $DOCKER_COMPOSE -f docker-compose.production.yml ps --services --filter status=running | grep -qx postgres; then
   backup_file="${BACKUP_DIR}/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
   $DOCKER_COMPOSE -f docker-compose.production.yml exec -T postgres sh -lc \
-    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > "${backup_file}"
+    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > "${backup_file}" < /dev/null
   chmod 600 "${backup_file}"
   echo "Backup created: ${backup_file}"
 else

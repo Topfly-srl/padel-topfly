@@ -217,7 +217,8 @@ cd /opt/padel-topfly
 BACKUP_DIR=/var/backups/padel-topfly
 sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "$BACKUP_DIR"
 sudo docker compose -f docker-compose.production.yml exec -T postgres \
-  pg_dump -U padel -d padel_topfly > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+  pg_dump -U padel -d padel_topfly \
+  > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql" < /dev/null
 git pull --ff-only origin main
 sudo docker compose -f docker-compose.production.yml up -d --build
 sudo docker compose -f docker-compose.production.yml restart caddy

@@ -113,7 +113,8 @@ jobs:
 
           if sudo docker compose -f docker-compose.production.yml ps --services --filter "status=running" | grep -qx postgres; then
             sudo docker compose -f docker-compose.production.yml exec -T postgres \
-              pg_dump -U padel -d padel_topfly > "${BACKUP_DIR}/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+              pg_dump -U padel -d padel_topfly \
+              > "${BACKUP_DIR}/padel_topfly_$(date +%Y%m%d-%H%M%S).sql" < /dev/null
           else
             echo "Postgres is not running; skipping pre-deploy DB dump."
           fi
@@ -126,9 +127,11 @@ jobs:
           sudo docker compose -f docker-compose.production.yml up -d --build
           sudo docker compose -f docker-compose.production.yml restart caddy
           sudo docker compose -f docker-compose.production.yml exec -T app \
-            sh -lc 'grep -q "Content-Security-Policy" next.config.ts && echo "Next security headers: present"'
+            sh -lc 'grep -q "Content-Security-Policy" next.config.ts && echo "Next security headers: present"' \
+            < /dev/null
           sudo docker compose -f docker-compose.production.yml exec -T caddy \
-            caddy validate --config /etc/caddy/Caddyfile
+            caddy validate --config /etc/caddy/Caddyfile \
+            < /dev/null
           sudo docker compose -f docker-compose.production.yml ps
           REMOTE
 
