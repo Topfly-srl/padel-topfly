@@ -249,7 +249,8 @@ Lo script:
 3. crea un backup DB in `/var/backups/padel-topfly` se Postgres e' gia' in esecuzione;
 4. esegue `git pull --ff-only origin main`;
 5. esegue `sudo docker compose up -d --build`;
-6. mostra lo stato container.
+6. riavvia Caddy per ricaricare configurazione e security header;
+7. mostra lo stato container.
 
 Se Docker non richiede `sudo`, usare:
 

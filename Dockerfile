@@ -23,6 +23,7 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 COPY package.json package-lock.json ./
+COPY next.config.ts ./next.config.ts
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public

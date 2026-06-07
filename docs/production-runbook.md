@@ -205,7 +205,8 @@ congelare i deploy da `main`.
    gia' disponibile; altrimenti segnala il backup skipped;
 5. esegue `git pull --ff-only origin main`;
 6. ricostruisce Docker Compose;
-7. esegue health check su <https://padel.topflysolutions.com>.
+7. riavvia Caddy per ricaricare eventuali modifiche al proxy/header;
+8. esegue health check su <https://padel.topflysolutions.com>.
 
 ### Fallback Manuale
 
@@ -219,6 +220,7 @@ sudo docker compose -f docker-compose.production.yml exec -T postgres \
   pg_dump -U padel -d padel_topfly > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
 git pull --ff-only origin main
 sudo docker compose -f docker-compose.production.yml up -d --build
+sudo docker compose -f docker-compose.production.yml restart caddy
 sudo docker compose -f docker-compose.production.yml ps
 ```
 

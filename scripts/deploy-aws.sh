@@ -48,5 +48,6 @@ git checkout main
 git pull --ff-only origin main
 
 $DOCKER_COMPOSE -f docker-compose.production.yml up -d --build
+$DOCKER_COMPOSE -f docker-compose.production.yml restart caddy
 $DOCKER_COMPOSE -f docker-compose.production.yml ps
 REMOTE

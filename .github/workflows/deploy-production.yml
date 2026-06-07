@@ -122,6 +122,7 @@ jobs:
           git pull --ff-only origin main
 
           sudo docker compose -f docker-compose.production.yml up -d --build
+          sudo docker compose -f docker-compose.production.yml restart caddy
           sudo docker compose -f docker-compose.production.yml ps
           REMOTE
 
