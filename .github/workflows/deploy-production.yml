@@ -18,6 +18,8 @@ jobs:
     name: CI checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://padel:padel@localhost:5432/padel_topfly
 
     steps:
       - name: Checkout
