@@ -126,12 +126,34 @@ function normalizeRefererOrigin(value: string | null) {
   }
 }
 
+function isDevelopmentOrigin(origin: string) {
+  try {
+    const { hostname, protocol } = new URL(origin);
+
+    if (protocol !== "http:" && protocol !== "https:") return false;
+
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function assertTrustedOrigin(request: NextRequest) {
   const trustedOrigins = allowedOrigins(request);
   const origin = normalizeOrigin(request.headers.get("origin"));
 
   if (origin) {
     if (!trustedOrigins.has(origin)) {
+      if (!strictOriginMode() && isDevelopmentOrigin(origin)) {
+        return;
+      }
       throw new AppError("Origine richiesta non autorizzata.", 403);
     }
     return;
@@ -139,6 +161,10 @@ export function assertTrustedOrigin(request: NextRequest) {
 
   const refererOrigin = normalizeRefererOrigin(request.headers.get("referer"));
   if (refererOrigin && trustedOrigins.has(refererOrigin)) {
+    return;
+  }
+
+  if (refererOrigin && !strictOriginMode() && isDevelopmentOrigin(refererOrigin)) {
     return;
   }
 
