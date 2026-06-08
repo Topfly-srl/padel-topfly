@@ -67,7 +67,7 @@ function allowedOrigins(request: NextRequest) {
     origins.push(request.nextUrl.origin);
   }
 
-  if (process.env.NODE_ENV !== "production") {
+  if (!appConfig.isProduction) {
     origins.push(...localDevelopmentOrigins(request));
   }
 
@@ -79,7 +79,7 @@ function allowedOrigins(request: NextRequest) {
 }
 
 function strictOriginMode() {
-  return appConfig.isProduction && process.env.NODE_ENV === "production";
+  return appConfig.isProduction;
 }
 
 function localDevelopmentOrigins(request: NextRequest) {
