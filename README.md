@@ -76,7 +76,26 @@ npm run lint
 npm test
 npm run build
 npm audit --omit=dev
-npx prisma validate
+DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
+```
+
+### Pulizia Locale
+
+La cartella locale puo' pesare oltre 1 GB anche se il sito e' piccolo: quasi tutto lo
+spazio e' occupato da `node_modules` e `.next`, che non finiscono in GitHub ne' nel build
+context Docker.
+
+Per pulire build/cache locali senza toccare le dipendenze:
+
+```bash
+npm run clean
+```
+
+Per liberare piu' spazio rimuovendo anche `node_modules`:
+
+```bash
+npm run clean:full
+npm ci
 ```
 
 ## Produzione AWS
@@ -94,10 +113,11 @@ Deploy consigliato:
 - autodeploy attivo con repository variable `PRODUCTION_AUTO_DEPLOY=true` e secrets SSH
   Lightsail configurati.
 
-Il workflow esegue prima CI (`lint`, test, build, Prisma validate e audit npm), crea un
-backup Postgres fuori dal repo in `/var/backups/padel-topfly` quando Postgres e' gia'
-attivo, aggiorna `/opt/padel-topfly`, ricostruisce Docker Compose ed esegue un health
-check su <https://padel.topflysolutions.com>.
+Il workflow esegue prima CI (`lint`, test, build, Prisma validate e audit npm), forza le
+JavaScript Actions sul runtime Node 24, crea un backup Postgres fuori dal repo in
+`/var/backups/padel-topfly` quando Postgres e' gia' attivo, aggiorna `/opt/padel-topfly`,
+ricostruisce Docker Compose ed esegue health check su <https://padel.topflysolutions.com>
+e su un'API pubblica con `Cache-Control: no-store`.
 
 La produzione usa hardening Docker per il container `app`: utente non-root,
 `no-new-privileges` e capabilities Linux rimosse.
@@ -111,7 +131,8 @@ cd /opt/padel-topfly
 BACKUP_DIR=/var/backups/padel-topfly
 sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "$BACKUP_DIR"
 sudo docker compose -f docker-compose.production.yml exec -T postgres \
-  pg_dump -U padel -d padel_topfly > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+  pg_dump -U padel -d padel_topfly \
+  > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql" < /dev/null
 git pull --ff-only origin main
 sudo docker compose -f docker-compose.production.yml up -d --build
 sudo docker compose -f docker-compose.production.yml ps
@@ -222,14 +243,19 @@ Permessi Microsoft Graph sull'app registration:
 
 - `Calendars.ReadWrite` Application, con consenso amministratore.
 
-`Mail.Send` non e' richiesto dalla V1: la conferma e la cancellazione passano dagli
-inviti/eventi Outlook, evitando una seconda email separata quando l'utente cancella.
-Se il permesso `Mail.Send` e' ancora presente in Entra, puo' essere rimosso dopo smoke
-test positivo.
+`Mail.Send` non e' richiesto dalla V1 e deve restare assente: la conferma e la
+cancellazione passano dagli inviti/eventi Outlook, evitando una seconda email separata
+quando l'utente cancella.
 
 Per ridurre il blast radius del permesso Application, limitare `Calendars.ReadWrite` alla
 sola mailbox `padel@topflysolutions.com` tramite Exchange Application Access Policy o
 RBAC for Applications.
+
+Stato operativo da verificare manualmente in Microsoft 365:
+
+- `Calendars.ReadWrite` Application con admin consent;
+- `Mail.Send` assente;
+- policy Exchange/RBAC limitata alla mailbox `padel@topflysolutions.com`.
 
 Funzioni attese:
 

@@ -380,9 +380,8 @@ Permessi Graph sull'app registration:
 - `Calendars.ReadWrite` Application;
 - consenso amministratore concesso.
 
-`Mail.Send` non e' richiesto dalla V1: conferme, modifiche e cancellazioni usano gli
-inviti/eventi Outlook, senza una seconda email custom separata.
-Se `Mail.Send` e' ancora presente in Entra, rimuoverlo dopo smoke test positivo.
+`Mail.Send` non e' richiesto dalla V1 e deve restare assente: conferme, modifiche e
+cancellazioni usano gli inviti/eventi Outlook, senza una seconda email custom separata.
 
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
 La cancellazione aggiorna l'evento e poi cancella l'evento Outlook.
@@ -391,7 +390,7 @@ il commento testuale, che deve restare breve e chiaro.
 
 Hardening Microsoft 365 raccomandato:
 
-- rimuovere `Mail.Send`, se ancora presente;
+- verificare che `Mail.Send` sia assente;
 - limitare `Calendars.ReadWrite` Application alla sola mailbox `padel@topflysolutions.com`
   con Exchange Application Access Policy o RBAC for Applications;
 - verificare che la mailbox sia tecnica/condivisa e non usata come account personale.

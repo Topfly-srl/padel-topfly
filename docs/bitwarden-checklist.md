@@ -85,7 +85,7 @@ Da salvare:
 - client secret;
 - data scadenza secret;
 - permessi Graph attesi: `Calendars.ReadWrite` Application con admin consent;
-- nota: `Mail.Send` non e' richiesto dalla V1 e puo' essere rimosso se ancora presente.
+- nota: `Mail.Send` non e' richiesto dalla V1 e deve restare assente;
 - nota sicurezza: accesso Graph da limitare alla sola mailbox `padel@topflysolutions.com`
   tramite Exchange Application Access Policy o RBAC for Applications;
 - stato della policy Exchange: configurata/non configurata, data verifica, chi l'ha
@@ -147,7 +147,7 @@ aziendali dedicati. Nella nota Padel basta indicare dove trovarle.
 Da aggiornare quando si chiude un finding del report
 [`docs/security-audit.md`](security-audit.md):
 
-- rimozione `Mail.Send`, se applicabile;
+- verifica `Mail.Send` assente;
 - Application Access Policy/RBAC Exchange per Graph;
 - eventuale rotazione deploy key GitHub Actions;
 - stato branch protection GitHub;

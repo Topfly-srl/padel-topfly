@@ -29,6 +29,7 @@ import {
   normalizePersonName,
 } from "@/lib/manage-token";
 import { prisma } from "@/lib/prisma";
+import { retryPrismaTransaction } from "@/lib/prisma-retry";
 import { assertDateParam, zonedDayBounds } from "@/lib/time";
 import type {
   AuditItem,
@@ -394,36 +395,38 @@ export async function createBooking(input: PublicBookingInput) {
   const manageTokenHash = hashManageToken(manageToken);
   const tokenExpiresAt = manageTokenExpiresAt(input.end);
 
-  const booking = await prisma.$transaction(
-    async (tx) => {
-      await validateNoConflicts(tx, {
-        start: input.start,
-        end: input.end,
-        organizerEmail: identity.organizerEmail,
-      });
-
-      const created = await tx.booking.create({
-        data: {
+  const booking = await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await validateNoConflicts(tx, {
           start: input.start,
           end: input.end,
-          organizerName: identity.organizerName,
           organizerEmail: identity.organizerEmail,
-          manageTokenHash,
-          manageTokenExpiresAt: tokenExpiresAt,
-          outlookSyncStatus: "PENDING",
-        },
-      });
+        });
 
-      await audit(tx, { email: identity.organizerEmail }, {
-        action: "BOOKING_CREATED",
-        entityType: "Booking",
-        entityId: created.id,
-        after: created,
-      });
+        const created = await tx.booking.create({
+          data: {
+            start: input.start,
+            end: input.end,
+            organizerName: identity.organizerName,
+            organizerEmail: identity.organizerEmail,
+            manageTokenHash,
+            manageTokenExpiresAt: tokenExpiresAt,
+            outlookSyncStatus: "PENDING",
+          },
+        });
 
-      return created;
-    },
-    { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+        await audit(tx, { email: identity.organizerEmail }, {
+          action: "BOOKING_CREATED",
+          entityType: "Booking",
+          entityId: created.id,
+          after: created,
+        });
+
+        return created;
+      },
+      { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+    ),
   );
 
   const synced = await syncBooking(booking, "create", manageToken, input.baseUrl);
@@ -456,39 +459,41 @@ export async function updateBooking(
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
 
-  const updated = await prisma.$transaction(
-    async (tx) => {
-      if (nextStatus === "CONFIRMED") {
-        await validateNoConflicts(tx, {
-          start: nextStart,
-          end: nextEnd,
-          organizerEmail: booking.organizerEmail,
-          ignoreBookingId: booking.id,
+  const updated = await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        if (nextStatus === "CONFIRMED") {
+          await validateNoConflicts(tx, {
+            start: nextStart,
+            end: nextEnd,
+            organizerEmail: booking.organizerEmail,
+            ignoreBookingId: booking.id,
+          });
+        }
+
+        const saved = await tx.booking.update({
+          where: { id: booking.id },
+          data: {
+            start: nextStart,
+            end: nextEnd,
+            status: nextStatus,
+            manageTokenExpiresAt: manageTokenExpiresAt(nextEnd),
+            outlookSyncStatus: nextStatus === "CONFIRMED" ? "PENDING" : booking.outlookSyncStatus,
+          },
         });
-      }
 
-      const saved = await tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          start: nextStart,
-          end: nextEnd,
-          status: nextStatus,
-          manageTokenExpiresAt: manageTokenExpiresAt(nextEnd),
-          outlookSyncStatus: nextStatus === "CONFIRMED" ? "PENDING" : booking.outlookSyncStatus,
-        },
-      });
+        await audit(tx, actor, {
+          action: nextStatus === "CONFIRMED" ? "BOOKING_UPDATED" : "BOOKING_STATUS_CHANGED",
+          entityType: "Booking",
+          entityId: booking.id,
+          before: booking,
+          after: saved,
+        });
 
-      await audit(tx, actor, {
-        action: nextStatus === "CONFIRMED" ? "BOOKING_UPDATED" : "BOOKING_STATUS_CHANGED",
-        entityType: "Booking",
-        entityId: booking.id,
-        before: booking,
-        after: saved,
-      });
-
-      return saved;
-    },
-    { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+        return saved;
+      },
+      { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+    ),
   );
 
   const synced =
@@ -561,43 +566,45 @@ export async function createAdminBlock(
     throw new AppError("Inserisci un motivo per il blocco.", 422);
   }
 
-  const block = await prisma.$transaction(
-    async (tx) => {
-      const overlappingBookings = await tx.booking.findMany({
-        where: {
-          status: "CONFIRMED",
-          start: { lt: input.end },
-          end: { gt: input.start },
-        },
-        select: { id: true },
-      });
+  const block = await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const overlappingBookings = await tx.booking.findMany({
+          where: {
+            status: "CONFIRMED",
+            start: { lt: input.end },
+            end: { gt: input.start },
+          },
+          select: { id: true },
+        });
 
-      if (overlappingBookings.length > 0) {
-        throw new AppError(
-          "Ci sono prenotazioni confermate in questa fascia. Cancellale o spostale prima.",
-          422,
-        );
-      }
+        if (overlappingBookings.length > 0) {
+          throw new AppError(
+            "Ci sono prenotazioni confermate in questa fascia. Cancellale o spostale prima.",
+            422,
+          );
+        }
 
-      const saved = await tx.adminBlock.create({
-        data: {
-          start: input.start,
-          end: input.end,
-          reason: input.reason.trim(),
-          createdById: currentUser.id,
-        },
-      });
+        const saved = await tx.adminBlock.create({
+          data: {
+            start: input.start,
+            end: input.end,
+            reason: input.reason.trim(),
+            createdById: currentUser.id,
+          },
+        });
 
-      await audit(tx, currentUser, {
-        action: "ADMIN_BLOCK_CREATED",
-        entityType: "AdminBlock",
-        entityId: saved.id,
-        after: saved,
-      });
+        await audit(tx, currentUser, {
+          action: "ADMIN_BLOCK_CREATED",
+          entityType: "AdminBlock",
+          entityId: saved.id,
+          after: saved,
+        });
 
-      return saved;
-    },
-    { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+        return saved;
+      },
+      { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+    ),
   );
 
   return serializeBlock(block);

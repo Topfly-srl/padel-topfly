@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { appConfig, isAdminEmail, isAllowedCompanyEmail } from "@/lib/config";
+import { AppError } from "@/lib/errors";
 import { getOrCreateDevUser, toCurrentUser, upsertUserProfile } from "@/lib/users";
 import type { CurrentUser } from "@/lib/types";
 
@@ -49,10 +50,7 @@ export async function requireApiUser() {
   const user = await getCurrentUser();
 
   if (!user) {
-    throw new Response(JSON.stringify({ error: "Accesso richiesto." }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+    throw new AppError("Accesso richiesto.", 401);
   }
 
   return user;
@@ -60,9 +58,6 @@ export async function requireApiUser() {
 
 export function assertAdmin(user: CurrentUser) {
   if (user.role !== "ADMIN") {
-    throw new Response(JSON.stringify({ error: "Serve un account admin." }), {
-      status: 403,
-      headers: { "Content-Type": "application/json" },
-    });
+    throw new AppError("Serve un account admin.", 403);
   }
 }

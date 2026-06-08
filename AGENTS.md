@@ -45,7 +45,7 @@ npm run lint
 npm test
 npm run build
 npm audit --omit=dev
-npx prisma validate
+DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
 ```
 
 Per modifiche piccole e mirate, esegui almeno:
@@ -59,7 +59,7 @@ Per modifiche a Prisma/DB/Graph/API, esegui anche:
 
 ```bash
 npm run build
-npx prisma validate
+DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
 ```
 
 Per modifiche UI, verifica anche browser mobile/desktop quando possibile.

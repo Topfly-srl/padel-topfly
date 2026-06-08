@@ -100,6 +100,14 @@ function localDay(date: Date) {
   }).format(date);
 }
 
+function localSummaryDay(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  }).format(date);
+}
+
 function humanDay(date: Date) {
   const today = dateKey(new Date());
   const tomorrow = dateKey(addMinutes(new Date(), 24 * 60));
@@ -657,12 +665,6 @@ export function BookingApp({
               <div className="control-heading timeline-heading">
                 <span>Orario di inizio</span>
               </div>
-              <div className="selected-range-note" aria-live="polite">
-                <span>Selezione</span>
-                <strong>
-                  {localTime(start)} - {localTime(end)}
-                </strong>
-              </div>
             </div>
 
             <div className="timeline" role="group" aria-label="Disponibilita del giorno" ref={timelineRef}>
@@ -713,7 +715,7 @@ export function BookingApp({
                   <div>
                     <h2>Prenotazione confermata</h2>
                     <p>
-                      {localDay(start)} · {localTime(start)} - {localTime(end)}
+                      {localSummaryDay(start)} · {localTime(start)} - {localTime(end)}
                     </p>
                     {selectedOwnSyncText ? (
                       <small className={selectedOwnSyncFailed ? "sync-warning-text" : undefined}>
@@ -744,13 +746,13 @@ export function BookingApp({
                 <div className="summary-top">
                   <div>
                     <p className="muted-label">Riepilogo</p>
-                    <h2>{selectionConflict ? "Slot non disponibile" : localDay(start)}</h2>
+                    <h2>{selectionConflict ? "Slot non disponibile" : localSummaryDay(start)}</h2>
                   </div>
                   {selectionConflict ? null : <span className="summary-duration">{durationLabel(duration)}</span>}
                 </div>
                 <p className="summary-time">
                   {selectionConflict
-                    ? `${localDay(start)} · ${localTime(start)} - ${localTime(end)}`
+                    ? `${localSummaryDay(start)} · ${localTime(start)} - ${localTime(end)}`
                     : `${localTime(start)} - ${localTime(end)}`}
                 </p>
 

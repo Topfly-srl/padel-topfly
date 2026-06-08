@@ -1,4 +1,26 @@
 import type { NextConfig } from "next";
+import { networkInterfaces } from "node:os";
+
+function localDevOrigins() {
+  const origins = new Set<string>();
+
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) {
+        origins.add(address.address);
+      }
+    }
+  }
+
+  for (const origin of process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(",") ?? []) {
+    const value = origin.trim();
+    if (value) {
+      origins.add(value);
+    }
+  }
+
+  return Array.from(origins);
+}
 
 const securityHeaders = [
   {
@@ -25,8 +47,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: localDevOrigins(),
   poweredByHeader: false,
   async headers() {
+    if (process.env.NODE_ENV !== "production") {
+      return [];
+    }
+
     return [
       {
         source: "/:path*",

@@ -29,7 +29,17 @@ export function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 export function routeError(error: unknown) {
   if (error instanceof Response) {
-    return error;
+    const headers = new Headers(error.headers);
+
+    for (const [key, value] of Object.entries(noStoreHeaders)) {
+      headers.set(key, value);
+    }
+
+    return new Response(error.body, {
+      status: error.status,
+      statusText: error.statusText,
+      headers,
+    });
   }
 
   if (error instanceof AppError) {

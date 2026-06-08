@@ -33,7 +33,8 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-app), system-ui, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   letter-spacing: 0;
 }
 
@@ -309,26 +310,7 @@ summary:focus-visible {
 }
 
 .timeline-heading {
-  margin-bottom: -2px;
-}
-
-.selected-range-note {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fafbfc;
-  padding: 8px 10px;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.selected-range-note strong {
-  color: var(--foreground);
-  font-weight: 450;
-  white-space: nowrap;
+  margin-bottom: 0;
 }
 
 .duration-row {

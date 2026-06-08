@@ -74,7 +74,7 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 
 - Backup automatici non ancora configurati.
 - Monitoraggio/alerting non ancora configurato.
-- Rimozione del permesso Graph `Mail.Send` da Entra, se ancora presente dopo gli ultimi smoke test.
+- Verifica che il permesso Graph `Mail.Send` sia assente da Entra.
 - Limitazione del permesso Graph Application alla sola mailbox Padel tramite Exchange
   Application Access Policy/RBAC, da verificare manualmente.
 - Branch protection su `main` da valutare/abilitare.
@@ -197,8 +197,8 @@ congelare i deploy da `main`.
 
 ### Cosa Fa Il Workflow
 
-1. esegue CI (`npm run lint`, `npm test`, `npm run build`, `npx prisma validate`,
-   `npm audit --omit=dev`);
+1. esegue CI (`npm run lint`, `npm test`, `npm run build`, `npx prisma validate`
+   con `DATABASE_URL` fittizio di CI, `npm audit --omit=dev`);
 2. valida che i secrets SSH siano presenti;
 3. entra su Lightsail via SSH;
 4. crea un dump Postgres in `/var/backups/padel-topfly` se il container Postgres e'
@@ -206,7 +206,11 @@ congelare i deploy da `main`.
 5. esegue `git pull --ff-only origin main`;
 6. ricostruisce Docker Compose;
 7. riavvia Caddy per ricaricare eventuali modifiche al proxy/header;
-8. esegue health check su <https://padel.topflysolutions.com>.
+8. esegue health check su <https://padel.topflysolutions.com> e su
+   `/api/availability`, verificando anche `Cache-Control: no-store`.
+
+Il workflow imposta `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` per anticipare la
+migrazione GitHub Actions da Node 20 a Node 24.
 
 ### Fallback Manuale
 
@@ -300,7 +304,7 @@ Costo atteso dopo eventuale periodo gratuito: circa il costo mensile del piano L
 1. Salvare/aggiornare tutti gli item indicati in `docs/bitwarden-checklist.md`.
 2. Fare smoke test completo con 2-3 colleghi.
 3. Verificare mail conferma e mail cancellazione Outlook dopo ogni patch Graph.
-4. Rimuovere `Mail.Send` da Entra se ancora presente.
+4. Verificare che `Mail.Send` sia assente da Entra.
 5. Limitare `Calendars.ReadWrite` alla mailbox `padel@topflysolutions.com`.
 6. Valutare snapshot manuale o backup database schedulato.
 7. Preparare messaggio interno con link e regole d'uso.
@@ -313,10 +317,9 @@ Permessi Graph richiesti:
 
 - `Calendars.ReadWrite` Application, consenso admin concesso.
 
-`Mail.Send` non e' richiesto dalla V1: l'app usa gli inviti/eventi Outlook per conferme,
-modifiche e cancellazioni, senza inviare una seconda email custom separata.
-Se `Mail.Send` e' ancora presente tra i permessi Entra, puo' essere rimosso dopo smoke
-test positivo di creazione, modifica e cancellazione prenotazione.
+`Mail.Send` non e' richiesto dalla V1 e deve restare assente: l'app usa gli
+inviti/eventi Outlook per conferme, modifiche e cancellazioni, senza inviare una seconda
+email custom separata.
 
 La mailbox usata dall'app e':
 
@@ -379,7 +382,8 @@ cd /opt/padel-topfly
 BACKUP_DIR=/var/backups/padel-topfly
 sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "$BACKUP_DIR"
 sudo docker compose -f docker-compose.production.yml exec -T postgres \
-  pg_dump -U padel -d padel_topfly > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql"
+  pg_dump -U padel -d padel_topfly \
+  > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql" < /dev/null
 ls -lh "$BACKUP_DIR" | tail
 ```
 

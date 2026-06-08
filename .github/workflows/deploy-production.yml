@@ -13,6 +13,9 @@ concurrency:
   group: production-deploy
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   ci:
     name: CI checks
@@ -167,3 +170,7 @@ jobs:
             echo "::error::Production still exposes X-Powered-By"
             exit 1
           fi
+
+          api_headers="$(curl --fail --silent --show-error --dump-header - --output /dev/null \
+            "https://padel.topflysolutions.com/api/availability?date=$(date -u +%F)")"
+          printf '%s\n' "${api_headers}" | grep -qi '^cache-control:.*no-store'

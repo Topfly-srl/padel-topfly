@@ -1,9 +1,11 @@
 import { createHash } from "crypto";
+import { networkInterfaces } from "os";
 import { Prisma as PrismaNamespace } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { appConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { retryPrismaTransaction } from "@/lib/prisma-retry";
 
 type RateLimitAction =
   | "booking:create"
@@ -61,8 +63,12 @@ function rateKey(request: NextRequest, action: RateLimitAction, scope?: string) 
 function allowedOrigins(request: NextRequest) {
   const origins = [appConfig.publicOrigin];
 
-  if (!appConfig.isProduction || !appConfig.publicOrigin) {
+  if (!strictOriginMode() || !appConfig.publicOrigin) {
     origins.push(request.nextUrl.origin);
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    origins.push(...localDevelopmentOrigins(request));
   }
 
   return new Set(
@@ -70,6 +76,36 @@ function allowedOrigins(request: NextRequest) {
       .filter((origin): origin is string => Boolean(origin))
       .map((origin) => new URL(origin).origin),
   );
+}
+
+function strictOriginMode() {
+  return appConfig.isProduction && process.env.NODE_ENV === "production";
+}
+
+function localDevelopmentOrigins(request: NextRequest) {
+  const protocol = request.nextUrl.protocol || "http:";
+  const port = request.nextUrl.port || "3000";
+  const origins = new Set([
+    `${protocol}//localhost:${port}`,
+    `${protocol}//127.0.0.1:${port}`,
+    `${protocol}//0.0.0.0:${port}`,
+  ]);
+
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) {
+        origins.add(`${protocol}//${address.address}:${port}`);
+      }
+    }
+  }
+
+  for (const origin of process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(",") ?? []) {
+    const value = origin.trim();
+    if (!value) continue;
+    origins.add(value.startsWith("http://") || value.startsWith("https://") ? value : `${protocol}//${value}`);
+  }
+
+  return Array.from(origins);
 }
 
 function normalizeOrigin(value: string | null) {
@@ -106,7 +142,7 @@ export function assertTrustedOrigin(request: NextRequest) {
     return;
   }
 
-  if (appConfig.isProduction) {
+  if (strictOriginMode()) {
     throw new AppError("Origine richiesta non autorizzata.", 403);
   }
 }
@@ -135,26 +171,28 @@ export async function assertRateLimit(request: NextRequest, action: RateLimitAct
 
   const nowDate = new Date(now);
 
-  await prisma.$transaction(
-    async (tx) => {
-      await tx.rateLimitBucket.deleteMany({
-        where: {
-          key,
-          resetAt: { lte: nowDate },
-        },
-      });
+  await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await tx.rateLimitBucket.deleteMany({
+          where: {
+            key,
+            resetAt: { lte: nowDate },
+          },
+        });
 
-      const bucket = await tx.rateLimitBucket.upsert({
-        where: { key },
-        create: { key, count: 1, resetAt },
-        update: { count: { increment: 1 } },
-      });
+        const bucket = await tx.rateLimitBucket.upsert({
+          where: { key },
+          create: { key, count: 1, resetAt },
+          update: { count: { increment: 1 } },
+        });
 
-      if (bucket.count > policy.max) {
-        throw new AppError("Troppe richieste ravvicinate. Riprova tra poco.", 429);
-      }
-    },
-    { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+        if (bucket.count > policy.max) {
+          throw new AppError("Troppe richieste ravvicinate. Riprova tra poco.", 429);
+        }
+      },
+      { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+    ),
   );
 
   if (Math.random() < 0.01) {

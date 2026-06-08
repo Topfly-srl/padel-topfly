@@ -10,6 +10,7 @@ function makeRequest(headers: Record<string, string> = {}) {
 
 async function loadGuard(env: "development" | "production") {
   vi.resetModules();
+  vi.stubEnv("NODE_ENV", env === "production" ? "production" : "development");
   vi.stubEnv("APP_ENV", env);
   vi.stubEnv("APP_PUBLIC_ORIGIN", "https://padel.topflysolutions.com");
   vi.stubEnv("DATABASE_URL", env === "production" ? "postgres://user:pass@localhost:5432/db" : "");
@@ -59,6 +60,19 @@ describe("request guard", () => {
     expect(() =>
       assertTrustedOrigin(
         makeRequest({ referer: "https://padel.topflysolutions.com/manage/booking-id" }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("accetta origin LAN in sviluppo locale", async () => {
+    const { assertTrustedOrigin } = await loadGuard("development");
+
+    expect(() =>
+      assertTrustedOrigin(
+        new NextRequest("http://localhost:3000/api/bookings", {
+          method: "POST",
+          headers: { origin: "http://192.168.1.11:3000" },
+        }),
       ),
     ).not.toThrow();
   });

@@ -2,7 +2,7 @@
 
 Audit applicativo e operativo per <https://padel.topflysolutions.com>.
 
-Data ultimo aggiornamento: 2026-06-07.
+Data ultimo aggiornamento: 2026-06-08.
 
 ## Executive Summary
 
@@ -56,6 +56,7 @@ Non incluso:
 | SEC-13 | Media | Fix applicato | Race blocchi admin/prenotazioni |
 | SEC-14 | Media | Fix applicato | Fail-fast env produzione |
 | SEC-15 | Media | Fix applicato | Limite dimensione richieste HTTP |
+| SEC-16 | Bassa | Fix applicato | Runtime Node GitHub Actions |
 
 ## Findings
 
@@ -249,7 +250,7 @@ Impact:
 
 Fix raccomandato:
 
-- rimuovere `Mail.Send`, se presente;
+- verificare che `Mail.Send` sia assente;
 - mantenere solo `Calendars.ReadWrite` Application;
 - configurare Exchange Application Access Policy o RBAC for Applications per limitare
   l'app alla mailbox `padel@topflysolutions.com`;
@@ -460,6 +461,29 @@ Fix:
 - Caddy limita il body richiesta a `256KB`, sufficiente per form prenotazioni, lookup token
   e azioni admin attuali.
 
+### SEC-16 - Warning runtime Node 20 nelle GitHub Actions
+
+Severity: Bassa.
+
+Location:
+
+- `.github/workflows/deploy-production.yml`.
+
+Evidence:
+
+- GitHub sta migrando le JavaScript Actions da Node 20 a Node 24;
+- il workflow usa ancora `actions/checkout@v4` e `actions/setup-node@v4`, ma il warning
+  puo' comparire sul runtime dell'action, non sul Node usato dall'app.
+
+Impact:
+
+- possibile rumore nei log CI o incompatibilita' futura se il runtime GitHub cambia.
+
+Fix:
+
+- aggiunto `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` a livello workflow;
+- il job CI continua a usare Node 22 per build/test applicativi.
+
 ## Verifiche Automatiche Aggiunte
 
 - origin trusted accettato in produzione;
@@ -469,19 +493,21 @@ Fix:
 - `X-Real-IP` preferito per rate limit;
 - rate limit email globale su creazione prenotazione;
 - fail-fast env produzione;
+- retry conflitti serializzabili Prisma `P2034`;
 - retry cancellazione Outlook fallita;
 - audit sanitizer non salva token/hash o dettagli Graph;
-- risposte JSON API con `Cache-Control: no-store`.
+- risposte JSON API con `Cache-Control: no-store`;
+- health check produzione anche su API con header no-store.
 
 ## Checklist Pre-Link Aziendale
 
 ### Codice
 
-- [ ] `npm run lint`
-- [ ] `npm test`
-- [ ] `npm run build`
-- [ ] `npm audit --omit=dev`
-- [ ] `npx prisma validate`
+- [x] `npm run lint` - verificato localmente il 2026-06-08;
+- [x] `npm test` - verificato localmente il 2026-06-08;
+- [x] `npm run build` - verificato localmente il 2026-06-08;
+- [x] `npm audit --omit=dev` - verificato localmente il 2026-06-08;
+- [x] `DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate` - verificato localmente il 2026-06-08.
 
 ### Produzione
 
@@ -496,7 +522,7 @@ Fix:
 
 ### Microsoft 365
 
-- [ ] `Mail.Send` assente, se non piu' necessario;
+- [ ] `Mail.Send` assente;
 - [ ] `Calendars.ReadWrite` Application con admin consent;
 - [ ] Application Access Policy/RBAC limita accesso alla mailbox Padel;
 - [ ] mailbox `padel@topflysolutions.com` confermata come tecnica/condivisa.
