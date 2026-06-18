@@ -400,8 +400,8 @@ describe("Microsoft Graph sync", () => {
       createOutlookEvent(
         booking,
         { email: booking.organizerEmail, name: booking.organizerName },
-        "https://padel-test.topflysolutions.com/manage/booking_test?token=abc&test=1",
-        "https://padel-test.topflysolutions.com/waiver/booking_test?token=guest&test=1",
+        "https://padel.topflysolutions.com/test/manage/booking_test?token=abc&test=1",
+        "https://padel.topflysolutions.com/test/waiver/booking_test?token=guest&test=1",
       ),
     ).resolves.toMatchObject({ status: "SYNCED" });
 

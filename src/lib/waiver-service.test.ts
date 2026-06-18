@@ -154,8 +154,8 @@ describe("waiver service", () => {
 
     const { buildGuestWaiverUrl } = await import("@/lib/waiver-service");
 
-    expect(buildGuestWaiverUrl("https://padel-test.example.com", "booking_1", "abc")).toBe(
-      "https://padel-test.example.com/waiver/booking_1?token=abc&test=1",
+    expect(buildGuestWaiverUrl("https://padel.topflysolutions.com/test", "booking_1", "abc")).toBe(
+      "https://padel.topflysolutions.com/test/waiver/booking_1?token=abc&test=1",
     );
   });
 });
