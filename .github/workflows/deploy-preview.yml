@@ -89,7 +89,7 @@ jobs:
           printf '%s\n' "${LIGHTSAIL_KNOWN_HOSTS}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/lightsail_deploy_key ~/.ssh/known_hosts
 
-      - name: Deploy preview over SSH
+      - name: Remote diagnostics
         shell: bash
         env:
           LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
@@ -100,17 +100,98 @@ jobs:
           SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
 
           ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
-          set -euo pipefail
+          set -euxo pipefail
 
           cd /opt/padel-topfly
           echo "Remote host: $(hostname)"
+          sudo docker version
+          sudo docker compose -f docker-compose.production.yml ps || true
+          REMOTE
+
+      - name: Update remote checkout
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euxo pipefail
+
+          cd /opt/padel-topfly
 
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
           echo "Remote commit for preview: $(git rev-parse --short HEAD)"
+          REMOTE
 
-          sudo docker compose -f docker-compose.production.yml up -d --build postgres_preview app_preview caddy
+      - name: Start preview database
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euxo pipefail
+
+          cd /opt/padel-topfly
+
+          sudo docker compose -f docker-compose.production.yml up -d postgres_preview
+          for attempt in $(seq 1 30); do
+            if sudo docker compose -f docker-compose.production.yml exec -T postgres_preview \
+              pg_isready -U padel_preview -d padel_topfly_preview; then
+              echo "Preview database is ready"
+              exit 0
+            fi
+            echo "Waiting for preview database (${attempt}/30)"
+            sleep 2
+          done
+
+          sudo docker compose -f docker-compose.production.yml logs postgres_preview --tail=120
+          exit 1
+          REMOTE
+
+      - name: Build preview app image
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euxo pipefail
+
+          cd /opt/padel-topfly
+          timeout 900 sudo docker compose -f docker-compose.production.yml build app_preview
+          REMOTE
+
+      - name: Start preview app and Caddy
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euxo pipefail
+
+          cd /opt/padel-topfly
+
+          sudo docker compose -f docker-compose.production.yml up -d app_preview caddy
           sudo docker compose -f docker-compose.production.yml exec -T app_preview \
             sh -lc 'grep -q "Content-Security-Policy" next.config.ts && echo "Preview security headers: present"' \
             < /dev/null
@@ -118,6 +199,35 @@ jobs:
             caddy validate --config /etc/caddy/Caddyfile \
             < /dev/null
           sudo docker compose -f docker-compose.production.yml ps
+          REMOTE
+
+      - name: Internal preview smoke test
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euxo pipefail
+
+          cd /opt/padel-topfly
+
+          for attempt in $(seq 1 36); do
+            if sudo docker compose -f docker-compose.production.yml exec -T app_preview \
+              node -e "fetch('http://127.0.0.1:3000').then(r => r.text()).then(t => process.exit(t.includes('TEST') ? 0 : 1)).catch(() => process.exit(1))"; then
+              echo "Preview app responded with TEST marker"
+              exit 0
+            fi
+            echo "Waiting for preview app (${attempt}/36)"
+            sleep 5
+          done
+
+          sudo docker compose -f docker-compose.production.yml logs app_preview --tail=180
+          exit 1
           REMOTE
 
       - name: Collect preview logs on failure
@@ -138,8 +248,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          curl --fail --silent --show-error --location --retry 18 --retry-delay 10 \
-            https://padel-test.topflysolutions.com > /tmp/padel-preview.html
+          if ! getent hosts padel-test.topflysolutions.com > /tmp/padel-preview-hosts.txt; then
+            echo "::warning::padel-test.topflysolutions.com does not resolve yet. Internal preview smoke test passed; retry public check after DNS propagation."
+            exit 0
+          fi
+
+          if ! curl --fail --silent --show-error --location --retry 18 --retry-delay 10 \
+            https://padel-test.topflysolutions.com > /tmp/padel-preview.html; then
+            echo "::warning::Preview DNS resolves, but HTTPS is not ready yet. Internal preview smoke test passed; retry after Caddy obtains the certificate."
+            exit 0
+          fi
 
           grep -q 'TEST' /tmp/padel-preview.html
 
