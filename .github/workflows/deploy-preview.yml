@@ -198,6 +198,9 @@ jobs:
           sudo docker compose -f docker-compose.production.yml exec -T caddy \
             caddy validate --config /etc/caddy/Caddyfile \
             < /dev/null
+          sudo docker compose -f docker-compose.production.yml exec -T caddy \
+            caddy reload --config /etc/caddy/Caddyfile \
+            < /dev/null
           sudo docker compose -f docker-compose.production.yml ps
           REMOTE
 
