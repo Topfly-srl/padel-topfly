@@ -6,7 +6,10 @@ import { listAdminWaiverSignatures } from "@/lib/waiver-service";
 
 const querySchema = z.object({
   status: z.enum(["PENDING", "SENT", "FAILED", "SKIPPED"]).optional(),
-  limit: z.coerce.number().int().min(10).max(200).default(50),
+  role: z.enum(["ORGANIZER", "GUEST"]).optional(),
+  query: z.string().trim().max(80).optional(),
+  cursor: z.string().trim().max(300).optional(),
+  limit: z.coerce.number().int().min(10).max(100).default(50),
 });
 
 export async function GET(request: NextRequest) {
@@ -15,11 +18,14 @@ export async function GET(request: NextRequest) {
     assertAdmin(user);
     const query = querySchema.parse({
       status: request.nextUrl.searchParams.get("status") ?? undefined,
+      role: request.nextUrl.searchParams.get("role") ?? undefined,
+      query: request.nextUrl.searchParams.get("query") ?? undefined,
+      cursor: request.nextUrl.searchParams.get("cursor") ?? undefined,
       limit: request.nextUrl.searchParams.get("limit") ?? undefined,
     });
-    const waivers = await listAdminWaiverSignatures(query);
+    const list = await listAdminWaiverSignatures(query);
 
-    return jsonResponse({ waivers });
+    return jsonResponse({ waivers: list.items, nextCursor: list.nextCursor });
   } catch (error) {
     return routeError(error);
   }

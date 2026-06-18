@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isEmailAtDomain, normalizeAllowedDomain } from "@/lib/email";
 
 const optionalUrl = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
@@ -63,7 +64,7 @@ if (isProductionDeployment) {
 }
 
 export const appConfig = {
-  allowedDomain: env.APP_ALLOWED_DOMAIN.trim().toLowerCase(),
+  allowedDomain: normalizeAllowedDomain(env.APP_ALLOWED_DOMAIN),
   adminEmails: new Set(
     env.APP_ADMIN_EMAILS.split(",")
       .map((email) => email.trim().toLowerCase())
@@ -99,7 +100,7 @@ export const appConfig = {
 };
 
 export function isAllowedCompanyEmail(email: string) {
-  return email.toLowerCase().endsWith(`@${appConfig.allowedDomain}`);
+  return isEmailAtDomain(email, appConfig.allowedDomain);
 }
 
 export function isAdminEmail(email: string) {

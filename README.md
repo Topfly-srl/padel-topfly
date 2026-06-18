@@ -23,6 +23,11 @@ hanno oggetto con prefisso `[TEST]`, il corpo email contiene un avviso `AMBIENTE
 e i link di gestione/firma ospiti includono `test=1`. Sul preview pubblico i PDF dello
 scarico vengono inviati a `antony.buffone@gmail.com`, cosi' Cecilia non riceve test.
 
+| Ambiente | URL | Badge | Database | Destinatario PDF scarico |
+| --- | --- | --- | --- | --- |
+| Preview test | `https://padel.topflysolutions.com/test` | `TEST` | `postgres_preview` | `antony.buffone@gmail.com` |
+| Produzione | `https://padel.topflysolutions.com` | nessuno | `postgres` | `cecilia.faieta@topflysolutions.com` |
+
 ## Stato Produzione
 
 - Hosting: AWS Lightsail, istanza `padel-topfly`, regione Frankfurt `eu-central-1`.
@@ -44,7 +49,9 @@ scarico vengono inviati a `antony.buffone@gmail.com`, cosi' Cecilia non riceve t
 - Form obbligatorio con nome/cognome ed email.
 - Scarico responsabilita' digitale obbligatorio per il referente al momento della prenotazione.
 - Link firma ospiti separato, mostrato dopo la prenotazione e copiabile anche manualmente.
-- PDF firmato archiviato in Postgres e inviato a `cecilia.faieta@topflysolutions.com`.
+- Firma col dito acquisita come firma elettronica semplice, con hash e audit tecnico.
+- PDF firmato archiviato in Postgres e inviato al destinatario configurato in
+  `APP_WAIVER_RECIPIENT_EMAIL`.
 - Email non aziendali ammesse, con warning non bloccante lato UI.
 - Nome del prenotante visibile sugli slot occupati, email mai esposta pubblicamente.
 - Link/token di gestione salvato localmente e incluso negli inviti Outlook.
@@ -259,6 +266,7 @@ MS_GRAPH_TENANT_ID=...
 MS_GRAPH_CLIENT_ID=...
 MS_GRAPH_CLIENT_SECRET=...
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
+APP_WAIVER_RECIPIENT_EMAIL=cecilia.faieta@topflysolutions.com
 ```
 
 Permessi Microsoft Graph sull'app registration:
@@ -289,7 +297,13 @@ Funzioni attese:
 - includere link firma ospiti nel corpo evento quando disponibile;
 - aggiornare evento quando cambia la prenotazione;
 - cancellare evento Outlook quando la prenotazione viene annullata;
-- inviare a Cecilia il PDF dello scarico responsabilita' firmato.
+- inviare il PDF dello scarico responsabilita' firmato al destinatario configurato.
+
+Privacy e conservazione:
+
+- il database conserva PDF firmati, immagine firma, dati anagrafici, email e hash tecnici;
+- la policy di conservazione definitiva va confermata da TOPFLY prima del go-live pieno;
+- fino a decisione formale, evitare export non necessari e usare `/test` solo per dati di prova.
 
 Verifica rapida da server:
 

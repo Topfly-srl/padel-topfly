@@ -1,12 +1,50 @@
 import { createHash } from "crypto";
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
+import { PNG } from "pngjs";
 import { generateWaiverPdf } from "@/lib/waiver-pdf";
 
-const signatureImageBytes = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-  "base64",
-);
+function drawDot(png: PNG, x: number, y: number, size = 2) {
+  for (let yy = Math.max(0, y - size); yy <= Math.min(png.height - 1, y + size); yy += 1) {
+    for (let xx = Math.max(0, x - size); xx <= Math.min(png.width - 1, x + size); xx += 1) {
+      const index = (png.width * yy + xx) << 2;
+      png.data[index] = 17;
+      png.data[index + 1] = 24;
+      png.data[index + 2] = 39;
+      png.data[index + 3] = 255;
+    }
+  }
+}
+
+function drawSegment(png: PNG, from: [number, number], to: [number, number]) {
+  const steps = Math.max(Math.abs(to[0] - from[0]), Math.abs(to[1] - from[1]));
+  for (let step = 0; step <= steps; step += 1) {
+    const progress = step / steps;
+    drawDot(
+      png,
+      Math.round(from[0] + (to[0] - from[0]) * progress),
+      Math.round(from[1] + (to[1] - from[1]) * progress),
+      2,
+    );
+  }
+}
+
+function signaturePngBytes() {
+  const png = new PNG({ width: 260, height: 100 });
+  for (let index = 0; index < png.data.length; index += 4) {
+    png.data[index] = 255;
+    png.data[index + 1] = 255;
+    png.data[index + 2] = 255;
+    png.data[index + 3] = 255;
+  }
+  drawSegment(png, [28, 62], [72, 38]);
+  drawSegment(png, [72, 38], [118, 68]);
+  drawSegment(png, [118, 68], [170, 34]);
+  drawSegment(png, [170, 34], [220, 58]);
+  return PNG.sync.write(png);
+}
+
+const signatureImageBytes = signaturePngBytes();
 
 const booking = {
   id: "booking_pdf_1",

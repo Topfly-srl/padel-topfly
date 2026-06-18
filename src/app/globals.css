@@ -1871,10 +1871,14 @@ summary:focus-visible {
 
 .admin-filter-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 10px;
   align-items: end;
   margin-top: 12px;
+}
+
+.admin-filter-row label:last-of-type {
+  grid-column: 1 / -2;
 }
 
 .admin-filter-row label {

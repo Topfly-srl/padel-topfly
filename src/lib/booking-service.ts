@@ -7,7 +7,7 @@ import {
   rangesOverlap,
   validateBookingPolicy,
 } from "@/lib/booking-policy";
-import { appConfig, isAllowedCompanyEmail } from "@/lib/config";
+import { appConfig } from "@/lib/config";
 import {
   demoCancelBooking,
   demoCreateAdminBlock,
@@ -774,8 +774,4 @@ export function hasRangeConflict(
   ranges: Array<{ start: Date; end: Date }>,
 ) {
   return ranges.some((range) => rangesOverlap(start, end, range.start, range.end));
-}
-
-export function isExternalEmail(email: string) {
-  return email.trim().includes("@") && !isAllowedCompanyEmail(normalizeEmail(email));
 }

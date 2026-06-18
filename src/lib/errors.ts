@@ -57,7 +57,11 @@ export function routeError(error: unknown) {
     return jsonResponse({ error: "JSON richiesta non valido." }, { status: 400 });
   }
 
-  console.error(error);
+  if (error instanceof Error) {
+    console.error({ name: error.name, message: error.message });
+  } else {
+    console.error({ message: "Unknown route error" });
+  }
   return jsonResponse(
     { error: "Qualcosa e' andato storto. Riprova tra poco." },
     { status: 500 },

@@ -338,7 +338,15 @@ export function ManageBooking({
                 </div>
 
                 {selectionConflict ? <div className="notice error">{selectionConflict}</div> : null}
-                {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+                {notice ? (
+                  <div
+                    aria-live={notice.type === "error" ? "assertive" : "polite"}
+                    className={`notice ${notice.type}`}
+                    role={notice.type === "error" ? "alert" : "status"}
+                  >
+                    {notice.text}
+                  </div>
+                ) : null}
                 <button
                   className="primary-button full-width"
                   disabled={saveDisabled}
@@ -360,7 +368,15 @@ export function ManageBooking({
               </>
             ) : (
               <>
-                {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+                {notice ? (
+                  <div
+                    aria-live={notice.type === "error" ? "assertive" : "polite"}
+                    className={`notice ${notice.type}`}
+                    role={notice.type === "error" ? "alert" : "status"}
+                  >
+                    {notice.text}
+                  </div>
+                ) : null}
                 <Link className="ghost-button full-width" href="/">
                   Torna al calendario
                 </Link>
@@ -371,7 +387,13 @@ export function ManageBooking({
           <>
             <h1>Controllo link</h1>
             {notice ? (
-              <div className={`notice ${notice.type}`}>{notice.text}</div>
+              <div
+                aria-live={notice.type === "error" ? "assertive" : "polite"}
+                className={`notice ${notice.type}`}
+                role={notice.type === "error" ? "alert" : "status"}
+              >
+                {notice.text}
+              </div>
             ) : (
               <div className="notice info">
                 <Clock3 size={16} />

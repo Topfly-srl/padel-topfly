@@ -196,6 +196,7 @@ Con `APP_ENV=preview`:
 - i corpi email mostrano `AMBIENTE TEST`;
 - i link gestione/firma includono anche `test=1`;
 - i PDF dello scarico vengono inviati a `antony.buffone@gmail.com`, non a Cecilia.
+- il container preview imposta `APP_WAIVER_RECIPIENT_EMAIL=antony.buffone@gmail.com`.
 
 Attenzione:
 

@@ -1,5 +1,10 @@
+import type { Metadata } from "next";
 import { WaiverSigning } from "@/components/waiver-signing";
 import { appConfig } from "@/lib/config";
+
+export const metadata: Metadata = {
+  referrer: "no-referrer",
+};
 
 type PageProps = {
   params: Promise<{ bookingId: string }>;

@@ -27,7 +27,12 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const onChangeRef = useRef(onChange);
   const hasSignature = Boolean(value);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   const resetCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -49,13 +54,30 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
     return true;
   }, []);
 
-  useEffect(() => {
-    resetCanvas();
+  const drawStoredSignature = useCallback((signatureValue: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !signatureValue) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const image = new window.Image();
+    image.onload = () => {
+      ctx.drawImage(image, 0, 0, rect.width, rect.height);
+    };
+    image.onerror = () => {
+      resetCanvas();
+      onChangeRef.current("");
+    };
+    image.src = signatureValue;
   }, [resetCanvas]);
 
   useEffect(() => {
-    if (!value) resetCanvas();
-  }, [resetCanvas, value]);
+    if (resetCanvas() && value) {
+      drawStoredSignature(value);
+    }
+  }, [drawStoredSignature, resetCanvas, value]);
 
   const pointFromEvent = (event: PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -138,6 +160,7 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
         aria-invalid={showError || undefined}
         aria-label="Disegna la tua firma"
         className="signature-pad"
+        tabIndex={0}
         onPointerCancel={stopDrawing}
         onPointerDown={startDrawing}
         onPointerLeave={stopDrawing}

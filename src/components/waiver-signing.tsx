@@ -2,9 +2,10 @@
 
 import { Check, MailWarning } from "lucide-react";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
+import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -61,10 +62,6 @@ function localTime(date: Date) {
   }).format(date);
 }
 
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
 async function readApiError(response: Response) {
   const json = (await response.json().catch(() => null)) as { error?: string } | null;
   return json?.error ?? "Richiesta non riuscita.";
@@ -101,14 +98,16 @@ export function WaiverSigning({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [hasSigned, setHasSigned] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const waiverCardRef = useRef<HTMLElement | null>(null);
 
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
+  const normalizedSignerEmail = normalizeEmailInput(signerEmail);
   const canSubmit =
     !isPending &&
     waiver &&
     waiver.booking.remainingSignatures > 0 &&
     signerName.trim().length > 1 &&
-    isValidEmail(signerEmail) &&
+    isValidEmail(normalizedSignerEmail) &&
     Boolean(birthDateIso) &&
     waiverForm.birthPlace.trim().length > 1 &&
     waiverForm.isAdultConfirmed &&
@@ -120,7 +119,7 @@ export function WaiverSigning({
   const missingFields = useMemo(() => {
     const missing: string[] = [];
     if (signerName.trim().length < 2) missing.push("nome e cognome");
-    if (!isValidEmail(signerEmail)) missing.push("email valida");
+    if (!isValidEmail(normalizedSignerEmail)) missing.push("email valida");
     if (!birthDateIso) missing.push("data di nascita");
     if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
     if (!waiverForm.isAdultConfirmed) missing.push("maggiore età");
@@ -132,7 +131,7 @@ export function WaiverSigning({
     return missing;
   }, [
     birthDateIso,
-    signerEmail,
+    normalizedSignerEmail,
     signerName,
     waiverForm.birthPlace,
     waiverForm.isAdultConfirmed,
@@ -145,6 +144,14 @@ export function WaiverSigning({
 
   const bookingStart = useMemo(() => (waiver ? new Date(waiver.booking.start) : null), [waiver]);
   const bookingEnd = useMemo(() => (waiver ? new Date(waiver.booking.end) : null), [waiver]);
+
+  useEffect(() => {
+    if (!submitAttempted || canSubmit) return;
+
+    window.requestAnimationFrame(() => {
+      waiverCardRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    });
+  }, [canSubmit, submitAttempted]);
 
   const loadWaiver = useCallback(async () => {
     const response = await fetch(appPath(`/api/waivers/${bookingId}?token=${encodeURIComponent(token)}`), {
@@ -188,7 +195,7 @@ export function WaiverSigning({
       body: JSON.stringify({
         token,
         signerName,
-        signerEmail,
+        signerEmail: normalizedSignerEmail,
         birthDate: birthDateIso,
         birthPlace: waiverForm.birthPlace,
         isAdultConfirmed: waiverForm.isAdultConfirmed,
@@ -236,8 +243,16 @@ export function WaiverSigning({
         </div>
       </header>
 
-      <section className="summary-card waiver-page-card">
-        {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+      <section className="summary-card waiver-page-card" ref={waiverCardRef}>
+        {notice ? (
+          <div
+            aria-live={notice.type === "error" ? "assertive" : "polite"}
+            className={`notice ${notice.type}`}
+            role={notice.type === "error" ? "alert" : "status"}
+          >
+            {notice.text}
+          </div>
+        ) : null}
 
         {waiver && bookingStart && bookingEnd ? (
           <>
@@ -262,9 +277,8 @@ export function WaiverSigning({
               <div className="guest-success-card">
                 <strong>Firma registrata.</strong>
                 <p>
-                  Il modulo ufficiale firmato è stato inviato alla Direzione. Ti mandiamo anche una
-                  mail con il riepilogo, l&apos;evento calendario e il link per rinunciare al posto se non
-                  puoi esserci.
+                  Il PDF firmato è stato inviato alla Direzione. Riceverai una mail con riepilogo,
+                  evento calendario e link per rinunciare al posto se non puoi esserci.
                 </p>
               </div>
             ) : waiver.booking.remainingSignatures <= 0 ? (
@@ -302,9 +316,12 @@ export function WaiverSigning({
                         inputMode="email"
                         required
                         type="email"
-                        aria-invalid={showFieldError("signerEmail", !isValidEmail(signerEmail)) || undefined}
+                        aria-invalid={showFieldError("signerEmail", !isValidEmail(normalizedSignerEmail)) || undefined}
                         value={signerEmail}
-                        onBlur={() => markTouched("signerEmail")}
+                        onBlur={() => {
+                          markTouched("signerEmail");
+                          setSignerEmail(normalizedSignerEmail);
+                        }}
                         onChange={(event) => setSignerEmail(event.target.value)}
                         placeholder="nome@topflysolutions.com"
                       />
@@ -315,12 +332,12 @@ export function WaiverSigning({
                 <section className="guest-section">
                   <div className="guest-section-title">
                     <strong>Firma e consensi</strong>
-                    <small>Compiliamo il PDF ufficiale e lo inviamo alla Direzione.</small>
+                    <small>Dati, documenti, conferme e firma.</small>
                   </div>
                   <WaiverFormSection
                     birthDateIsValid={Boolean(birthDateIso)}
                     compact
-                    helperText="Compiliamo il PDF ufficiale TOPFLY e lo inviamo alla Direzione."
+                    helperText="Modulo e regolamento saranno allegati al PDF firmato."
                     regulationUrl={appPath(waiver.booking.regulationUrl)}
                     templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
                     showErrors={submitAttempted}

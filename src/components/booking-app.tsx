@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
+import { isExternalEmailForDomain, isValidEmail, normalizeEmailInput } from "@/lib/email";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
   AuditItem,
@@ -69,8 +70,11 @@ type AdminWaiverItem = {
   signerName: string;
   signerEmail: string;
   signedAt: string;
+  status: "ACTIVE" | "CANCELED";
   emailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
   emailError: string | null;
+  guestEmailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+  guestEmailError: string | null;
   bookingStart: string;
   bookingEnd: string;
   playerCount: number;
@@ -78,6 +82,7 @@ type AdminWaiverItem = {
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
 const guestWaiverLinksStorageKey = "topfly-padel.guest-waiver-links.v1";
+const adminWaiverPageSize = 50;
 const fallbackInitialState: BookingInitialState = {
   date: "1970-01-01",
   time: "18:00",
@@ -207,10 +212,6 @@ function bookingSuccessText(status: string) {
   return "Fatto. Prenotazione confermata.";
 }
 
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
 function cancellationSuccessText(status: string) {
   if (status === "SYNCED") return "Prenotazione cancellata. Cancellazione Outlook inviata.";
   if (status === "FAILED") return "Prenotazione cancellata. Cancellazione Outlook non riuscita.";
@@ -229,6 +230,14 @@ function waiverEmailStatusTone(status: AdminWaiverItem["emailStatus"]) {
   if (status === "FAILED") return "danger";
   if (status === "SKIPPED") return "neutral";
   return "warning";
+}
+
+function waiverSignatureStatusLabel(status: AdminWaiverItem["status"]) {
+  return status === "ACTIVE" ? "Attiva" : "Rinunciata";
+}
+
+function waiverSignatureStatusTone(status: AdminWaiverItem["status"]) {
+  return status === "ACTIVE" ? "success" : "neutral";
 }
 
 function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
@@ -335,7 +344,9 @@ export function BookingApp({
   const [copiedGuestWaiverLink, setCopiedGuestWaiverLink] = useState<string | null>(null);
   const [adminWaivers, setAdminWaivers] = useState<AdminWaiverItem[]>([]);
   const [adminWaiverStatusFilter, setAdminWaiverStatusFilter] = useState<AdminWaiverItem["emailStatus"] | "ALL">("ALL");
-  const [adminWaiverLimit, setAdminWaiverLimit] = useState(50);
+  const [adminWaiverRoleFilter, setAdminWaiverRoleFilter] = useState<AdminWaiverItem["signerRole"] | "ALL">("ALL");
+  const [adminWaiverQuery, setAdminWaiverQuery] = useState("");
+  const [adminWaiverNextCursor, setAdminWaiverNextCursor] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("10:00");
@@ -368,9 +379,8 @@ export function BookingApp({
     [activeMyBookings],
   );
   const allowedDomain = availability?.settings.allowedDomain ?? "azienda.it";
-  const isExternalEmail =
-    organizerEmail.trim().includes("@") &&
-    !organizerEmail.trim().toLowerCase().endsWith(`@${allowedDomain}`);
+  const normalizedOrganizerEmail = normalizeEmailInput(organizerEmail);
+  const isExternalEmail = isExternalEmailForDomain(normalizedOrganizerEmail, allowedDomain);
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
   const isWaiverFormValid =
     playerCount >= 2 &&
@@ -385,10 +395,10 @@ export function BookingApp({
     Boolean(waiverForm.signatureImageDataUrl);
   const isBookingFormValid =
     !isBookingFormOpen ||
-    (organizerName.trim().length > 1 && isValidEmail(organizerEmail) && isWaiverFormValid);
+    (organizerName.trim().length > 1 && isValidEmail(normalizedOrganizerEmail) && isWaiverFormValid);
   const isBookingDetailsValid =
     organizerName.trim().length > 1 &&
-    isValidEmail(organizerEmail) &&
+    isValidEmail(normalizedOrganizerEmail) &&
     playerCount >= 2 &&
     playerCount <= 4;
 
@@ -413,17 +423,10 @@ export function BookingApp({
   const selectedOwnWaiverDelivery = selectedOwnBooking
     ? waiverDeliveryCopy(selectedOwnBooking.waiverEmailStatus)
     : null;
-  const filteredAdminWaivers = useMemo(
-    () =>
-      adminWaiverStatusFilter === "ALL"
-        ? adminWaivers
-        : adminWaivers.filter((waiver) => waiver.emailStatus === adminWaiverStatusFilter),
-    [adminWaiverStatusFilter, adminWaivers],
-  );
   const missingBookingFields = useMemo(() => {
     const missing: string[] = [];
     if (organizerName.trim().length < 2) missing.push("nome referente");
-    if (!isValidEmail(organizerEmail)) missing.push("email valida");
+    if (!isValidEmail(normalizedOrganizerEmail)) missing.push("email valida");
     if (!birthDateIso) missing.push("data di nascita");
     if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
     if (!waiverForm.isAdultConfirmed) missing.push("maggiore eta");
@@ -435,7 +438,7 @@ export function BookingApp({
     return missing;
   }, [
     birthDateIso,
-    organizerEmail,
+    normalizedOrganizerEmail,
     organizerName,
     waiverForm.birthPlace,
     waiverForm.isAdultConfirmed,
@@ -480,20 +483,30 @@ export function BookingApp({
     }
   }, [isAdmin]);
 
-  const loadAdminWaivers = useCallback(async () => {
+  const loadAdminWaivers = useCallback(async (cursor?: string) => {
     if (!isAdmin) return;
 
-    const params = new URLSearchParams({ limit: String(adminWaiverLimit) });
+    const params = new URLSearchParams({ limit: String(adminWaiverPageSize) });
     if (adminWaiverStatusFilter !== "ALL") {
       params.set("status", adminWaiverStatusFilter);
+    }
+    if (adminWaiverRoleFilter !== "ALL") {
+      params.set("role", adminWaiverRoleFilter);
+    }
+    if (adminWaiverQuery.trim()) {
+      params.set("query", adminWaiverQuery.trim());
+    }
+    if (cursor) {
+      params.set("cursor", cursor);
     }
 
     const response = await fetch(appPath(`/api/admin/waivers?${params.toString()}`), { cache: "no-store" });
     if (response.ok) {
-      const json = (await response.json()) as { waivers: AdminWaiverItem[] };
-      setAdminWaivers(json.waivers);
+      const json = (await response.json()) as { waivers: AdminWaiverItem[]; nextCursor: string | null };
+      setAdminWaivers((current) => (cursor ? [...current, ...json.waivers] : json.waivers));
+      setAdminWaiverNextCursor(json.nextCursor);
     }
-  }, [adminWaiverLimit, adminWaiverStatusFilter, isAdmin]);
+  }, [adminWaiverQuery, adminWaiverRoleFilter, adminWaiverStatusFilter, isAdmin]);
 
   const loadMyBookings = useCallback(async (tokens: string[]) => {
     if (!tokens.length) {
@@ -673,7 +686,7 @@ export function BookingApp({
           start: start.toISOString(),
           end: end.toISOString(),
           organizerName,
-          organizerEmail,
+          organizerEmail: normalizedOrganizerEmail,
           playerCount,
           waiver: {
             birthDate: birthDateIso,
@@ -1020,7 +1033,15 @@ export function BookingApp({
                     </small>
                   </div>
                 </div>
-                {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+                {notice ? (
+                  <div
+                    aria-live={notice.type === "error" ? "assertive" : "polite"}
+                    className={`notice ${notice.type}`}
+                    role={notice.type === "error" ? "alert" : "status"}
+                  >
+                    {notice.text}
+                  </div>
+                ) : null}
                 {selectedOwnWaiverDelivery ? (
                   <div className={`official-pdf-panel ${selectedOwnWaiverDelivery.tone}`}>
                     <FileText size={17} />
@@ -1071,7 +1092,13 @@ export function BookingApp({
                 {selectionConflict ? (
                   <div className="notice error">{selectionConflict}</div>
                 ) : notice ? (
-                  <div className={`notice ${notice.type}`}>{notice.text}</div>
+                  <div
+                    aria-live={notice.type === "error" ? "assertive" : "polite"}
+                    className={`notice ${notice.type}`}
+                    role={notice.type === "error" ? "alert" : "status"}
+                  >
+                    {notice.text}
+                  </div>
                 ) : (
                   <div className="summary-next">
                     <span aria-hidden="true">
@@ -1297,7 +1324,6 @@ export function BookingApp({
                     <select
                       value={adminWaiverStatusFilter}
                       onChange={(event) => {
-                        setAdminWaiverLimit(50);
                         setAdminWaiverStatusFilter(event.target.value as AdminWaiverItem["emailStatus"] | "ALL");
                       }}
                     >
@@ -1308,12 +1334,33 @@ export function BookingApp({
                       <option value="SKIPPED">Non configurata</option>
                     </select>
                   </label>
-                  <span className="count-pill">{filteredAdminWaivers.length}</span>
+                  <label>
+                    Ruolo
+                    <select
+                      value={adminWaiverRoleFilter}
+                      onChange={(event) =>
+                        setAdminWaiverRoleFilter(event.target.value as AdminWaiverItem["signerRole"] | "ALL")
+                      }
+                    >
+                      <option value="ALL">Tutti</option>
+                      <option value="ORGANIZER">Referente</option>
+                      <option value="GUEST">Ospite</option>
+                    </select>
+                  </label>
+                  <label>
+                    Cerca
+                    <input
+                      value={adminWaiverQuery}
+                      onChange={(event) => setAdminWaiverQuery(event.target.value)}
+                      placeholder="Nome o email"
+                    />
+                  </label>
+                  <span className="count-pill">{adminWaivers.length}</span>
                 </div>
                 <div className="booking-list">
-                  {filteredAdminWaivers.length ? (
+                  {adminWaivers.length ? (
                     <>
-                      {filteredAdminWaivers.map((waiver) => (
+                      {adminWaivers.map((waiver) => (
                         <article className="booking-item" key={waiver.id}>
                           <div>
                             <strong>{waiver.signerName}</strong>
@@ -1323,10 +1370,19 @@ export function BookingApp({
                               {localTime(new Date(waiver.bookingEnd))}
                             </span>
                             <small>
+                              <span className={`status-badge ${waiverSignatureStatusTone(waiver.status)}`}>
+                                Firma {waiverSignatureStatusLabel(waiver.status)}
+                              </span>{" "}
                               <span className={`status-badge ${waiverEmailStatusTone(waiver.emailStatus)}`}>
-                                PDF {waiverEmailStatusLabel(waiver.emailStatus)}
-                              </span>
-                              {waiver.emailError ? ` - ${waiver.emailError.slice(0, 80)}` : ""}
+                                PDF Direzione {waiverEmailStatusLabel(waiver.emailStatus)}
+                              </span>{" "}
+                              {waiver.signerRole === "GUEST" ? (
+                                <span className={`status-badge ${waiverEmailStatusTone(waiver.guestEmailStatus)}`}>
+                                  Email ospite {waiverEmailStatusLabel(waiver.guestEmailStatus)}
+                                </span>
+                              ) : null}
+                              {waiver.emailError ? ` - PDF: ${waiver.emailError.slice(0, 80)}` : ""}
+                              {waiver.guestEmailError ? ` - Ospite: ${waiver.guestEmailError.slice(0, 80)}` : ""}
                             </small>
                           </div>
                           <div className="item-actions">
@@ -1352,10 +1408,10 @@ export function BookingApp({
                           </div>
                         </article>
                       ))}
-                      {adminWaivers.length >= adminWaiverLimit ? (
+                      {adminWaiverNextCursor ? (
                         <button
                           className="ghost-button full-width"
-                          onClick={() => setAdminWaiverLimit((current) => current + 50)}
+                          onClick={() => loadAdminWaivers(adminWaiverNextCursor)}
                           type="button"
                         >
                           Mostra altri
@@ -1441,7 +1497,15 @@ export function BookingApp({
             </div>
 
             <div className="booking-wizard-body">
-              {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+              {notice ? (
+                <div
+                  aria-live={notice.type === "error" ? "assertive" : "polite"}
+                  className={`notice ${notice.type}`}
+                  role={notice.type === "error" ? "alert" : "status"}
+                >
+                  {notice.text}
+                </div>
+              ) : null}
 
               {bookingFormStep === 1 ? (
                 <div className="wizard-section">
@@ -1464,9 +1528,12 @@ export function BookingApp({
                       inputMode="email"
                       type="email"
                       required
-                      aria-invalid={showFieldError("organizerEmail", !isValidEmail(organizerEmail)) || undefined}
+                      aria-invalid={showFieldError("organizerEmail", !isValidEmail(normalizedOrganizerEmail)) || undefined}
                       value={organizerEmail}
-                      onBlur={() => markTouched("organizerEmail")}
+                      onBlur={() => {
+                        markTouched("organizerEmail");
+                        setOrganizerEmail(normalizedOrganizerEmail);
+                      }}
                       onChange={(event) => setOrganizerEmail(event.target.value)}
                       placeholder={`nome@${allowedDomain}`}
                     />
@@ -1499,7 +1566,7 @@ export function BookingApp({
                   <WaiverFormSection
                     birthDateIsValid={Boolean(birthDateIso)}
                     compact
-                    helperText="Compiliamo il PDF ufficiale TOPFLY e lo inviamo alla Direzione."
+                    helperText="Modulo e regolamento saranno allegati al PDF firmato."
                     regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
                     templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
                     showErrors={bookingSubmitAttempted}

@@ -1,23 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { isoDateOnlySchema } from "@/lib/date-only";
 import { jsonResponse, routeError } from "@/lib/errors";
 import { assertRateLimit, assertTrustedOrigin, clientIp } from "@/lib/request-guard";
 import { getPublicBaseUrl } from "@/lib/public-url";
 import { signGuestWaiver } from "@/lib/waiver-service";
+import { waiverPayloadSchema } from "@/lib/waiver-schema";
 
-const signWaiverSchema = z.object({
+const signWaiverSchema = waiverPayloadSchema.extend({
   token: z.string().trim().min(1).max(200),
   signerName: z.string().min(1, "Inserisci nome e cognome.").max(80),
   signerEmail: z.string().email("Inserisci un'email valida.").max(120),
-  birthDate: isoDateOnlySchema,
-  birthPlace: z.string().min(2, "Inserisci il luogo di nascita.").max(120),
-  isAdultConfirmed: z.boolean(),
-  privacyAccepted: z.boolean(),
-  regulationAccepted: z.boolean(),
-  liabilityAccepted: z.boolean(),
-  specificApprovalAccepted: z.boolean(),
-  signatureImageDataUrl: z.string().min(1, "Disegna la firma nel riquadro.").max(400_000),
 });
 
 type RouteContext = {

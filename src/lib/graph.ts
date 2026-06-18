@@ -80,10 +80,23 @@ async function graphFetch(path: string, init: RequestInit = {}) {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Graph ${response.status}: ${body.slice(0, 500)}`);
+    throw new Error(graphErrorMessage(response, body));
   }
 
   return response;
+}
+
+function graphErrorMessage(response: Response, body: string) {
+  let code = "";
+
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: string } };
+    code = parsed.error?.code ? ` (${parsed.error.code})` : "";
+  } catch {
+    code = "";
+  }
+
+  return `Graph ${response.status}${code}`;
 }
 
 type OrganizerContact = {

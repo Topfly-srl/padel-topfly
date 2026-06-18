@@ -3,9 +3,10 @@
 import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Send, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
+import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
 import {
   WaiverFormSection,
@@ -68,10 +69,6 @@ function localSummaryDay(date: Date) {
     day: "2-digit",
     month: "long",
   }).format(date);
-}
-
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 function normalizeName(value: string) {
@@ -162,14 +159,16 @@ export function BookingCheckout({
   const [createdBooking, setCreatedBooking] = useState<CreatedBooking | null>(null);
   const [copiedGuestWaiverLink, setCopiedGuestWaiverLink] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const checkoutCardRef = useRef<HTMLElement | null>(null);
 
   const start = useMemo(() => dateTimeFromParts(selectedDate, selectedTime), [selectedDate, selectedTime]);
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
   const normalizedOrganizerName = normalizeName(organizerName);
+  const normalizedOrganizerEmail = normalizeEmailInput(organizerEmail);
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
   const canSubmit =
     normalizedOrganizerName.length > 1 &&
-    isValidEmail(organizerEmail) &&
+    isValidEmail(normalizedOrganizerEmail) &&
     playerCount >= 2 &&
     playerCount <= 4 &&
     Boolean(birthDateIso) &&
@@ -183,7 +182,7 @@ export function BookingCheckout({
   const missingFields = useMemo(() => {
     const missing: string[] = [];
     if (normalizedOrganizerName.length < 2) missing.push("nome e cognome");
-    if (!isValidEmail(organizerEmail)) missing.push("email valida");
+    if (!isValidEmail(normalizedOrganizerEmail)) missing.push("email valida");
     if (!birthDateIso) missing.push("data di nascita");
     if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
     if (!waiverForm.isAdultConfirmed) missing.push("maggiore età");
@@ -196,7 +195,7 @@ export function BookingCheckout({
   }, [
     birthDateIso,
     normalizedOrganizerName.length,
-    organizerEmail,
+    normalizedOrganizerEmail,
     waiverForm.birthPlace,
     waiverForm.isAdultConfirmed,
     waiverForm.liabilityAccepted,
@@ -214,6 +213,14 @@ export function BookingCheckout({
   const missingCopy = canSubmit
     ? "Tutto pronto: confermiamo la prenotazione e inviamo il PDF."
     : `Completa: ${missingFields.slice(0, 3).join(", ")}${missingFields.length > 3 ? "..." : ""}`;
+
+  useEffect(() => {
+    if (!submitAttempted || canSubmit) return;
+
+    window.requestAnimationFrame(() => {
+      checkoutCardRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    });
+  }, [canSubmit, submitAttempted]);
 
   async function copyGuestWaiverLink(linkOverride?: string) {
     const link = linkOverride ?? createdBooking?.guestWaiverUrl;
@@ -244,7 +251,7 @@ export function BookingCheckout({
         start: start.toISOString(),
         end: end.toISOString(),
         organizerName,
-        organizerEmail,
+        organizerEmail: normalizedOrganizerEmail,
         playerCount,
         waiver: {
           birthDate: birthDateIso,
@@ -299,7 +306,7 @@ export function BookingCheckout({
         </div>
       </header>
 
-      <section className="checkout-card">
+      <section className="checkout-card" ref={checkoutCardRef}>
         <div className="checkout-recap">
           <div className="checkout-recap-copy">
             <span className="checkout-kicker">
@@ -322,10 +329,18 @@ export function BookingCheckout({
         </div>
 
         {!createdBooking ? (
-          <p className="checkout-intro">Controlla i dati, firma lo scarico e conferma. Il PDF resta archiviato.</p>
+          <p className="checkout-intro">Compila i dati, firma e conferma. Al PDF pensiamo noi.</p>
         ) : null}
 
-        {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+        {notice ? (
+          <div
+            aria-live={notice.type === "error" ? "assertive" : "polite"}
+            className={`notice ${notice.type}`}
+            role={notice.type === "error" ? "alert" : "status"}
+          >
+            {notice.text}
+          </div>
+        ) : null}
 
         {createdBooking ? (
           <div className="checkout-success-flow">
@@ -384,7 +399,7 @@ export function BookingCheckout({
                 <span>1</span>
                 <div>
                   <strong>Referente</strong>
-                  <small>Dati per conferma e link ospiti.</small>
+                  <small>Servono per conferma e link ospiti.</small>
                 </div>
               </div>
               <div className="checkout-field-grid">
@@ -407,9 +422,12 @@ export function BookingCheckout({
                     inputMode="email"
                     required
                     type="email"
-                    aria-invalid={showFieldError("organizerEmail", !isValidEmail(organizerEmail)) || undefined}
+                    aria-invalid={showFieldError("organizerEmail", !isValidEmail(normalizedOrganizerEmail)) || undefined}
                     value={organizerEmail}
-                    onBlur={() => markTouched("organizerEmail")}
+                    onBlur={() => {
+                      markTouched("organizerEmail");
+                      setOrganizerEmail(normalizedOrganizerEmail);
+                    }}
                     onChange={(event) => setOrganizerEmail(event.target.value)}
                     placeholder={`nome@${allowedDomain}`}
                   />
@@ -439,13 +457,13 @@ export function BookingCheckout({
                 <span>2</span>
                 <div>
                   <strong>Scarico responsabilità</strong>
-                  <small>PDF ufficiale, conferme e firma.</small>
+                  <small>Dati, documenti, conferme e firma.</small>
                 </div>
               </div>
               <WaiverFormSection
                 birthDateIsValid={Boolean(birthDateIso)}
                 compact
-                helperText="Modulo e regolamento restano allegati al PDF firmato."
+                helperText="Modulo e regolamento saranno allegati al PDF firmato."
                 layout="checkout"
                 regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
                 templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}

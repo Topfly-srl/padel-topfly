@@ -1,5 +1,14 @@
 import { createHash } from "crypto";
-import type { Booking, Prisma, User, WaiverEmailStatus, WaiverSignature } from "@prisma/client";
+import type {
+  Booking,
+  Prisma,
+  User,
+  WaiverEmailStatus,
+  WaiverSignature,
+  WaiverSignatureStatus,
+  WaiverSignerRole,
+} from "@prisma/client";
+import { PNG } from "pngjs";
 import { AppError } from "@/lib/errors";
 import {
   demoCancelGuestWaiverSignature,
@@ -62,11 +71,19 @@ export type AdminWaiverSignatureItem = {
   signerName: string;
   signerEmail: string;
   signedAt: string;
+  status: WaiverSignatureStatus;
   emailStatus: WaiverEmailStatus;
   emailError: string | null;
+  guestEmailStatus: WaiverEmailStatus;
+  guestEmailError: string | null;
   bookingStart: string;
   bookingEnd: string;
   playerCount: number;
+};
+
+export type AdminWaiverSignatureList = {
+  items: AdminWaiverSignatureItem[];
+  nextCursor: string | null;
 };
 
 export type GuestWaiverCancelContext = {
@@ -101,6 +118,9 @@ const minBirthDate = new Date("1900-01-01T00:00:00.000Z");
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const maxSignatureImageBytes = 300_000;
 const minSignatureImageBytes = 60;
+const minSignatureDarkPixels = 24;
+const minSignatureWidth = 16;
+const minSignatureHeight = 6;
 
 export function validatePlayerCount(value: number) {
   if (!Number.isInteger(value) || value < 2 || value > 4) {
@@ -147,11 +167,59 @@ function parseSignatureImageDataUrl(value: string | undefined) {
     throw new AppError("La firma deve essere un'immagine PNG valida.", 422);
   }
 
+  assertSignatureHasInk(bytes);
+
   return {
     bytes,
     mimeType: "image/png",
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
+}
+
+function assertSignatureHasInk(bytes: Buffer) {
+  let png: PNG;
+
+  try {
+    png = PNG.sync.read(bytes);
+  } catch {
+    throw new AppError("La firma deve essere un'immagine PNG valida.", 422);
+  }
+
+  let darkPixels = 0;
+  let minX = png.width;
+  let minY = png.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const index = (png.width * y + x) << 2;
+      const red = png.data[index];
+      const green = png.data[index + 1];
+      const blue = png.data[index + 2];
+      const alpha = png.data[index + 3];
+      const average = (red + green + blue) / 3;
+
+      if (alpha > 16 && average < 160 && Math.max(red, green, blue) < 190) {
+        darkPixels += 1;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  const signatureWidth = maxX >= minX ? maxX - minX + 1 : 0;
+  const signatureHeight = maxY >= minY ? maxY - minY + 1 : 0;
+
+  if (
+    darkPixels < minSignatureDarkPixels ||
+    signatureWidth < minSignatureWidth ||
+    signatureHeight < minSignatureHeight
+  ) {
+    throw new AppError("Disegna una firma valida nel riquadro.", 422);
+  }
 }
 
 export function normalizeWaiverInput(input: WaiverInput, now = new Date()) {
@@ -784,12 +852,46 @@ export async function getAdminWaiverPdf(signatureId: string) {
 
 export async function listAdminWaiverSignatures(input: {
   status?: WaiverEmailStatus;
+  role?: WaiverSignerRole;
+  query?: string;
   limit?: number;
-} = {}): Promise<AdminWaiverSignatureItem[]> {
-  if (!appConfig.databaseConfigured) return [];
+  cursor?: string;
+} = {}): Promise<AdminWaiverSignatureList> {
+  if (!appConfig.databaseConfigured) {
+    return { items: [], nextCursor: null };
+  }
+
+  const limit = Math.min(Math.max(input.limit ?? 50, 10), 100);
+  const cursor = parseAdminWaiverCursor(input.cursor);
+  const query = input.query?.trim();
+  const andFilters: Prisma.WaiverSignatureWhereInput[] = [];
+
+  if (query) {
+    andFilters.push({
+      OR: [
+        { signerName: { contains: query, mode: "insensitive" } },
+        { signerEmail: { contains: query, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (cursor) {
+    andFilters.push({
+      OR: [
+        { signedAt: { lt: cursor.signedAt } },
+        { signedAt: cursor.signedAt, id: { lt: cursor.id } },
+      ],
+    });
+  }
+
+  const where: Prisma.WaiverSignatureWhereInput = {
+    ...(input.status ? { emailStatus: input.status } : {}),
+    ...(input.role ? { signerRole: input.role } : {}),
+    ...(andFilters.length ? { AND: andFilters } : {}),
+  };
 
   const signatures = await prisma.waiverSignature.findMany({
-    where: input.status ? { emailStatus: input.status } : undefined,
+    where,
     include: {
       booking: {
         select: {
@@ -799,24 +901,50 @@ export async function listAdminWaiverSignatures(input: {
         },
       },
     },
-    orderBy: { signedAt: "desc" },
-    take: input.limit ?? 50,
+    orderBy: [{ signedAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 
-  return signatures.map((signature) => ({
-    id: signature.id,
-    bookingId: signature.bookingId,
-    bookingRevision: signature.bookingRevision,
-    signerRole: signature.signerRole,
-    signerName: signature.signerName,
-    signerEmail: signature.signerEmail,
-    signedAt: signature.signedAt.toISOString(),
-    emailStatus: signature.emailStatus,
-    emailError: signature.emailError,
-    bookingStart: signature.booking.start.toISOString(),
-    bookingEnd: signature.booking.end.toISOString(),
-    playerCount: signature.booking.playerCount,
-  }));
+  const visibleSignatures = signatures.slice(0, limit);
+  const lastSignature = visibleSignatures.at(-1);
+
+  return {
+    items: visibleSignatures.map((signature) => ({
+      id: signature.id,
+      bookingId: signature.bookingId,
+      bookingRevision: signature.bookingRevision,
+      signerRole: signature.signerRole,
+      signerName: signature.signerName,
+      signerEmail: signature.signerEmail,
+      signedAt: signature.signedAt.toISOString(),
+      status: signature.status,
+      emailStatus: signature.emailStatus,
+      emailError: signature.emailError,
+      guestEmailStatus: signature.guestEmailStatus,
+      guestEmailError: signature.guestEmailError,
+      bookingStart: signature.booking.start.toISOString(),
+      bookingEnd: signature.booking.end.toISOString(),
+      playerCount: signature.booking.playerCount,
+    })),
+    nextCursor: signatures.length > limit && lastSignature ? adminWaiverCursor(lastSignature) : null,
+  };
+}
+
+function adminWaiverCursor(signature: Pick<WaiverSignature, "signedAt" | "id">) {
+  return Buffer.from(`${signature.signedAt.toISOString()}|${signature.id}`, "utf8").toString("base64url");
+}
+
+function parseAdminWaiverCursor(value: string | undefined) {
+  if (!value) return null;
+
+  try {
+    const [signedAtRaw, id] = Buffer.from(value, "base64url").toString("utf8").split("|");
+    const signedAt = new Date(signedAtRaw);
+    if (!id || Number.isNaN(signedAt.getTime())) return null;
+    return { signedAt, id };
+  } catch {
+    return null;
+  }
 }
 
 export function guestWaiverTokenData(token: string, end: Date) {

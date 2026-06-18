@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { normalizeEmailInput } from "@/lib/email";
 
 export function createManageToken() {
   return randomBytes(32).toString("base64url");
@@ -32,7 +33,7 @@ export function isManageTokenValid(
 }
 
 export function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
+  return normalizeEmailInput(email);
 }
 
 export function normalizePersonName(name: string) {

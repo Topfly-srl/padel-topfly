@@ -1,5 +1,10 @@
+import type { Metadata } from "next";
 import { WaiverCancel } from "@/components/waiver-cancel";
 import { appConfig } from "@/lib/config";
+
+export const metadata: Metadata = {
+  referrer: "no-referrer",
+};
 
 type PageProps = {
   params: Promise<{ signatureId: string }>;

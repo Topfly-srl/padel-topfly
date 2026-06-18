@@ -138,7 +138,15 @@ export function WaiverCancel({
       </header>
 
       <section className="summary-card waiver-page-card guest-cancel-card">
-        {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+        {notice ? (
+          <div
+            aria-live={notice.type === "error" ? "assertive" : "polite"}
+            className={`notice ${notice.type}`}
+            role={notice.type === "error" ? "alert" : "status"}
+          >
+            {notice.text}
+          </div>
+        ) : null}
 
         {cancelContext && bookingStart && bookingEnd ? (
           <>
