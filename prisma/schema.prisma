@@ -24,6 +24,18 @@ enum OutlookSyncStatus {
   SKIPPED
 }
 
+enum WaiverSignerRole {
+  ORGANIZER
+  GUEST
+}
+
+enum WaiverEmailStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
 model User {
   id          String       @id @default(cuid())
   email       String       @unique
@@ -50,14 +62,56 @@ model Booking {
   outlookEventId    String?
   outlookSyncStatus OutlookSyncStatus @default(PENDING)
   outlookSyncError  String?
+  playerCount       Int               @default(4)
+  waiverRevision    Int               @default(1)
+  guestWaiverTokenHash String?
+  guestWaiverTokenExpiresAt DateTime?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   organizerId       String?
   organizer         User?             @relation("BookingOrganizer", fields: [organizerId], references: [id], onDelete: SetNull)
+  waiverSignatures  WaiverSignature[]
 
   @@index([start, end])
   @@index([organizerEmail, status, end])
   @@index([manageTokenHash])
+  @@index([guestWaiverTokenHash])
+}
+
+model WaiverSignature {
+  id                         String            @id @default(cuid())
+  bookingId                  String
+  booking                    Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingRevision            Int
+  signerRole                 WaiverSignerRole
+  signerName                 String
+  signerEmail                String
+  birthDate                  DateTime
+  birthPlace                 String
+  isAdultConfirmed           Boolean
+  privacyAcceptedAt          DateTime
+  regulationAcceptedAt       DateTime
+  liabilityAcceptedAt        DateTime
+  specificApprovalAcceptedAt DateTime
+  signatureText              String
+  signatureImageBytes        Bytes?
+  signatureImageSha256       String?
+  signatureImageMimeType     String?
+  signedAt                   DateTime          @default(now())
+  ipHash                     String?
+  userAgentHash              String?
+  documentVersion            String
+  pdfBytes                   Bytes
+  pdfSha256                  String
+  emailStatus                WaiverEmailStatus @default(PENDING)
+  emailError                 String?
+  emailSentAt                DateTime?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+
+  @@unique([bookingId, bookingRevision, signerEmail])
+  @@index([bookingId, bookingRevision])
+  @@index([emailStatus])
 }
 
 model AdminBlock {

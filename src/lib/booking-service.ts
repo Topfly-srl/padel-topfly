@@ -1,4 +1,4 @@
-import type { Booking, Prisma } from "@prisma/client";
+import type { Booking, Prisma, WaiverEmailStatus } from "@prisma/client";
 import { BookingStatus, Prisma as PrismaNamespace } from "@prisma/client";
 import { AppError } from "@/lib/errors";
 import {
@@ -31,6 +31,17 @@ import {
 import { prisma } from "@/lib/prisma";
 import { retryPrismaTransaction } from "@/lib/prisma-retry";
 import { assertDateParam, zonedDayBounds } from "@/lib/time";
+import {
+  buildGuestWaiverUrl,
+  createGuestWaiverToken,
+  createWaiverSignature,
+  guestWaiverTokenData,
+  sendWaiverSignatureEmail,
+  summarizeWaiverSignatures,
+  validatePlayerCount,
+  type WaiverEvidence,
+  type WaiverInput,
+} from "@/lib/waiver-service";
 import type {
   AuditItem,
   AvailabilityBlock,
@@ -49,6 +60,9 @@ export type PublicBookingInput = {
   end: Date;
   organizerName: string;
   organizerEmail: string;
+  playerCount: number;
+  waiver: WaiverInput;
+  waiverEvidence?: WaiverEvidence;
   baseUrl?: string;
 };
 
@@ -60,10 +74,18 @@ export type BookingAccess = {
 
 function buildManageUrl(baseUrl: string | undefined, bookingId: string, token: string | undefined) {
   if (!baseUrl || !token) return undefined;
-  return `${baseUrl.replace(/\/$/, "")}/manage/${bookingId}?token=${encodeURIComponent(token)}`;
+  const params = new URLSearchParams({ token });
+  if (appConfig.isPreview) params.set("test", "1");
+  return `${baseUrl.replace(/\/$/, "")}/manage/${bookingId}?${params.toString()}`;
 }
 
-function serializeBooking(booking: Booking): AvailabilityBooking {
+type BookingWithWaiverSignatures = Booking & {
+  waiverSignatures?: Array<{ bookingRevision: number; emailStatus: WaiverEmailStatus }>;
+};
+
+function serializeBooking(booking: BookingWithWaiverSignatures): AvailabilityBooking {
+  const waiverSummary = summarizeWaiverSignatures(booking);
+
   return {
     id: booking.id,
     start: booking.start.toISOString(),
@@ -71,13 +93,17 @@ function serializeBooking(booking: Booking): AvailabilityBooking {
     status: booking.status,
     organizerName: booking.organizerName,
     outlookSyncStatus: booking.outlookSyncStatus,
+    playerCount: booking.playerCount,
+    waiverSignedCount: waiverSummary.signedCount,
+    waiverEmailStatus: waiverSummary.emailStatus,
   };
 }
 
 function serializeManagedBooking(
-  booking: Booking,
+  booking: BookingWithWaiverSignatures,
   manageToken?: string,
   baseUrl?: string,
+  guestWaiverToken?: string,
 ): MyBooking {
   return {
     ...serializeBooking(booking),
@@ -85,6 +111,8 @@ function serializeManagedBooking(
     updatedAt: booking.updatedAt.toISOString(),
     manageToken,
     manageUrl: buildManageUrl(baseUrl, booking.id, manageToken),
+    guestWaiverToken,
+    guestWaiverUrl: buildGuestWaiverUrl(baseUrl, booking.id, guestWaiverToken),
   };
 }
 
@@ -105,6 +133,8 @@ function serializeBlock(block: {
 const hiddenAuditFields = new Set([
   "manageTokenHash",
   "manageTokenExpiresAt",
+  "guestWaiverTokenHash",
+  "guestWaiverTokenExpiresAt",
   "outlookEventId",
   "outlookSyncError",
 ]);
@@ -166,12 +196,14 @@ async function syncBooking(
   mode: "create" | "update",
   manageToken?: string,
   baseUrl?: string,
+  guestWaiverToken?: string,
 ) {
   const manageUrl = buildManageUrl(baseUrl, booking.id, manageToken);
+  const guestWaiverUrl = buildGuestWaiverUrl(baseUrl, booking.id, guestWaiverToken);
   const result =
     mode === "create"
-      ? await createOutlookEvent(booking, bookingOrganizer(booking), manageUrl)
-      : await updateOutlookEvent(booking, bookingOrganizer(booking), manageUrl);
+      ? await createOutlookEvent(booking, bookingOrganizer(booking), manageUrl, guestWaiverUrl)
+      : await updateOutlookEvent(booking, bookingOrganizer(booking), manageUrl, guestWaiverUrl);
 
   return prisma.booking.update({
     where: { id: booking.id },
@@ -195,6 +227,17 @@ async function markOutlookDeleted(booking: Booking) {
   });
 }
 
+async function getBookingWithWaivers(bookingId: string) {
+  return prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      waiverSignatures: {
+        select: { bookingRevision: true, emailStatus: true },
+      },
+    },
+  });
+}
+
 export function shouldRetryOutlookDelete(
   booking: Pick<Booking, "status" | "outlookEventId" | "outlookSyncStatus">,
 ) {
@@ -209,6 +252,7 @@ export function shouldRetryOutlookDelete(
 function normalizePublicBookingInput(input: PublicBookingInput) {
   const organizerName = normalizePersonName(input.organizerName);
   const organizerEmail = normalizeEmail(input.organizerEmail);
+  const playerCount = validatePlayerCount(input.playerCount);
   const errors: string[] = [];
 
   if (organizerName.split(" ").filter(Boolean).length < 2) {
@@ -231,7 +275,7 @@ function normalizePublicBookingInput(input: PublicBookingInput) {
     throw new AppError(errors.join(" "), 422);
   }
 
-  return { organizerName, organizerEmail };
+  return { organizerName, organizerEmail, playerCount };
 }
 
 async function validateNoConflicts(
@@ -319,6 +363,11 @@ export async function getAvailability(dateValue: string | null) {
         start: { lt: bounds.end },
         end: { gt: bounds.start },
       },
+      include: {
+        waiverSignatures: {
+          select: { bookingRevision: true, emailStatus: true },
+        },
+      },
       orderBy: { start: "asc" },
     }),
     prisma.adminBlock.findMany({
@@ -359,6 +408,11 @@ export async function lookupBookings(tokens: string[], baseUrl?: string) {
       manageTokenExpiresAt: { gt: now },
       OR: [{ end: { gte: now } }, { status: "CANCELED" }],
     },
+    include: {
+      waiverSignatures: {
+        select: { bookingRevision: true, emailStatus: true },
+      },
+    },
     orderBy: [{ status: "asc" }, { start: "asc" }],
     take: 30,
   });
@@ -378,6 +432,11 @@ export async function listBookings(currentUser: CurrentUser) {
   }
 
   const bookings = await prisma.booking.findMany({
+    include: {
+      waiverSignatures: {
+        select: { bookingRevision: true, emailStatus: true },
+      },
+    },
     orderBy: { start: "desc" },
     take: 100,
   });
@@ -394,8 +453,10 @@ export async function createBooking(input: PublicBookingInput) {
   const manageToken = createManageToken();
   const manageTokenHash = hashManageToken(manageToken);
   const tokenExpiresAt = manageTokenExpiresAt(input.end);
+  const guestWaiverToken = createGuestWaiverToken();
+  const guestWaiverData = guestWaiverTokenData(guestWaiverToken, input.end);
 
-  const booking = await retryPrismaTransaction(() =>
+  const result = await retryPrismaTransaction(() =>
     prisma.$transaction(
       async (tx) => {
         await validateNoConflicts(tx, {
@@ -410,11 +471,21 @@ export async function createBooking(input: PublicBookingInput) {
             end: input.end,
             organizerName: identity.organizerName,
             organizerEmail: identity.organizerEmail,
+            playerCount: identity.playerCount,
             manageTokenHash,
             manageTokenExpiresAt: tokenExpiresAt,
+            ...guestWaiverData,
             outlookSyncStatus: "PENDING",
           },
         });
+
+        const organizerWaiver = await createWaiverSignature(
+          tx,
+          created,
+          input.waiver,
+          "ORGANIZER",
+          input.waiverEvidence ?? {},
+        );
 
         await audit(tx, { email: identity.organizerEmail }, {
           action: "BOOKING_CREATED",
@@ -423,14 +494,31 @@ export async function createBooking(input: PublicBookingInput) {
           after: created,
         });
 
-        return created;
+        await audit(tx, { email: identity.organizerEmail }, {
+          action: "WAIVER_SIGNED",
+          entityType: "WaiverSignature",
+          entityId: organizerWaiver.id,
+          after: {
+            bookingId: created.id,
+            bookingRevision: created.waiverRevision,
+            signerRole: "ORGANIZER",
+            signerEmail: organizerWaiver.signerEmail,
+            signatureImageSha256: organizerWaiver.signatureImageSha256,
+            pdfSha256: organizerWaiver.pdfSha256,
+          },
+        });
+
+        return { booking: created, organizerWaiverId: organizerWaiver.id };
       },
       { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
     ),
   );
 
-  const synced = await syncBooking(booking, "create", manageToken, input.baseUrl);
-  return serializeManagedBooking(synced, manageToken, input.baseUrl);
+  await sendWaiverSignatureEmail(result.organizerWaiverId);
+
+  const synced = await syncBooking(result.booking, "create", manageToken, input.baseUrl, guestWaiverToken);
+  const refreshed = await getBookingWithWaivers(synced.id);
+  return serializeManagedBooking(refreshed ?? synced, manageToken, input.baseUrl, guestWaiverToken);
 }
 
 export async function updateBooking(
@@ -458,6 +546,12 @@ export async function updateBooking(
   const nextStatus = input.status ?? booking.status;
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
+  const requiresFreshWaivers =
+    nextStatus === "CONFIRMED" &&
+    (booking.status !== "CONFIRMED" ||
+      nextStart.getTime() !== booking.start.getTime() ||
+      nextEnd.getTime() !== booking.end.getTime());
+  const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
 
   const updated = await retryPrismaTransaction(() =>
     prisma.$transaction(
@@ -478,6 +572,12 @@ export async function updateBooking(
             end: nextEnd,
             status: nextStatus,
             manageTokenExpiresAt: manageTokenExpiresAt(nextEnd),
+            ...(nextGuestWaiverToken
+              ? {
+                  waiverRevision: { increment: 1 },
+                  ...guestWaiverTokenData(nextGuestWaiverToken, nextEnd),
+                }
+              : {}),
             outlookSyncStatus: nextStatus === "CONFIRMED" ? "PENDING" : booking.outlookSyncStatus,
           },
         });
@@ -498,10 +598,22 @@ export async function updateBooking(
 
   const synced =
     updated.status === "CONFIRMED"
-      ? await syncBooking(updated, "update", access.manageToken ?? undefined, access.baseUrl)
+      ? await syncBooking(
+          updated,
+          "update",
+          access.manageToken ?? undefined,
+          access.baseUrl,
+          nextGuestWaiverToken,
+        )
       : await markOutlookDeleted(updated);
 
-  return serializeManagedBooking(synced, access.manageToken ?? undefined, access.baseUrl);
+  const refreshed = await getBookingWithWaivers(synced.id);
+  return serializeManagedBooking(
+    refreshed ?? synced,
+    access.manageToken ?? undefined,
+    access.baseUrl,
+    nextGuestWaiverToken,
+  );
 }
 
 export async function cancelBooking(access: BookingAccess, bookingId: string) {
@@ -522,7 +634,8 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
       ? await markOutlookDeleted(booking)
       : booking;
 
-    return serializeManagedBooking(synced, access.manageToken ?? undefined, access.baseUrl);
+    const refreshed = await getBookingWithWaivers(synced.id);
+    return serializeManagedBooking(refreshed ?? synced, access.manageToken ?? undefined, access.baseUrl);
   }
 
   const canceled = await prisma.$transaction(async (tx) => {
@@ -543,7 +656,8 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
   });
 
   const synced = await markOutlookDeleted(canceled);
-  return serializeManagedBooking(synced, access.manageToken ?? undefined, access.baseUrl);
+  const refreshed = await getBookingWithWaivers(synced.id);
+  return serializeManagedBooking(refreshed ?? synced, access.manageToken ?? undefined, access.baseUrl);
 }
 
 export async function createAdminBlock(

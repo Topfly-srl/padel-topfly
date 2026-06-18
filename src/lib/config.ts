@@ -21,12 +21,16 @@ const envSchema = z.object({
   MS_GRAPH_CLIENT_ID: z.string().optional(),
   MS_GRAPH_CLIENT_SECRET: z.string().optional(),
   MS_GRAPH_MAILBOX: z.string().optional(),
+  APP_WAIVER_RECIPIENT_EMAIL: z.string().email().default("cecilia.faieta@topflysolutions.com"),
+  APP_WAIVER_DOCUMENT_VERSION: z.string().default("padel-waiver-v1"),
   DATABASE_URL: z.string().optional(),
 });
 
 const env = envSchema.parse(process.env);
+const appEnvironment = env.APP_ENV ?? "development";
 const isProductionDeployment =
   process.env.VERCEL_ENV === "production" || env.APP_ENV === "production";
+const isPreviewDeployment = appEnvironment === "preview" || process.env.VERCEL_ENV === "preview";
 
 if (isProductionDeployment && env.AUTH_DEV_MODE === "true") {
   throw new Error("AUTH_DEV_MODE non puo' essere attivo in produzione.");
@@ -68,6 +72,9 @@ export const appConfig = {
   publicOrigin: env.APP_PUBLIC_ORIGIN?.trim().replace(/\/$/, ""),
   timeZone: env.APP_TIME_ZONE,
   isProduction: isProductionDeployment,
+  isPreview: isPreviewDeployment,
+  environmentName: appEnvironment,
+  publicEnvironmentLabel: isPreviewDeployment ? "TEST" : "",
   authDevMode: env.AUTH_DEV_MODE === "true",
   databaseConfigured: Boolean(env.DATABASE_URL),
   devUser: {
@@ -84,6 +91,10 @@ export const appConfig = {
     clientId: env.MS_GRAPH_CLIENT_ID,
     clientSecret: env.MS_GRAPH_CLIENT_SECRET,
     mailbox: env.MS_GRAPH_MAILBOX,
+  },
+  waiver: {
+    recipientEmail: env.APP_WAIVER_RECIPIENT_EMAIL.trim().toLowerCase(),
+    documentVersion: env.APP_WAIVER_DOCUMENT_VERSION.trim(),
   },
 };
 

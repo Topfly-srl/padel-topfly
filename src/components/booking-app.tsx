@@ -4,18 +4,24 @@ import {
   CalendarDays,
   Check,
   Clock3,
+  Copy,
+  Download,
   Edit3,
+  FileText,
   Lock,
   Mail,
   LogOut,
   MailWarning,
+  RotateCcw,
   Shield,
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
+import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
   AuditItem,
   AvailabilityBlock,
@@ -23,6 +29,12 @@ import type {
   CurrentUser,
   MyBooking,
 } from "@/lib/types";
+import { GuestLinkPanel } from "@/components/guest-link-panel";
+import {
+  WaiverFormSection,
+  type WaiverField,
+  type WaiverFormValue,
+} from "@/components/waiver-form-section";
 
 type AvailabilityResponse = {
   date: string;
@@ -45,13 +57,41 @@ type Notice = {
   text: string;
 };
 
-type StoredIdentity = {
-  organizerName: string;
-  organizerEmail: string;
+type GuestWaiverLinks = Record<string, string>;
+type FormField = "organizerName" | "organizerEmail" | "playerCount" | WaiverField;
+
+type AdminWaiverItem = {
+  id: string;
+  bookingId: string;
+  bookingRevision: number;
+  signerRole: "ORGANIZER" | "GUEST";
+  signerName: string;
+  signerEmail: string;
+  signedAt: string;
+  emailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+  emailError: string | null;
+  bookingStart: string;
+  bookingEnd: string;
+  playerCount: number;
 };
 
-const identityStorageKey = "topfly-padel.identity.v1";
 const tokenStorageKey = "topfly-padel.tokens.v1";
+const guestWaiverLinksStorageKey = "topfly-padel.guest-waiver-links.v1";
+const fallbackInitialState: BookingInitialState = {
+  date: "1970-01-01",
+  time: "18:00",
+  dateKeys: ["1970-01-01"],
+};
+const emptyWaiverForm: WaiverFormValue = {
+  birthDate: "",
+  birthPlace: "",
+  isAdultConfirmed: false,
+  privacyAccepted: false,
+  regulationAccepted: false,
+  liabilityAccepted: false,
+  specificApprovalAccepted: false,
+  signatureImageDataUrl: "",
+};
 
 function pad(value: number) {
   return value.toString().padStart(2, "0");
@@ -108,9 +148,7 @@ function localSummaryDay(date: Date) {
   }).format(date);
 }
 
-function humanDay(date: Date) {
-  const today = dateKey(new Date());
-  const tomorrow = dateKey(addMinutes(new Date(), 24 * 60));
+function humanDay(date: Date, today: string, tomorrow: string) {
   const key = dateKey(date);
 
   if (key === today) return "Oggi";
@@ -126,29 +164,6 @@ function timeOptions() {
     const minutes = index * 15;
     return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
   });
-}
-
-function defaultSelection() {
-  const now = new Date();
-  const today = dateKey(now);
-  const preferred = dateTimeFromParts(today, "18:00");
-
-  if (preferred > now) {
-    return { date: today, time: "18:00" };
-  }
-
-  const next = new Date(now.getTime() + 15 * 60_000);
-  next.setSeconds(0, 0);
-  const roundedMinutes = Math.ceil(next.getMinutes() / 15) * 15;
-  next.setMinutes(roundedMinutes === 60 ? 0 : roundedMinutes);
-  if (roundedMinutes === 60) {
-    next.setHours(next.getHours() + 1);
-  }
-
-  return {
-    date: dateKey(next),
-    time: `${pad(next.getHours())}:${pad(next.getMinutes())}`,
-  };
 }
 
 function dateTimeFromParts(day: string, time: string) {
@@ -201,18 +216,50 @@ function cancellationSuccessText(status: string) {
   return "Prenotazione cancellata.";
 }
 
-function readStoredIdentity(): StoredIdentity {
-  if (typeof window === "undefined") return { organizerName: "", organizerEmail: "" };
+function waiverEmailStatusLabel(status: AdminWaiverItem["emailStatus"]) {
+  if (status === "SENT") return "Inviata";
+  if (status === "FAILED") return "Da reinviare";
+  if (status === "SKIPPED") return "Non configurata";
+  return "In coda";
+}
 
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(identityStorageKey) ?? "{}") as Partial<StoredIdentity>;
+function waiverEmailStatusTone(status: AdminWaiverItem["emailStatus"]) {
+  if (status === "SENT") return "success";
+  if (status === "FAILED") return "danger";
+  if (status === "SKIPPED") return "neutral";
+  return "warning";
+}
+
+function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
+  if (status === "SENT") {
     return {
-      organizerName: typeof parsed.organizerName === "string" ? parsed.organizerName : "",
-      organizerEmail: typeof parsed.organizerEmail === "string" ? parsed.organizerEmail : "",
+      tone: "success",
+      title: "Modulo ufficiale inviato alla Direzione",
+      text: "Il PDF di Cecilia e' stato compilato, archiviato e inviato via email.",
     };
-  } catch {
-    return { organizerName: "", organizerEmail: "" };
   }
+
+  if (status === "FAILED") {
+    return {
+      tone: "warning",
+      title: "PDF salvato, email da reinviare",
+      text: "La firma resta registrata. Cecilia puo' scaricarlo o ritentare l'invio da admin.",
+    };
+  }
+
+  if (status === "SKIPPED") {
+    return {
+      tone: "warning",
+      title: "PDF salvato in archivio",
+      text: "L'invio email non e' configurato: il modulo resta disponibile nell'admin.",
+    };
+  }
+
+  return {
+    tone: "neutral",
+    title: "Modulo ufficiale in preparazione",
+    text: "Generiamo il PDF firmato dal modello TOPFLY e lo rendiamo disponibile alla Direzione.",
+  };
 }
 
 function readStoredTokens() {
@@ -228,25 +275,45 @@ function readStoredTokens() {
   }
 }
 
-function writeStoredIdentity(identity: StoredIdentity) {
-  window.localStorage.setItem(identityStorageKey, JSON.stringify(identity));
+function readStoredGuestWaiverLinks(): GuestWaiverLinks {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(guestWaiverLinksStorageKey) ?? "{}") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
 }
 
 function writeStoredTokens(tokens: string[]) {
   window.localStorage.setItem(tokenStorageKey, JSON.stringify(tokens.slice(0, 30)));
 }
 
+function writeStoredGuestWaiverLinks(links: GuestWaiverLinks) {
+  window.localStorage.setItem(guestWaiverLinksStorageKey, JSON.stringify(links));
+}
+
 export function BookingApp({
   adminMode = false,
+  environmentLabel = "",
+  initialState = fallbackInitialState,
   initialUser,
 }: {
   adminMode?: boolean;
+  environmentLabel?: string;
+  initialState?: BookingInitialState;
   initialUser?: CurrentUser;
 }) {
   const isAdmin = adminMode && initialUser?.role === "ADMIN";
-  const [initialSelection] = useState(defaultSelection);
-  const [selectedDate, setSelectedDate] = useState(initialSelection.date);
-  const [selectedTime, setSelectedTime] = useState(initialSelection.time);
+  const [selectedDate, setSelectedDate] = useState(initialState.date);
+  const [selectedTime, setSelectedTime] = useState(initialState.time);
   const [duration, setDuration] = useState(60);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [myBookings, setMyBookings] = useState<MyBooking[]>([]);
@@ -255,9 +322,19 @@ export function BookingApp({
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [editingToken, setEditingToken] = useState<string | null>(null);
   const [isBookingFormOpen, setIsBookingFormOpen] = useState(false);
+  const [bookingFormStep, setBookingFormStep] = useState<1 | 2>(1);
   const [organizerName, setOrganizerName] = useState("");
   const [organizerEmail, setOrganizerEmail] = useState("");
+  const [playerCount, setPlayerCount] = useState(4);
+  const [waiverForm, setWaiverForm] = useState<WaiverFormValue>(emptyWaiverForm);
+  const [touchedFields, setTouchedFields] = useState<Partial<Record<FormField, boolean>>>({});
+  const [bookingSubmitAttempted, setBookingSubmitAttempted] = useState(false);
   const [localTokens, setLocalTokens] = useState<string[]>([]);
+  const [guestWaiverLinks, setGuestWaiverLinks] = useState<GuestWaiverLinks>({});
+  const [copiedGuestWaiverLink, setCopiedGuestWaiverLink] = useState<string | null>(null);
+  const [adminWaivers, setAdminWaivers] = useState<AdminWaiverItem[]>([]);
+  const [adminWaiverStatusFilter, setAdminWaiverStatusFilter] = useState<AdminWaiverItem["emailStatus"] | "ALL">("ALL");
+  const [adminWaiverLimit, setAdminWaiverLimit] = useState(50);
   const [storageReady, setStorageReady] = useState(false);
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("10:00");
@@ -267,13 +344,8 @@ export function BookingApp({
 
   const dates = useMemo(
     () =>
-      Array.from({ length: 15 }, (_, index) => {
-        const date = new Date();
-        date.setHours(0, 0, 0, 0);
-        date.setDate(date.getDate() + index);
-        return date;
-      }),
-    [],
+      initialState.dateKeys.map((key) => dateTimeFromParts(key, "00:00")),
+    [initialState.dateKeys],
   );
 
   const options = useMemo(() => timeOptions(), []);
@@ -298,7 +370,26 @@ export function BookingApp({
   const isExternalEmail =
     organizerEmail.trim().includes("@") &&
     !organizerEmail.trim().toLowerCase().endsWith(`@${allowedDomain}`);
-  const isBookingFormValid = !isBookingFormOpen || (organizerName.trim().length > 1 && isValidEmail(organizerEmail));
+  const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
+  const isWaiverFormValid =
+    playerCount >= 2 &&
+    playerCount <= 4 &&
+    Boolean(birthDateIso) &&
+    waiverForm.birthPlace.trim().length > 1 &&
+    waiverForm.isAdultConfirmed &&
+    waiverForm.privacyAccepted &&
+    waiverForm.regulationAccepted &&
+    waiverForm.liabilityAccepted &&
+    waiverForm.specificApprovalAccepted &&
+    Boolean(waiverForm.signatureImageDataUrl);
+  const isBookingFormValid =
+    !isBookingFormOpen ||
+    (organizerName.trim().length > 1 && isValidEmail(organizerEmail) && isWaiverFormValid);
+  const isBookingDetailsValid =
+    organizerName.trim().length > 1 &&
+    isValidEmail(organizerEmail) &&
+    playerCount >= 2 &&
+    playerCount <= 4;
 
   const selectedOwnBooking = useMemo(
     () =>
@@ -315,6 +406,44 @@ export function BookingApp({
     ? syncLabel(selectedOwnBooking.outlookSyncStatus, selectedOwnBooking.status)
     : null;
   const selectedOwnSyncFailed = selectedOwnBooking?.outlookSyncStatus === "FAILED";
+  const selectedOwnGuestWaiverLink = selectedOwnBooking
+    ? selectedOwnBooking.guestWaiverUrl ?? guestWaiverLinks[selectedOwnBooking.id]
+    : null;
+  const selectedOwnWaiverDelivery = selectedOwnBooking
+    ? waiverDeliveryCopy(selectedOwnBooking.waiverEmailStatus)
+    : null;
+  const filteredAdminWaivers = useMemo(
+    () =>
+      adminWaiverStatusFilter === "ALL"
+        ? adminWaivers
+        : adminWaivers.filter((waiver) => waiver.emailStatus === adminWaiverStatusFilter),
+    [adminWaiverStatusFilter, adminWaivers],
+  );
+  const missingBookingFields = useMemo(() => {
+    const missing: string[] = [];
+    if (organizerName.trim().length < 2) missing.push("nome referente");
+    if (!isValidEmail(organizerEmail)) missing.push("email valida");
+    if (!birthDateIso) missing.push("data di nascita");
+    if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
+    if (!waiverForm.isAdultConfirmed) missing.push("maggiore eta");
+    if (!waiverForm.privacyAccepted) missing.push("privacy");
+    if (!waiverForm.regulationAccepted) missing.push("regolamento");
+    if (!waiverForm.liabilityAccepted) missing.push("responsabilita");
+    if (!waiverForm.specificApprovalAccepted) missing.push("clausole specifiche");
+    if (!waiverForm.signatureImageDataUrl) missing.push("firma nel riquadro");
+    return missing;
+  }, [
+    birthDateIso,
+    organizerEmail,
+    organizerName,
+    waiverForm.birthPlace,
+    waiverForm.isAdultConfirmed,
+    waiverForm.liabilityAccepted,
+    waiverForm.privacyAccepted,
+    waiverForm.regulationAccepted,
+    waiverForm.signatureImageDataUrl,
+    waiverForm.specificApprovalAccepted,
+  ]);
 
   const selectionConflict = useMemo(() => {
     const booking = dayBookings.find(
@@ -350,6 +479,21 @@ export function BookingApp({
     }
   }, [isAdmin]);
 
+  const loadAdminWaivers = useCallback(async () => {
+    if (!isAdmin) return;
+
+    const params = new URLSearchParams({ limit: String(adminWaiverLimit) });
+    if (adminWaiverStatusFilter !== "ALL") {
+      params.set("status", adminWaiverStatusFilter);
+    }
+
+    const response = await fetch(`/api/admin/waivers?${params.toString()}`, { cache: "no-store" });
+    if (response.ok) {
+      const json = (await response.json()) as { waivers: AdminWaiverItem[] };
+      setAdminWaivers(json.waivers);
+    }
+  }, [adminWaiverLimit, adminWaiverStatusFilter, isAdmin]);
+
   const loadMyBookings = useCallback(async (tokens: string[]) => {
     if (!tokens.length) {
       setMyBookings([]);
@@ -370,10 +514,8 @@ export function BookingApp({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const identity = readStoredIdentity();
-      setOrganizerName(identity.organizerName);
-      setOrganizerEmail(identity.organizerEmail);
       setLocalTokens(readStoredTokens());
+      setGuestWaiverLinks(readStoredGuestWaiverLinks());
       setStorageReady(true);
     }, 0);
 
@@ -385,6 +527,7 @@ export function BookingApp({
       try {
         await loadAvailability();
         await loadAudit();
+        await loadAdminWaivers();
       } catch (error) {
         setNotice({
           type: "error",
@@ -392,7 +535,7 @@ export function BookingApp({
         });
       }
     });
-  }, [loadAudit, loadAvailability]);
+  }, [loadAdminWaivers, loadAudit, loadAvailability]);
 
   useEffect(() => {
     if (!storageReady) return;
@@ -417,15 +560,8 @@ export function BookingApp({
   async function refresh(tokens = localTokens) {
     await loadAvailability();
     await loadAudit();
+    await loadAdminWaivers();
     await loadMyBookings(tokens);
-  }
-
-  function rememberIdentity() {
-    const nextIdentity = {
-      organizerName: organizerName.trim(),
-      organizerEmail: organizerEmail.trim(),
-    };
-    writeStoredIdentity(nextIdentity);
   }
 
   function rememberToken(token: string) {
@@ -435,11 +571,93 @@ export function BookingApp({
     return nextTokens;
   }
 
+  function rememberGuestWaiverLink(bookingId: string, link: string) {
+    const nextLinks = { ...guestWaiverLinks, [bookingId]: link };
+    writeStoredGuestWaiverLinks(nextLinks);
+    setGuestWaiverLinks(nextLinks);
+    return nextLinks;
+  }
+
+  function normalizeGuestWaiverLink(link: string) {
+    if (typeof window === "undefined") return link;
+
+    try {
+      const url = new URL(link, window.location.origin);
+      if (url.pathname.startsWith("/waiver/")) {
+        return `${window.location.origin}${url.pathname}${url.search}${url.hash}`;
+      }
+      return url.toString();
+    } catch {
+      return link;
+    }
+  }
+
+  async function writeClipboardText(text: string) {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fall through to the textarea fallback below.
+      }
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      return document.execCommand("copy");
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
+  async function copyGuestWaiverLink(link: string) {
+    const normalizedLink = normalizeGuestWaiverLink(link);
+    const copied = await writeClipboardText(normalizedLink);
+
+    if (copied) {
+      setCopiedGuestWaiverLink(normalizedLink);
+      setNotice({ type: "success", text: "Link firma ospiti copiato." });
+      window.setTimeout(() => {
+        setCopiedGuestWaiverLink((current) => (current === normalizedLink ? null : current));
+      }, 4500);
+    } else {
+      setNotice({
+        type: "warning",
+        text: "Copia automatica non riuscita. Apri il link o selezionalo dal campo qui sotto.",
+      });
+    }
+  }
+
   async function saveBooking() {
     setNotice(null);
 
     if (!editingBookingId && !isBookingFormOpen) {
       setIsBookingFormOpen(true);
+      setBookingFormStep(1);
+      setBookingSubmitAttempted(false);
+      return;
+    }
+
+    if (!editingBookingId && !isBookingDetailsValid) {
+      setBookingFormStep(1);
+      setBookingSubmitAttempted(true);
+      setNotice({ type: "warning", text: "Completa i dati della prenotazione prima di continuare." });
+      return;
+    }
+
+    if (!editingBookingId && !isBookingFormValid) {
+      setBookingFormStep(2);
+      setBookingSubmitAttempted(true);
+      setNotice({ type: "warning", text: "Completa i campi obbligatori prima di prenotare." });
       return;
     }
 
@@ -455,6 +673,17 @@ export function BookingApp({
           end: end.toISOString(),
           organizerName,
           organizerEmail,
+          playerCount,
+          waiver: {
+            birthDate: birthDateIso,
+            birthPlace: waiverForm.birthPlace,
+            isAdultConfirmed: waiverForm.isAdultConfirmed,
+            privacyAccepted: waiverForm.privacyAccepted,
+            regulationAccepted: waiverForm.regulationAccepted,
+            liabilityAccepted: waiverForm.liabilityAccepted,
+            specificApprovalAccepted: waiverForm.specificApprovalAccepted,
+            signatureImageDataUrl: waiverForm.signatureImageDataUrl,
+          },
         };
 
     const response = await fetch(isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings", {
@@ -472,15 +701,27 @@ export function BookingApp({
     let nextTokens = localTokens;
 
     if (!isEditing) {
-      rememberIdentity();
       if (json.booking.manageToken) {
         nextTokens = rememberToken(json.booking.manageToken);
       }
     }
 
+    if (json.booking.guestWaiverUrl) {
+      rememberGuestWaiverLink(json.booking.id, json.booking.guestWaiverUrl);
+    }
+
     setEditingBookingId(null);
     setEditingToken(null);
     setIsBookingFormOpen(false);
+    setBookingFormStep(1);
+    setBookingSubmitAttempted(false);
+    setTouchedFields({});
+    if (!isEditing) {
+      setWaiverForm(emptyWaiverForm);
+      setOrganizerName("");
+      setOrganizerEmail("");
+      setPlayerCount(4);
+    }
     setNotice({
       type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
       text: bookingSuccessText(json.booking.outlookSyncStatus),
@@ -572,7 +813,55 @@ export function BookingApp({
     await refresh();
   }
 
+  async function retryWaiverEmail(signatureId: string) {
+    const response = await fetch(`/api/admin/waivers/${signatureId}/retry-email`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      setNotice({ type: "error", text: await readApiError(response) });
+      return;
+    }
+
+    setNotice({ type: "success", text: "Invio PDF ritentato." });
+    await refresh();
+  }
+
   const canSave = !selectionConflict && !isPending && !isConfirmedSelection && isBookingFormValid;
+  const canPressPrimary = !selectionConflict && !isPending && !isConfirmedSelection;
+  const showFieldError = (field: FormField, invalid: boolean) =>
+    invalid && (bookingSubmitAttempted || Boolean(touchedFields[field]));
+  const markTouched = (field: FormField) => {
+    setTouchedFields((current) => ({ ...current, [field]: true }));
+  };
+  const closeBookingWizard = () => {
+    setEditingBookingId(null);
+    setEditingToken(null);
+    setIsBookingFormOpen(false);
+    setBookingFormStep(1);
+    setBookingSubmitAttempted(false);
+    setTouchedFields({});
+    setNotice(null);
+  };
+  const continueBookingWizard = () => {
+    if (!isBookingDetailsValid) {
+      setBookingSubmitAttempted(true);
+      setNotice({ type: "warning", text: "Completa nome, email e numero giocatori." });
+      return;
+    }
+
+    setNotice(null);
+    setBookingFormStep(2);
+  };
+  const openBookingCheckout = () => {
+    const params = new URLSearchParams({
+      date: selectedDate,
+      time: selectedTime,
+      duration: String(duration),
+    });
+
+    window.location.assign(`/book?${params.toString()}`);
+  };
 
   return (
     <main className="app-shell">
@@ -592,6 +881,7 @@ export function BookingApp({
                 ? `Admin ${initialUser?.name?.split(" ")[0] ?? initialUser?.email.split("@")[0]}`
                 : "Prenota il campo"}
             </h1>
+            {environmentLabel ? <span className="environment-badge">{environmentLabel}</span> : null}
           </div>
         </div>
         {isAdmin ? (
@@ -625,7 +915,7 @@ export function BookingApp({
                     aria-pressed={key === selectedDate}
                     type="button"
                   >
-                    <span>{humanDay(date)}</span>
+                    <span>{humanDay(date, initialState.dateKeys[0], initialState.dateKeys[1])}</span>
                     <strong>{new Intl.DateTimeFormat("it-IT", { day: "2-digit" }).format(date)}</strong>
                   </button>
                 );
@@ -724,8 +1014,29 @@ export function BookingApp({
                           : selectedOwnSyncText}
                       </small>
                     ) : null}
+                    <small>
+                      Firme scarico: {selectedOwnBooking.waiverSignedCount}/{selectedOwnBooking.playerCount}
+                    </small>
                   </div>
                 </div>
+                {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+                {selectedOwnWaiverDelivery ? (
+                  <div className={`official-pdf-panel ${selectedOwnWaiverDelivery.tone}`}>
+                    <FileText size={17} />
+                    <div>
+                      <strong>{selectedOwnWaiverDelivery.title}</strong>
+                      <small>{selectedOwnWaiverDelivery.text}</small>
+                    </div>
+                  </div>
+                ) : null}
+                {selectedOwnGuestWaiverLink ? (
+                  <GuestLinkPanel
+                    copied={copiedGuestWaiverLink === normalizeGuestWaiverLink(selectedOwnGuestWaiverLink)}
+                    environmentLabel={environmentLabel}
+                    link={normalizeGuestWaiverLink(selectedOwnGuestWaiverLink)}
+                    onCopy={copyGuestWaiverLink}
+                  />
+                ) : null}
                 <div className="summary-actions">
                   <button className="ghost-button full-width" onClick={() => editBooking(selectedOwnBooking)} type="button">
                     <Edit3 size={16} />
@@ -765,77 +1076,31 @@ export function BookingApp({
                     <span aria-hidden="true">
                       <Mail size={17} />
                     </span>
-                    <div>
-                      <strong>Conferma via email</strong>
-                      <small>Con link per modificare o cancellare.</small>
-                    </div>
+                  <div>
+                      <strong>Prenotazione e modulo PDF</strong>
+                      <small>Conferma via email, poi invio del modulo firmato alla Direzione.</small>
                   </div>
+                </div>
                 )}
 
               </>
             )}
-
-            {isBookingFormOpen && !editingBookingId ? (
-              <div className="booking-form">
-                <label>
-                  Nome e cognome
-                  <input
-                    autoComplete="name"
-                    required
-                    aria-invalid={isBookingFormOpen && organizerName.trim().length === 0}
-                    value={organizerName}
-                    onChange={(event) => setOrganizerName(event.target.value)}
-                    placeholder="Mario Rossi"
-                  />
-                </label>
-                <label>
-                  Email
-                  <input
-                    autoComplete="email"
-                    inputMode="email"
-                    type="email"
-                    required
-                    aria-invalid={isBookingFormOpen && organizerEmail.trim().length > 0 && !isValidEmail(organizerEmail)}
-                    value={organizerEmail}
-                    onChange={(event) => setOrganizerEmail(event.target.value)}
-                    placeholder={`nome@${allowedDomain}`}
-                  />
-                </label>
-                {isExternalEmail ? (
-                  <div className="notice info">
-                    Puoi usare questa email, ma quella aziendale aiuta a riconoscerti meglio.
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
             {isConfirmedSelection || selectionConflict ? null : (
               <button
                 className="primary-button full-width"
-                disabled={!canSave}
-                onClick={saveBooking}
+                disabled={!canPressPrimary || (editingBookingId ? !canSave : false)}
+                onClick={editingBookingId ? saveBooking : openBookingCheckout}
                 type="button"
               >
                 <Check size={18} />
-                {selectionConflict
-                  ? "Slot occupato"
-                  : editingBookingId
-                    ? "Salva modifica"
-                    : isBookingFormOpen
-                      ? "Conferma prenotazione"
-                      : "Prenota"}
+                {selectionConflict ? "Slot occupato" : editingBookingId ? "Salva modifica" : "Prenota"}
               </button>
             )}
 
-            {editingBookingId || isBookingFormOpen ? (
+            {editingBookingId ? (
               <button
                 className="ghost-button full-width"
-                onClick={() => {
-                  setEditingBookingId(null);
-                  setEditingToken(null);
-                  setIsBookingFormOpen(false);
-                  setNotice(null);
-                }}
+                onClick={closeBookingWizard}
                 type="button"
               >
                 Annulla
@@ -850,47 +1115,65 @@ export function BookingApp({
             </div>
             <div className="booking-list">
               {activeMyBookings.length ? (
-                activeMyBookings.map((booking) => (
-                  <article
-                    className={`booking-item compact ${booking.status.toLowerCase()} ${
-                      selectedOwnBooking?.id === booking.id ? "selected-booking" : ""
-                    }`}
-                    key={booking.id}
-                  >
-                    <div>
-                      <strong>
-                        {localDay(new Date(booking.start))}, {localTime(new Date(booking.start))} -{" "}
-                        {localTime(new Date(booking.end))}
-                      </strong>
-                      <small>
-                        {booking.status === "CONFIRMED" ? "Confermata" : "Cancellata"}
-                        {syncLabel(booking.outlookSyncStatus, booking.status)
-                          ? ` · ${syncLabel(booking.outlookSyncStatus, booking.status)}`
-                          : ""}
-                      </small>
-                    </div>
-                    <div className="item-actions">
-                      <button
-                        className="mini-button"
-                        onClick={() => editBooking(booking)}
-                        type="button"
-                        aria-label="Modifica"
-                        title="Modifica"
-                      >
-                        <Edit3 size={15} />
-                      </button>
-                      <button
-                        className="mini-button danger"
-                        onClick={() => cancelBooking(booking)}
-                        type="button"
-                        aria-label="Cancella"
-                        title="Cancella"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </article>
-                ))
+                activeMyBookings.map((booking) => {
+                  const guestLink = booking.guestWaiverUrl ?? guestWaiverLinks[booking.id];
+
+                  return (
+                    <article
+                      className={`booking-item compact ${booking.status.toLowerCase()} ${
+                        selectedOwnBooking?.id === booking.id ? "selected-booking" : ""
+                      }`}
+                      key={booking.id}
+                    >
+                      <div>
+                        <strong>
+                          {localDay(new Date(booking.start))}, {localTime(new Date(booking.start))} -{" "}
+                          {localTime(new Date(booking.end))}
+                        </strong>
+                        <small>
+                          {booking.status === "CONFIRMED" ? "Confermata" : "Cancellata"}
+                          {syncLabel(booking.outlookSyncStatus, booking.status)
+                            ? ` · ${syncLabel(booking.outlookSyncStatus, booking.status)}`
+                            : ""}
+                        </small>
+                        <small>
+                          Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
+                        </small>
+                      </div>
+                      <div className="item-actions">
+                        {guestLink ? (
+                          <button
+                            className="mini-button"
+                            onClick={() => copyGuestWaiverLink(guestLink)}
+                            type="button"
+                            aria-label="Copia link firma ospiti"
+                            title="Copia link firma ospiti"
+                          >
+                            <Copy size={15} />
+                          </button>
+                        ) : null}
+                        <button
+                          className="mini-button"
+                          onClick={() => editBooking(booking)}
+                          type="button"
+                          aria-label="Modifica"
+                          title="Modifica"
+                        >
+                          <Edit3 size={15} />
+                        </button>
+                        <button
+                          className="mini-button danger"
+                          onClick={() => cancelBooking(booking)}
+                          type="button"
+                          aria-label="Cancella"
+                          title="Cancella"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
               ) : (
                 <p className="empty-state">Nessuna prenotazione attiva salvata su questo dispositivo.</p>
               )}
@@ -975,6 +1258,10 @@ export function BookingApp({
                         <span>
                           {localTime(new Date(booking.start))} - {localTime(new Date(booking.end))}
                         </span>
+                        <small>
+                          Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
+                          {booking.waiverEmailStatus === "FAILED" ? " · email PDF da reinviare" : ""}
+                        </small>
                       </div>
                       <div className="item-actions">
                         <button
@@ -1002,6 +1289,85 @@ export function BookingApp({
               </details>
 
               <details>
+                <summary>Scarichi responsabilita</summary>
+                <div className="admin-filter-row">
+                  <label>
+                    Stato email PDF
+                    <select
+                      value={adminWaiverStatusFilter}
+                      onChange={(event) => {
+                        setAdminWaiverLimit(50);
+                        setAdminWaiverStatusFilter(event.target.value as AdminWaiverItem["emailStatus"] | "ALL");
+                      }}
+                    >
+                      <option value="ALL">Tutti</option>
+                      <option value="FAILED">Da reinviare</option>
+                      <option value="PENDING">In coda</option>
+                      <option value="SENT">Inviata</option>
+                      <option value="SKIPPED">Non configurata</option>
+                    </select>
+                  </label>
+                  <span className="count-pill">{filteredAdminWaivers.length}</span>
+                </div>
+                <div className="booking-list">
+                  {filteredAdminWaivers.length ? (
+                    <>
+                      {filteredAdminWaivers.map((waiver) => (
+                        <article className="booking-item" key={waiver.id}>
+                          <div>
+                            <strong>{waiver.signerName}</strong>
+                            <span>
+                              {waiver.signerRole === "ORGANIZER" ? "Referente" : "Ospite"} -{" "}
+                              {localDay(new Date(waiver.bookingStart))}, {localTime(new Date(waiver.bookingStart))} -{" "}
+                              {localTime(new Date(waiver.bookingEnd))}
+                            </span>
+                            <small>
+                              <span className={`status-badge ${waiverEmailStatusTone(waiver.emailStatus)}`}>
+                                PDF {waiverEmailStatusLabel(waiver.emailStatus)}
+                              </span>
+                              {waiver.emailError ? ` - ${waiver.emailError.slice(0, 80)}` : ""}
+                            </small>
+                          </div>
+                          <div className="item-actions">
+                            <a
+                              className="mini-button"
+                              href={`/api/admin/waivers/${waiver.id}/pdf`}
+                              aria-label={`Scarica PDF di ${waiver.signerName}`}
+                              title="Scarica PDF"
+                            >
+                              <Download size={15} />
+                            </a>
+                            {waiver.emailStatus === "FAILED" || waiver.emailStatus === "SKIPPED" ? (
+                              <button
+                                className="mini-button"
+                                onClick={() => retryWaiverEmail(waiver.id)}
+                                type="button"
+                                aria-label={`Reinvia PDF di ${waiver.signerName}`}
+                                title="Reinvia PDF"
+                              >
+                                <RotateCcw size={15} />
+                              </button>
+                            ) : null}
+                          </div>
+                        </article>
+                      ))}
+                      {adminWaivers.length >= adminWaiverLimit ? (
+                        <button
+                          className="ghost-button full-width"
+                          onClick={() => setAdminWaiverLimit((current) => current + 50)}
+                          type="button"
+                        >
+                          Mostra altri
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="empty-state">Nessuno scarico corrisponde al filtro selezionato.</p>
+                  )}
+                </div>
+              </details>
+
+              <details>
                 <summary>Storico recente</summary>
                 <div className="audit-list">
                   {audit.map((item) => (
@@ -1018,6 +1384,168 @@ export function BookingApp({
           ) : null}
         </aside>
       </section>
+
+      {isBookingFormOpen && !editingBookingId ? (
+        <div className="booking-wizard-backdrop" role="presentation">
+          <section
+            aria-labelledby="booking-wizard-title"
+            aria-modal="true"
+            className="booking-wizard"
+            role="dialog"
+          >
+            <div className="booking-wizard-header">
+              <div>
+                <p className="muted-label">
+                  {localSummaryDay(start)} · {localTime(start)} - {localTime(end)}
+                </p>
+                <h2 id="booking-wizard-title">
+                  {bookingFormStep === 1 ? "Dati prenotazione" : "Firma accesso campo"}
+                </h2>
+              </div>
+              <button
+                className="mini-button"
+                onClick={closeBookingWizard}
+                type="button"
+                aria-label="Chiudi"
+                title="Chiudi"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="wizard-steps" aria-label="Avanzamento prenotazione">
+              <button
+                className={bookingFormStep === 1 ? "active" : ""}
+                onClick={() => setBookingFormStep(1)}
+                type="button"
+              >
+                <span>1</span>
+                Prenotazione
+              </button>
+              <button
+                className={bookingFormStep === 2 ? "active" : ""}
+                onClick={() => {
+                  if (isBookingDetailsValid) {
+                    setBookingFormStep(2);
+                    setNotice(null);
+                  } else {
+                    continueBookingWizard();
+                  }
+                }}
+                type="button"
+              >
+                <span>2</span>
+                Scarico
+              </button>
+            </div>
+
+            <div className="booking-wizard-body">
+              {notice ? <div className={`notice ${notice.type}`}>{notice.text}</div> : null}
+
+              {bookingFormStep === 1 ? (
+                <div className="wizard-section">
+                  <label>
+                    Nome e cognome
+                    <input
+                      autoComplete="name"
+                      required
+                      aria-invalid={showFieldError("organizerName", organizerName.trim().length < 2) || undefined}
+                      value={organizerName}
+                      onBlur={() => markTouched("organizerName")}
+                      onChange={(event) => setOrganizerName(event.target.value)}
+                      placeholder="Mario Rossi"
+                    />
+                  </label>
+                  <label>
+                    Email
+                    <input
+                      autoComplete="email"
+                      inputMode="email"
+                      type="email"
+                      required
+                      aria-invalid={showFieldError("organizerEmail", !isValidEmail(organizerEmail)) || undefined}
+                      value={organizerEmail}
+                      onBlur={() => markTouched("organizerEmail")}
+                      onChange={(event) => setOrganizerEmail(event.target.value)}
+                      placeholder={`nome@${allowedDomain}`}
+                    />
+                  </label>
+                  {isExternalEmail ? (
+                    <div className="notice info">
+                      Puoi usare questa email, ma quella aziendale aiuta a riconoscerti meglio.
+                    </div>
+                  ) : null}
+                  <label>
+                    Giocatori in campo
+                    <select
+                      value={playerCount}
+                      onBlur={() => markTouched("playerCount")}
+                      onChange={(event) => {
+                        markTouched("playerCount");
+                        setPlayerCount(Number(event.target.value));
+                      }}
+                    >
+                      {[2, 3, 4].map((count) => (
+                        <option key={count} value={count}>
+                          {count} giocatori
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : (
+                <div className="wizard-section">
+                  <WaiverFormSection
+                    birthDateIsValid={Boolean(birthDateIso)}
+                    compact
+                    helperText="Compiliamo il PDF ufficiale TOPFLY e lo inviamo alla Direzione."
+                    regulationUrl="/legal/regolamento-padel-topfly-v1.pdf"
+                    templateUrl="/legal/modulo-responsabilita-padel-template-v1.pdf"
+                    showErrors={bookingSubmitAttempted}
+                    signerName={organizerName}
+                    touched={touchedFields}
+                    value={waiverForm}
+                    onChange={setWaiverForm}
+                    onTouched={markTouched}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className={`booking-wizard-footer ${bookingFormStep === 2 ? "with-note" : ""}`}>
+              {bookingFormStep === 1 ? (
+                <>
+                  <button className="ghost-button" onClick={closeBookingWizard} type="button">
+                    Annulla
+                  </button>
+                  <button className="primary-button" onClick={continueBookingWizard} type="button">
+                    Continua
+                  </button>
+                </>
+              ) : (
+                <>
+                  <small className={`form-submit-hint ${isBookingFormValid ? "success" : ""}`}>
+                    {isBookingFormValid
+                      ? "Tutto pronto: puoi firmare e prenotare."
+                      : `Completa: ${missingBookingFields.slice(0, 3).join(", ")}${
+                          missingBookingFields.length > 3 ? "..." : ""
+                        }.`}
+                  </small>
+                  <div className="wizard-footer-actions">
+                    <button className="ghost-button" onClick={() => setBookingFormStep(1)} type="button">
+                      Indietro
+                    </button>
+                    <button className="primary-button" onClick={saveBooking} type="button">
+                      <Check size={18} />
+                      Firma e conferma
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

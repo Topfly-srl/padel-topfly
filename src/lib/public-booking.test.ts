@@ -16,6 +16,8 @@ const adminUser: CurrentUser = {
   name: "Admin",
   role: "ADMIN",
 };
+const signatureImageDataUrl =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function pad(value: number) {
   return value.toString().padStart(2, "0");
@@ -33,6 +35,26 @@ function futureSlot(dayOffset: number, hour: number, minute = 0) {
   return { start, end };
 }
 
+function createDemoBooking(input: Parameters<typeof demoCreateBooking>[0]) {
+  return demoCreateBooking({
+    ...input,
+    playerCount: input.playerCount ?? 4,
+    waiver: {
+      signerName: input.organizerName,
+      signerEmail: input.organizerEmail,
+      birthDate: new Date("1990-01-01T00:00:00.000Z"),
+      birthPlace: "Pretoro",
+      isAdultConfirmed: true,
+      privacyAccepted: true,
+      regulationAccepted: true,
+      liabilityAccepted: true,
+      specificApprovalAccepted: true,
+      signatureText: input.organizerName,
+      signatureImageDataUrl,
+    },
+  });
+}
+
 describe("public booking flow", () => {
   beforeEach(() => {
     demoReset();
@@ -44,7 +66,7 @@ describe("public booking flow", () => {
 
   it("crea una prenotazione pubblica con token senza esporre l'email", async () => {
     const slot = futureSlot(1, 10);
-    const booking = await demoCreateBooking({
+    const booking = await createDemoBooking({
       ...slot,
       organizerName: "Mario Rossi",
       organizerEmail: "Mario.Rossi@example.com",
@@ -59,7 +81,7 @@ describe("public booking flow", () => {
 
   it("non espone email nella availability pubblica", async () => {
     const slot = futureSlot(1, 10);
-    await demoCreateBooking({
+    await createDemoBooking({
       ...slot,
       organizerName: "Mario Rossi",
       organizerEmail: "mario@example.com",
@@ -74,7 +96,7 @@ describe("public booking flow", () => {
 
   it("recupera solo le prenotazioni col token corretto", async () => {
     const slot = futureSlot(1, 11);
-    const booking = await demoCreateBooking({
+    const booking = await createDemoBooking({
       ...slot,
       organizerName: "Laura Bianchi",
       organizerEmail: "laura@example.com",
@@ -92,7 +114,7 @@ describe("public booking flow", () => {
     vi.setSystemTime(new Date("2026-06-03T10:00:00.000Z"));
 
     const slot = futureSlot(1, 15);
-    const booking = await demoCreateBooking({
+    const booking = await createDemoBooking({
       ...slot,
       organizerName: "Laura Bianchi",
       organizerEmail: "laura@example.com",
@@ -104,7 +126,7 @@ describe("public booking flow", () => {
   });
 
   it("modifica una prenotazione con token valido", async () => {
-    const booking = await demoCreateBooking({
+    const booking = await createDemoBooking({
       ...futureSlot(1, 14),
       organizerName: "Paolo Neri",
       organizerEmail: "paolo@example.com",
@@ -122,7 +144,7 @@ describe("public booking flow", () => {
   });
 
   it("rifiuta modifiche con token errato", async () => {
-    const booking = await demoCreateBooking({
+    const booking = await createDemoBooking({
       ...futureSlot(1, 15),
       organizerName: "Paolo Neri",
       organizerEmail: "paolo@example.com",
@@ -134,19 +156,19 @@ describe("public booking flow", () => {
   });
 
   it("limita a 2 prenotazioni future per email", async () => {
-    await demoCreateBooking({
+    await createDemoBooking({
       ...futureSlot(1, 12),
       organizerName: "Giulia Verdi",
       organizerEmail: "giulia@example.com",
     });
-    await demoCreateBooking({
+    await createDemoBooking({
       ...futureSlot(2, 12),
       organizerName: "Giulia Verdi",
       organizerEmail: "GIULIA@example.com",
     });
 
     await expect(
-      demoCreateBooking({
+      createDemoBooking({
         ...futureSlot(3, 12),
         organizerName: "Giulia Verdi",
         organizerEmail: "giulia@example.com",
@@ -155,7 +177,7 @@ describe("public booking flow", () => {
   });
 
   it("cancella una prenotazione con token valido", async () => {
-    const booking = await demoCreateBooking({
+    const booking = await createDemoBooking({
       ...futureSlot(1, 13),
       organizerName: "Paolo Neri",
       organizerEmail: "paolo@example.com",

@@ -1,3 +1,4 @@
+import type { WaiverEmailStatus } from "@prisma/client";
 import {
   bookingPolicy,
   isAlignedToSlot,
@@ -22,6 +23,7 @@ import type {
   CurrentUser,
   MyBooking,
 } from "@/lib/types";
+import type { WaiverEvidence, WaiverInput } from "@/lib/waiver-service";
 
 type DemoBooking = {
   id: string;
@@ -32,8 +34,22 @@ type DemoBooking = {
   organizerName: string;
   manageTokenHash: string | null;
   manageTokenExpiresAt: Date | null;
+  playerCount: number;
+  waiverRevision: number;
+  guestWaiverTokenHash: string | null;
+  guestWaiverTokenExpiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type DemoWaiverSignature = {
+  id: string;
+  bookingId: string;
+  bookingRevision: number;
+  signerName: string;
+  signerEmail: string;
+  emailStatus: WaiverEmailStatus;
+  signedAt: Date;
 };
 
 type DemoBlock = {
@@ -54,12 +70,16 @@ type DemoCreateInput = {
   end: Date;
   organizerName: string;
   organizerEmail: string;
+  playerCount?: number;
+  waiver?: WaiverInput;
+  waiverEvidence?: WaiverEvidence;
   baseUrl?: string;
 };
 
 const bookings: DemoBooking[] = [];
 const blocks: DemoBlock[] = [];
 const audit: AuditItem[] = [];
+const waiverSignatures: DemoWaiverSignature[] = [];
 
 function id(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -67,7 +87,40 @@ function id(prefix: string) {
 
 function buildManageUrl(baseUrl: string | undefined, bookingId: string, token: string | undefined) {
   if (!baseUrl || !token) return undefined;
-  return `${baseUrl.replace(/\/$/, "")}/manage/${bookingId}?token=${encodeURIComponent(token)}`;
+  const params = new URLSearchParams({ token });
+  if (appConfig.isPreview) params.set("test", "1");
+  return `${baseUrl.replace(/\/$/, "")}/manage/${bookingId}?${params.toString()}`;
+}
+
+function buildGuestWaiverUrl(baseUrl: string | undefined, bookingId: string, token: string | undefined) {
+  if (!baseUrl || !token) return undefined;
+  const params = new URLSearchParams({ token });
+  if (appConfig.isPreview) params.set("test", "1");
+  return `${baseUrl.replace(/\/$/, "")}/waiver/${bookingId}?${params.toString()}`;
+}
+
+function demoWaiverSummary(booking: DemoBooking) {
+  const current = waiverSignatures.filter(
+    (signature) =>
+      signature.bookingId === booking.id && signature.bookingRevision === booking.waiverRevision,
+  );
+  const statuses = current.map((signature) => signature.emailStatus);
+  const emailStatus: WaiverEmailStatus | null =
+    statuses.length === 0
+      ? null
+      : statuses.includes("FAILED")
+        ? "FAILED"
+        : statuses.includes("PENDING")
+          ? "PENDING"
+          : statuses.includes("SKIPPED")
+            ? "SKIPPED"
+            : "SENT";
+
+  return {
+    signedCount: current.length,
+    remainingCount: Math.max(0, booking.playerCount - current.length),
+    emailStatus,
+  };
 }
 
 function addAudit(actorEmail: string, action: string, entityType: string, entityId?: string) {
@@ -82,6 +135,8 @@ function addAudit(actorEmail: string, action: string, entityType: string, entity
 }
 
 function bookingToApi(booking: DemoBooking): AvailabilityBooking {
+  const waiverSummary = demoWaiverSummary(booking);
+
   return {
     id: booking.id,
     start: booking.start.toISOString(),
@@ -89,6 +144,9 @@ function bookingToApi(booking: DemoBooking): AvailabilityBooking {
     status: booking.status,
     organizerName: booking.organizerName,
     outlookSyncStatus: "SKIPPED",
+    playerCount: booking.playerCount,
+    waiverSignedCount: waiverSummary.signedCount,
+    waiverEmailStatus: waiverSummary.emailStatus,
   };
 }
 
@@ -96,6 +154,7 @@ function managedBookingToApi(
   booking: DemoBooking,
   manageToken?: string,
   baseUrl?: string,
+  guestWaiverToken?: string,
 ): MyBooking {
   return {
     ...bookingToApi(booking),
@@ -103,6 +162,8 @@ function managedBookingToApi(
     updatedAt: booking.updatedAt.toISOString(),
     manageToken,
     manageUrl: buildManageUrl(baseUrl, booking.id, manageToken),
+    guestWaiverToken,
+    guestWaiverUrl: buildGuestWaiverUrl(baseUrl, booking.id, guestWaiverToken),
   };
 }
 
@@ -255,6 +316,7 @@ export async function demoCreateBooking(input: DemoCreateInput) {
 
   const now = new Date();
   const manageToken = createManageToken();
+  const guestWaiverToken = createManageToken();
   const booking: DemoBooking = {
     id: id("booking"),
     start: input.start,
@@ -264,13 +326,27 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     organizerName: identity.organizerName,
     manageTokenHash: hashManageToken(manageToken),
     manageTokenExpiresAt: manageTokenExpiresAt(input.end),
+    playerCount: input.playerCount ?? 4,
+    waiverRevision: 1,
+    guestWaiverTokenHash: hashManageToken(guestWaiverToken),
+    guestWaiverTokenExpiresAt: manageTokenExpiresAt(input.end),
     createdAt: now,
     updatedAt: now,
   };
 
   bookings.push(booking);
+  waiverSignatures.push({
+    id: id("waiver"),
+    bookingId: booking.id,
+    bookingRevision: booking.waiverRevision,
+    signerName: identity.organizerName,
+    signerEmail: identity.organizerEmail,
+    emailStatus: "SKIPPED",
+    signedAt: now,
+  });
   addAudit(identity.organizerEmail, "BOOKING_CREATED", "Booking", booking.id);
-  return managedBookingToApi(booking, manageToken, input.baseUrl);
+  addAudit(identity.organizerEmail, "WAIVER_SIGNED", "WaiverSignature", booking.id);
+  return managedBookingToApi(booking, manageToken, input.baseUrl, guestWaiverToken);
 }
 
 export async function demoUpdateBooking(
@@ -292,6 +368,12 @@ export async function demoUpdateBooking(
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
   const nextStatus = input.status ?? booking.status;
+  const requiresFreshWaivers =
+    nextStatus === "CONFIRMED" &&
+    (booking.status !== "CONFIRMED" ||
+      nextStart.getTime() !== booking.start.getTime() ||
+      nextEnd.getTime() !== booking.end.getTime());
+  const guestWaiverToken = requiresFreshWaivers ? createManageToken() : undefined;
 
   if (nextStatus === "CONFIRMED") {
     assertDemoBookingAllowed(booking.organizerEmail, nextStart, nextEnd, booking.id);
@@ -301,6 +383,11 @@ export async function demoUpdateBooking(
   booking.end = nextEnd;
   booking.status = nextStatus;
   booking.manageTokenExpiresAt = manageTokenExpiresAt(nextEnd);
+  if (guestWaiverToken) {
+    booking.waiverRevision += 1;
+    booking.guestWaiverTokenHash = hashManageToken(guestWaiverToken);
+    booking.guestWaiverTokenExpiresAt = manageTokenExpiresAt(nextEnd);
+  }
   booking.updatedAt = new Date();
   addAudit(
     actorEmail,
@@ -309,7 +396,7 @@ export async function demoUpdateBooking(
     booking.id,
   );
 
-  return managedBookingToApi(booking, access.manageToken ?? undefined, access.baseUrl);
+  return managedBookingToApi(booking, access.manageToken ?? undefined, access.baseUrl, guestWaiverToken);
 }
 
 export async function demoCancelBooking(access: DemoAccess, bookingId: string) {
@@ -374,8 +461,94 @@ export async function demoGetAdminAudit() {
   return audit.slice(0, 40);
 }
 
+function assertDemoGuestWaiverAccess(booking: DemoBooking, token: string | null | undefined) {
+  const isValid = isManageTokenValid(
+    {
+      manageTokenHash: booking.guestWaiverTokenHash,
+      manageTokenExpiresAt: booking.guestWaiverTokenExpiresAt,
+    },
+    token,
+  );
+
+  if (!isValid) {
+    throw new AppError("Link firma ospiti non valido o scaduto.", 403);
+  }
+
+  if (booking.status !== "CONFIRMED") {
+    throw new AppError("La prenotazione non e' piu' attiva.", 409);
+  }
+}
+
+export async function demoGetWaiverContext(bookingId: string, token: string | null) {
+  const booking = bookings.find((item) => item.id === bookingId);
+  if (!booking) throw new AppError("Prenotazione non trovata.", 404);
+
+  assertDemoGuestWaiverAccess(booking, token);
+  const summary = demoWaiverSummary(booking);
+
+  return {
+    booking: {
+      id: booking.id,
+      start: booking.start.toISOString(),
+      end: booking.end.toISOString(),
+      organizerName: booking.organizerName,
+      playerCount: booking.playerCount,
+      waiverRevision: booking.waiverRevision,
+      waiverSignedCount: summary.signedCount,
+      remainingSignatures: summary.remainingCount,
+      documentVersion: appConfig.waiver.documentVersion,
+      regulationUrl: "/legal/regolamento-padel-topfly-v1.pdf",
+    },
+  };
+}
+
+export async function demoSignGuestWaiver(
+  bookingId: string,
+  token: string | null,
+  input: WaiverInput,
+  _evidence: WaiverEvidence,
+) {
+  void _evidence;
+
+  const booking = bookings.find((item) => item.id === bookingId);
+  if (!booking) throw new AppError("Prenotazione non trovata.", 404);
+
+  assertDemoGuestWaiverAccess(booking, token);
+  const summary = demoWaiverSummary(booking);
+  if (summary.signedCount >= booking.playerCount) {
+    throw new AppError("Tutte le firme per questa prenotazione risultano gia' raccolte.", 409);
+  }
+
+  const signerName = normalizePersonName(input.signerName);
+  const signerEmail = normalizeEmail(input.signerEmail);
+  if (
+    waiverSignatures.some(
+      (signature) =>
+        signature.bookingId === booking.id &&
+        signature.bookingRevision === booking.waiverRevision &&
+        signature.signerEmail === signerEmail,
+    )
+  ) {
+    throw new AppError("Questa email ha gia' firmato lo scarico per questa prenotazione.", 409);
+  }
+
+  waiverSignatures.push({
+    id: id("waiver"),
+    bookingId: booking.id,
+    bookingRevision: booking.waiverRevision,
+    signerName,
+    signerEmail,
+    emailStatus: "SKIPPED",
+    signedAt: new Date(),
+  });
+  addAudit(signerEmail, "WAIVER_SIGNED", "WaiverSignature", booking.id);
+
+  return demoGetWaiverContext(bookingId, token);
+}
+
 export function demoReset() {
   bookings.splice(0);
   blocks.splice(0);
   audit.splice(0);
+  waiverSignatures.splice(0);
 }

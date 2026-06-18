@@ -17,6 +17,7 @@ output/playwright/
 **/.DS_Store
 backups/
 *.sql
+!prisma/migrations/**/migration.sql
 *.dump
 *.pem
 *.key

@@ -11,13 +11,19 @@ type RateLimitAction =
   | "booking:create"
   | "booking:create-email"
   | "booking:lookup"
-  | "booking:manage";
+  | "booking:manage"
+  | "admin:waiver-email-retry"
+  | "waiver:read"
+  | "waiver:sign";
 
 const rateLimitPolicy: Record<RateLimitAction, { max: number; windowMs: number }> = {
   "booking:create": { max: 8, windowMs: 5 * 60_000 },
   "booking:create-email": { max: 5, windowMs: 15 * 60_000 },
   "booking:lookup": { max: 40, windowMs: 60_000 },
   "booking:manage": { max: 30, windowMs: 60_000 },
+  "admin:waiver-email-retry": { max: 12, windowMs: 15 * 60_000 },
+  "waiver:read": { max: 60, windowMs: 60_000 },
+  "waiver:sign": { max: 10, windowMs: 15 * 60_000 },
 };
 
 const memoryBuckets = new Map<string, { count: number; resetAt: number }>();

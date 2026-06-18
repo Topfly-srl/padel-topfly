@@ -46,11 +46,15 @@ const securityHeaders = [
   },
 ];
 
+function shouldApplySecurityHeaders() {
+  return process.env.VERCEL_ENV === "production" || process.env.APP_ENV === "production";
+}
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: localDevOrigins(),
   poweredByHeader: false,
   async headers() {
-    if (process.env.NODE_ENV !== "production") {
+    if (!shouldApplySecurityHeaders()) {
       return [];
     }
 

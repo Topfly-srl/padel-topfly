@@ -29,8 +29,9 @@ Istruzioni operative per agenti/Codex che lavorano su questo repository.
 - Non committare mai `.env`, `.env.production`, backup env, chiavi SSH o dump DB.
 - Non incollare in chat client secret, token, private key, password o contenuto completo
   di `.env.production`.
-- Per Microsoft Graph usare solo i permessi necessari: in V1 serve
-  `Calendars.ReadWrite` Application; `Mail.Send` non e' richiesto.
+- Per Microsoft Graph usare solo i permessi necessari: in V1 servono
+  `Calendars.ReadWrite` Application e `Mail.Send` Application per inviare i PDF
+  degli scarichi responsabilita'. Entrambi vanno limitati alla sola mailbox Padel.
 - Prima di modificare produzione, database, env o server remoti, chiedi conferma esplicita.
 - Non usare `docker compose down -v` in produzione: elimina il volume Postgres.
 - Non eseguire comandi distruttivi (`git reset --hard`, cancellazioni massive, reset DB)
@@ -82,6 +83,7 @@ Per modifiche UI, verifica anche browser mobile/desktop quando possibile.
 - La mail `Canceled:` e' generata da Outlook: il codice controlla solo il commento testuale.
 - Non reintrodurre `/sendMail` per la cancellazione senza discutere il trade-off, perche'
   produce una seconda comunicazione e richiede `Mail.Send`.
+- `/sendMail` e' ammesso solo per inviare a Cecilia i PDF degli scarichi responsabilita'.
 
 ## Documentazione
 

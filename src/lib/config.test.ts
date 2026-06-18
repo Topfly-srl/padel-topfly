@@ -38,5 +38,17 @@ describe("app config", () => {
 
     expect(appConfig.isProduction).toBe(true);
     expect(appConfig.publicOrigin).toBe("https://padel.topflysolutions.com");
+    expect(appConfig.publicEnvironmentLabel).toBe("");
+  });
+
+  it("espone label TEST in ambiente preview", async () => {
+    vi.resetModules();
+    vi.stubEnv("APP_ENV", "preview");
+
+    const { appConfig } = await import("@/lib/config");
+
+    expect(appConfig.isPreview).toBe(true);
+    expect(appConfig.isProduction).toBe(false);
+    expect(appConfig.publicEnvironmentLabel).toBe("TEST");
   });
 });

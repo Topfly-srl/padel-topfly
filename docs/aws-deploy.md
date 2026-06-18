@@ -177,6 +177,23 @@ MS_GRAPH_CLIENT_SECRET=
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
 ```
 
+### Env Preview/Test
+
+Per un ambiente pubblicato solo per test, non usare `APP_ENV=production`.
+Impostare invece:
+
+```env
+APP_ENV=preview
+APP_PUBLIC_ORIGIN=https://padel-test.topflysolutions.com
+```
+
+Con `APP_ENV=preview`:
+
+- l'interfaccia mostra il badge `TEST`;
+- gli oggetti Outlook/email partono con `[TEST]`;
+- i corpi email mostrano `AMBIENTE TEST`;
+- i link gestione/firma includono anche `test=1`.
+
 Attenzione:
 
 - `APP_DOMAIN` con dominio HTTPS non deve avere `:` davanti.
@@ -378,10 +395,12 @@ Non salvare segreti in Git e non incollarli in chat.
 Permessi Graph sull'app registration:
 
 - `Calendars.ReadWrite` Application;
+- `Mail.Send` Application;
 - consenso amministratore concesso.
 
-`Mail.Send` non e' richiesto dalla V1 e deve restare assente: conferme, modifiche e
-cancellazioni usano gli inviti/eventi Outlook, senza una seconda email custom separata.
+`Mail.Send` serve solo per inviare a Cecilia i PDF degli scarichi responsabilita'.
+Conferme, modifiche e cancellazioni usano gli inviti/eventi Outlook, senza una seconda
+email custom separata.
 
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
 La cancellazione aggiorna l'evento e poi cancella l'evento Outlook.
@@ -390,7 +409,7 @@ il commento testuale, che deve restare breve e chiaro.
 
 Hardening Microsoft 365 raccomandato:
 
-- verificare che `Mail.Send` sia assente;
-- limitare `Calendars.ReadWrite` Application alla sola mailbox `padel@topflysolutions.com`
-  con Exchange Application Access Policy o RBAC for Applications;
+- limitare `Calendars.ReadWrite` e `Mail.Send` Application alla sola mailbox
+  `padel@topflysolutions.com` con Exchange Application Access Policy o RBAC for
+  Applications;
 - verificare che la mailbox sia tecnica/condivisa e non usata come account personale.

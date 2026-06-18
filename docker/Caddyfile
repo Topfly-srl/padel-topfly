@@ -1,22 +1,35 @@
+(padel_security_headers) {
+	encode zstd gzip
+
+	header {
+		-Server
+		-X-Powered-By
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; upgrade-insecure-requests"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	request_body {
+		max_size 256KB
+	}
+}
+
 {$APP_DOMAIN} {
-  encode zstd gzip
+	import padel_security_headers
 
-  header {
-    -Server
-    -X-Powered-By
-    Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; upgrade-insecure-requests"
-    Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    X-Content-Type-Options "nosniff"
-    X-Frame-Options "DENY"
-  }
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+	}
+}
 
-  request_body {
-    max_size 256KB
-  }
+padel-test.topflysolutions.com {
+	import padel_security_headers
 
-  reverse_proxy app:3000 {
-    header_up X-Real-IP {remote_host}
-    header_up X-Forwarded-For {remote_host}
-  }
+	reverse_proxy app_preview:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+	}
 }

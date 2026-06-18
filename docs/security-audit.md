@@ -250,8 +250,8 @@ Impact:
 
 Fix raccomandato:
 
-- verificare che `Mail.Send` sia assente;
-- mantenere solo `Calendars.ReadWrite` Application;
+- mantenere solo i permessi necessari: `Calendars.ReadWrite` e `Mail.Send` Application;
+- usare `Mail.Send` solo per inviare a Cecilia i PDF degli scarichi responsabilita';
 - configurare Exchange Application Access Policy o RBAC for Applications per limitare
   l'app alla mailbox `padel@topflysolutions.com`;
 - verificare con `Test-ApplicationAccessPolicy` o test Graph equivalente.
@@ -522,8 +522,8 @@ Fix:
 
 ### Microsoft 365
 
-- [ ] `Mail.Send` assente;
 - [ ] `Calendars.ReadWrite` Application con admin consent;
+- [ ] `Mail.Send` Application con admin consent;
 - [ ] Application Access Policy/RBAC limita accesso alla mailbox Padel;
 - [ ] mailbox `padel@topflysolutions.com` confermata come tecnica/condivisa.
 

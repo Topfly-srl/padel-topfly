@@ -1,4 +1,4 @@
-import type { BookingStatus, OutlookSyncStatus, UserRole } from "@prisma/client";
+import type { BookingStatus, OutlookSyncStatus, UserRole, WaiverEmailStatus } from "@prisma/client";
 
 export type CurrentUser = {
   id: string;
@@ -14,6 +14,9 @@ export type AvailabilityBooking = {
   status: BookingStatus;
   organizerName: string;
   outlookSyncStatus: OutlookSyncStatus;
+  playerCount: number;
+  waiverSignedCount: number;
+  waiverEmailStatus: WaiverEmailStatus | null;
 };
 
 export type AvailabilityBlock = {
@@ -28,6 +31,8 @@ export type MyBooking = AvailabilityBooking & {
   updatedAt: string;
   manageToken?: string;
   manageUrl?: string;
+  guestWaiverToken?: string;
+  guestWaiverUrl?: string;
 };
 
 export type AuditItem = {

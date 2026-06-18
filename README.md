@@ -6,6 +6,20 @@ URL produzione:
 
 - <https://padel.topflysolutions.com>
 
+## Ambiente Test / Preview
+
+Per pubblicare una versione solo test, usare `APP_ENV=preview` e un
+`APP_PUBLIC_ORIGIN` dedicato al test, ad esempio:
+
+```env
+APP_ENV=preview
+APP_PUBLIC_ORIGIN=https://padel-test.topflysolutions.com
+```
+
+In modalita' preview l'app mostra il badge `TEST`, gli inviti Outlook e le email PDF
+hanno oggetto con prefisso `[TEST]`, il corpo email contiene un avviso `AMBIENTE TEST`
+e i link di gestione/firma ospiti includono `test=1`.
+
 ## Stato Produzione
 
 - Hosting: AWS Lightsail, istanza `padel-topfly`, regione Frankfurt `eu-central-1`.
@@ -25,11 +39,15 @@ URL produzione:
 
 - Prenotazione pubblica senza login utente.
 - Form obbligatorio con nome/cognome ed email.
+- Scarico responsabilita' digitale obbligatorio per il referente al momento della prenotazione.
+- Link firma ospiti separato, mostrato dopo la prenotazione e copiabile anche manualmente.
+- PDF firmato archiviato in Postgres e inviato a `cecilia.faieta@topflysolutions.com`.
 - Email non aziendali ammesse, con warning non bloccante lato UI.
 - Nome del prenotante visibile sugli slot occupati, email mai esposta pubblicamente.
 - Link/token di gestione salvato localmente e incluso negli inviti Outlook.
 - Modifica/cancellazione delle proprie prenotazioni tramite token.
 - Area admin protetta da Microsoft 365 per blocchi, storico e override.
+- Area admin con conteggio firme, stato invio PDF e retry email per scarichi falliti.
 - Limiti applicativi:
   - step slot: 15 minuti;
   - durata: 15-120 minuti;
@@ -41,7 +59,7 @@ URL produzione:
 - Next.js App Router + TypeScript.
 - Prisma + Postgres.
 - Auth.js / NextAuth con Microsoft Entra ID solo per area admin.
-- Microsoft Graph per inviti Outlook, promemoria e cancellazioni native Outlook.
+- Microsoft Graph per inviti Outlook, promemoria, cancellazioni native Outlook e invio PDF waiver.
 - Docker Compose in produzione:
   - `app`: Next.js;
   - `postgres`: database locale;
@@ -242,19 +260,20 @@ MS_GRAPH_MAILBOX=padel@topflysolutions.com
 Permessi Microsoft Graph sull'app registration:
 
 - `Calendars.ReadWrite` Application, con consenso amministratore.
+- `Mail.Send` Application, con consenso amministratore, per inviare a Cecilia i PDF firmati.
 
-`Mail.Send` non e' richiesto dalla V1 e deve restare assente: la conferma e la
-cancellazione passano dagli inviti/eventi Outlook, evitando una seconda email separata
-quando l'utente cancella.
+`Mail.Send` e' richiesto solo per lo scarico responsabilita' digitale. La conferma e la
+cancellazione della prenotazione continuano a passare dagli inviti/eventi Outlook,
+evitando una seconda email custom quando l'utente cancella.
 
-Per ridurre il blast radius del permesso Application, limitare `Calendars.ReadWrite` alla
-sola mailbox `padel@topflysolutions.com` tramite Exchange Application Access Policy o
-RBAC for Applications.
+Per ridurre il blast radius dei permessi Application, limitare `Calendars.ReadWrite` e
+`Mail.Send` alla sola mailbox `padel@topflysolutions.com` tramite Exchange Application
+Access Policy o RBAC for Applications.
 
 Stato operativo da verificare manualmente in Microsoft 365:
 
 - `Calendars.ReadWrite` Application con admin consent;
-- `Mail.Send` assente;
+- `Mail.Send` Application con admin consent;
 - policy Exchange/RBAC limitata alla mailbox `padel@topflysolutions.com`.
 
 Funzioni attese:
@@ -263,8 +282,10 @@ Funzioni attese:
 - inviare invito all'email inserita nel form;
 - includere reminder 1h;
 - includere link gestione nel corpo evento;
+- includere link firma ospiti nel corpo evento quando disponibile;
 - aggiornare evento quando cambia la prenotazione;
-- cancellare evento Outlook quando la prenotazione viene annullata.
+- cancellare evento Outlook quando la prenotazione viene annullata;
+- inviare a Cecilia il PDF dello scarico responsabilita' firmato.
 
 Verifica rapida da server:
 

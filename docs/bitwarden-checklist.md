@@ -84,10 +84,10 @@ Da salvare:
 - tenant ID;
 - client secret;
 - data scadenza secret;
-- permessi Graph attesi: `Calendars.ReadWrite` Application con admin consent;
-- nota: `Mail.Send` non e' richiesto dalla V1 e deve restare assente;
+- permessi Graph attesi: `Calendars.ReadWrite` e `Mail.Send` Application con admin consent;
+- nota: `Mail.Send` serve solo per inviare a Cecilia i PDF dello scarico responsabilita';
 - nota sicurezza: accesso Graph da limitare alla sola mailbox `padel@topflysolutions.com`
-  tramite Exchange Application Access Policy o RBAC for Applications;
+  tramite Exchange Application Access Policy o RBAC for Applications, includendo `Mail.Send`;
 - stato della policy Exchange: configurata/non configurata, data verifica, chi l'ha
   verificata.
 
@@ -139,7 +139,7 @@ aziendali dedicati. Nella nota Padel basta indicare dove trovarle.
 1. aggiornare Bitwarden;
 2. aggiornare GitHub Actions secrets o `.env.production`, se coinvolti;
 3. riavviare app o workflow;
-4. testare login admin, creazione prenotazione e cancellazione Outlook;
+4. testare login admin, creazione prenotazione, firma waiver, invio PDF e cancellazione Outlook;
 5. annotare data e motivo della modifica.
 
 ## Checklist Security Audit
@@ -147,7 +147,7 @@ aziendali dedicati. Nella nota Padel basta indicare dove trovarle.
 Da aggiornare quando si chiude un finding del report
 [`docs/security-audit.md`](security-audit.md):
 
-- verifica `Mail.Send` assente;
+- verifica `Mail.Send` limitato alla sola mailbox Padel;
 - Application Access Policy/RBAC Exchange per Graph;
 - eventuale rotazione deploy key GitHub Actions;
 - stato branch protection GitHub;

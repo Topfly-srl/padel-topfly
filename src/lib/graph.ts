@@ -6,6 +6,11 @@ type GraphSyncResult =
   | { status: "SYNCED"; eventId?: string; error?: string }
   | { status: "FAILED"; eventId?: string; error: string };
 
+type WaiverMailResult =
+  | { status: "SKIPPED"; error?: string }
+  | { status: "SENT" }
+  | { status: "FAILED"; error: string };
+
 type GraphToken = {
   accessToken: string;
   expiresAt: number;
@@ -94,6 +99,20 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
+function testPrefix() {
+  return appConfig.isPreview ? "[TEST] " : "";
+}
+
+function testBannerHtml() {
+  if (!appConfig.isPreview) return "";
+
+  return `
+    <div style="background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; padding: 12px 14px; border-radius: 8px; margin: 0 0 16px; font-weight: 700;">
+      AMBIENTE TEST - Non usare questo link per prenotazioni reali.
+    </div>
+  `;
+}
+
 function formatEventDate(date: Date) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "short",
@@ -115,10 +134,16 @@ function formatDuration(start: Date, end: Date) {
   return Math.round((end.getTime() - start.getTime()) / 60_000);
 }
 
-function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?: string) {
+function eventPayload(
+  booking: Booking,
+  organizer: OrganizerContact,
+  manageUrl?: string,
+  guestWaiverUrl?: string,
+) {
   const isCanceled = booking.status === "CANCELED";
   const organizerName = escapeHtml(organizer.name);
   const safeManageUrl = manageUrl ? escapeHtml(manageUrl) : null;
+  const safeGuestWaiverUrl = guestWaiverUrl ? escapeHtml(guestWaiverUrl) : null;
   const dateLabel = escapeHtml(formatEventDate(booking.start));
   const startLabel = escapeHtml(formatEventTime(booking.start));
   const endLabel = escapeHtml(formatEventTime(booking.end));
@@ -128,12 +153,29 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
     ? `
       <p style="margin: 22px 0 10px;">
         <a href="${safeManageUrl}" style="display: inline-block; background: #f80d17; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
-          Gestisci prenotazione
+          Gestisci prenotazione${appConfig.isPreview ? " TEST" : ""}
         </a>
       </p>
       <p style="margin: 0; color: #6b7280; font-size: 13px;">
-        Link diretto: <a href="${safeManageUrl}" style="color: #b91c1c;">${safeManageUrl}</a>
+        Link ${appConfig.isPreview ? "TEST " : ""}diretto: <a href="${safeManageUrl}" style="color: #b91c1c;">${safeManageUrl}</a>
       </p>
+      ${
+        safeGuestWaiverUrl
+          ? `
+      <p style="margin: 18px 0 8px; font-weight: 700;">
+        Fai firmare anche gli altri giocatori${appConfig.isPreview ? " - TEST" : ""}:
+      </p>
+      <p style="margin: 0 0 8px;">
+        <a href="${safeGuestWaiverUrl}" style="display: inline-block; background: #24262d; color: #ffffff; text-decoration: none; font-weight: 700; padding: 12px 16px; border-radius: 8px;">
+          Link ${appConfig.isPreview ? "TEST " : ""}firma ospiti
+        </a>
+      </p>
+      <p style="margin: 0; color: #6b7280; font-size: 13px;">
+        Link ${appConfig.isPreview ? "TEST " : ""}ospiti: <a href="${safeGuestWaiverUrl}" style="color: #374151;">${safeGuestWaiverUrl}</a>
+      </p>
+          `
+          : ""
+      }
     `
     : !isCanceled
       ? `
@@ -157,7 +199,7 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
     : "Se cambi programma, modifica o cancella la prenotazione: cos&igrave; lasci libero il campo per gli altri.";
 
   return {
-    subject: isCanceled ? "Padel TOPFLY - Prenotazione cancellata" : "Padel TOPFLY - Campo prenotato",
+    subject: `${testPrefix()}${isCanceled ? "Padel TOPFLY - Prenotazione cancellata" : "Padel TOPFLY - Campo prenotato"}`,
     body: {
       contentType: "HTML",
       content: `
@@ -172,6 +214,7 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
           </div>
 
           <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
+            ${testBannerHtml()}
             <p style="margin: 0 0 16px; font-size: 16px;">
               Ciao ${organizerName},<br>
               ${intro}
@@ -228,8 +271,84 @@ function eventPayload(booking: Booking, organizer: OrganizerContact, manageUrl?:
   };
 }
 
+function waiverMailPayload(input: {
+  recipientEmail: string;
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  signedAt: Date;
+  pdfBytes: Uint8Array;
+  filename: string;
+}) {
+  const dateLabel = escapeHtml(formatEventDate(input.booking.start));
+  const startLabel = escapeHtml(formatEventTime(input.booking.start));
+  const endLabel = escapeHtml(formatEventTime(input.booking.end));
+  const signerName = escapeHtml(input.signerName);
+  const signerEmail = escapeHtml(input.signerEmail);
+  const signedAt = escapeHtml(
+    new Intl.DateTimeFormat("it-IT", {
+      dateStyle: "short",
+      timeStyle: "short",
+      timeZone: appConfig.timeZone,
+    }).format(input.signedAt),
+  );
+
+  return {
+    message: {
+      subject: `${testPrefix()}Padel TOPFLY - Scarico responsabilita' ${signerName}`,
+      body: {
+        contentType: "HTML",
+        content: `
+          <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+            ${testBannerHtml()}
+            <h2 style="margin: 0 0 12px;">Scarico responsabilita' Padel TOPFLY</h2>
+            <p style="margin: 0 0 12px;">
+              In allegato il modulo firmato digitalmente per l'accesso al campo.
+            </p>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 6px 0; color: #6b7280; width: 34%;">Firmatario</td>
+                <td style="padding: 6px 0; font-weight: 700;">${signerName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #6b7280;">Email</td>
+                <td style="padding: 6px 0;">${signerEmail}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #6b7280;">Prenotazione</td>
+                <td style="padding: 6px 0;">${dateLabel} · ${startLabel} - ${endLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #6b7280;">Firmato il</td>
+                <td style="padding: 6px 0;">${signedAt}</td>
+              </tr>
+            </table>
+          </div>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.recipientEmail,
+          },
+        },
+      ],
+      attachments: [
+        {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: input.filename,
+          contentType: "application/pdf",
+          contentBytes: Buffer.from(input.pdfBytes).toString("base64"),
+        },
+      ],
+    },
+    saveToSentItems: true,
+  };
+}
+
 function cancelComment(organizer: OrganizerContact) {
   return [
+    ...(appConfig.isPreview ? ["AMBIENTE TEST - Cancellazione di prova.", ""] : []),
     `Ciao ${organizer.name},`,
     "",
     "la tua prenotazione del campo Padel TOPFLY e' stata cancellata.",
@@ -245,6 +364,7 @@ export async function createOutlookEvent(
   booking: Booking,
   organizer: OrganizerContact,
   manageUrl?: string,
+  guestWaiverUrl?: string,
 ): Promise<GraphSyncResult> {
   const disabled = graphDisabled();
   if (disabled) return disabled;
@@ -252,7 +372,7 @@ export async function createOutlookEvent(
   try {
     const response = await graphFetch(mailboxPath("/calendar/events"), {
       method: "POST",
-      body: JSON.stringify(eventPayload(booking, organizer, manageUrl)),
+      body: JSON.stringify(eventPayload(booking, organizer, manageUrl, guestWaiverUrl)),
     });
     const json = (await response.json()) as { id?: string };
 
@@ -269,9 +389,10 @@ export async function updateOutlookEvent(
   booking: Booking,
   organizer: OrganizerContact,
   manageUrl?: string,
+  guestWaiverUrl?: string,
 ): Promise<GraphSyncResult> {
   if (!booking.outlookEventId) {
-    return createOutlookEvent(booking, organizer, manageUrl);
+    return createOutlookEvent(booking, organizer, manageUrl, guestWaiverUrl);
   }
 
   const disabled = graphDisabled();
@@ -280,7 +401,7 @@ export async function updateOutlookEvent(
   try {
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}`), {
       method: "PATCH",
-      body: JSON.stringify(eventPayload(booking, organizer, manageUrl)),
+      body: JSON.stringify(eventPayload(booking, organizer, manageUrl, guestWaiverUrl)),
     });
 
     return { status: "SYNCED", eventId: booking.outlookEventId };
@@ -289,6 +410,39 @@ export async function updateOutlookEvent(
       status: "FAILED",
       eventId: booking.outlookEventId,
       error: error instanceof Error ? error.message : "Graph update failed",
+    };
+  }
+}
+
+export async function sendWaiverEmail(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  signedAt: Date;
+  pdfBytes: Uint8Array;
+  filename: string;
+}): Promise<WaiverMailResult> {
+  const disabled = graphDisabled();
+  if (disabled) {
+    return { status: "SKIPPED", error: disabled.error };
+  }
+
+  try {
+    await graphFetch(mailboxPath("/sendMail"), {
+      method: "POST",
+      body: JSON.stringify(
+        waiverMailPayload({
+          ...input,
+          recipientEmail: appConfig.waiver.recipientEmail,
+        }),
+      ),
+    });
+
+    return { status: "SENT" };
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "Graph sendMail failed",
     };
   }
 }

@@ -46,6 +46,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 - Migrazioni Prisma eseguite automaticamente all'avvio app.
 - Login pubblico eliminato per gli utenti normali.
 - Prenotazione pubblica con nome/cognome + email.
+- Scarico responsabilita' digitale obbligatorio per referente e ospiti.
+- PDF scarico responsabilita' archiviato nel DB e inviato a `cecilia.faieta@topflysolutions.com`.
 - "Le mie prenotazioni" basata su token salvati nel browser.
 - Modifica/cancellazione prenotazione tramite token.
 - Area `/admin` protetta da Microsoft Entra ID.
@@ -74,8 +76,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 
 - Backup automatici non ancora configurati.
 - Monitoraggio/alerting non ancora configurato.
-- Verifica che il permesso Graph `Mail.Send` sia assente da Entra.
-- Limitazione del permesso Graph Application alla sola mailbox Padel tramite Exchange
+- Verifica che il permesso Graph `Mail.Send` sia limitato alla sola mailbox Padel.
+- Limitazione dei permessi Graph Application alla sola mailbox Padel tramite Exchange
   Application Access Policy/RBAC, da verificare manualmente.
 - Branch protection su `main` da valutare/abilitare.
 - Eventuale pagina/documento interno per annunciare il link ai dipendenti.
@@ -86,12 +88,15 @@ Da browser normale:
 
 1. Aprire <https://padel.topflysolutions.com>.
 2. Creare una prenotazione con nome e email aziendale.
-3. Verificare che lo slot risulti occupato con solo nome visibile.
-4. Verificare "Le mie prenotazioni".
-5. Modificare la prenotazione.
-6. Cancellare la prenotazione e verificare la mail `Canceled:` nativa Outlook.
-7. Creare due prenotazioni future con la stessa email.
-8. Tentare una terza prenotazione futura con la stessa email e verificare il blocco.
+3. Compilare e firmare lo scarico responsabilita' del referente.
+4. Copiare il link firma ospiti e firmare come ospite in finestra anonima/mobile.
+5. Verificare che a Cecilia arrivi il PDF firmato.
+6. Verificare che lo slot risulti occupato con solo nome visibile.
+7. Verificare "Le mie prenotazioni".
+8. Modificare la prenotazione e verificare che venga generato un nuovo link ospiti.
+9. Cancellare la prenotazione e verificare la mail `Canceled:` nativa Outlook.
+10. Creare due prenotazioni future con la stessa email.
+11. Tentare una terza prenotazione futura con la stessa email e verificare il blocco.
 
 Da admin:
 
@@ -304,7 +309,7 @@ Costo atteso dopo eventuale periodo gratuito: circa il costo mensile del piano L
 1. Salvare/aggiornare tutti gli item indicati in `docs/bitwarden-checklist.md`.
 2. Fare smoke test completo con 2-3 colleghi.
 3. Verificare mail conferma e mail cancellazione Outlook dopo ogni patch Graph.
-4. Verificare che `Mail.Send` sia assente da Entra.
+4. Verificare che `Mail.Send` sia presente ma limitato alla sola mailbox Padel.
 5. Limitare `Calendars.ReadWrite` alla mailbox `padel@topflysolutions.com`.
 6. Valutare snapshot manuale o backup database schedulato.
 7. Preparare messaggio interno con link e regole d'uso.
@@ -316,10 +321,11 @@ App registration: `Padel TOPFLY Admin`.
 Permessi Graph richiesti:
 
 - `Calendars.ReadWrite` Application, consenso admin concesso.
+- `Mail.Send` Application, consenso admin concesso.
 
-`Mail.Send` non e' richiesto dalla V1 e deve restare assente: l'app usa gli
-inviti/eventi Outlook per conferme, modifiche e cancellazioni, senza inviare una seconda
-email custom separata.
+`Mail.Send` e' usato solo per inviare a `cecilia.faieta@topflysolutions.com` il PDF
+dello scarico responsabilita' firmato. Conferme, modifiche e cancellazioni della
+prenotazione restano sugli inviti/eventi Outlook, senza seconda email custom all'utente.
 
 La mailbox usata dall'app e':
 
@@ -332,7 +338,17 @@ Conferme:
 - creano evento Outlook nel calendario `padel@topflysolutions.com`;
 - invitano l'email inserita nel form;
 - includono reminder Outlook 1 ora prima;
-- includono link di gestione.
+- includono link di gestione;
+- includono link firma ospiti, quando disponibile.
+
+Scarichi responsabilita':
+
+- il referente firma durante la prenotazione;
+- dopo la prenotazione il referente vede il link ospiti completo e puo' copiarlo o aprirlo;
+- gli ospiti firmano da `/waiver/[bookingId]?token=...`;
+- ogni firma genera un PDF archiviato in Postgres;
+- l'app invia il PDF a Cecilia tramite Graph `sendMail`;
+- se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`.
 
 Cancellazioni:
 

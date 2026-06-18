@@ -14,6 +14,26 @@ services:
       - ALL
     restart: unless-stopped
 
+  app_preview:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.production
+    environment:
+      APP_ENV: preview
+      APP_PUBLIC_ORIGIN: https://padel-test.topflysolutions.com
+      AUTH_URL: https://padel-test.topflysolutions.com
+      DATABASE_URL: postgresql://padel_preview:padel_preview@postgres_preview:5432/padel_topfly_preview?schema=public
+    depends_on:
+      postgres_preview:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     env_file:
@@ -27,12 +47,28 @@ services:
       retries: 10
     restart: unless-stopped
 
+  postgres_preview:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: padel_preview
+      POSTGRES_PASSWORD: padel_preview
+      POSTGRES_DB: padel_topfly_preview
+    volumes:
+      - padel_topfly_preview_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U padel_preview -d padel_topfly_preview"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     env_file:
       - .env.production
     depends_on:
       - app
+      - app_preview
     ports:
       - "80:80"
       - "443:443"
@@ -44,5 +80,6 @@ services:
 
 volumes:
   padel_topfly_pgdata:
+  padel_topfly_preview_pgdata:
   caddy_data:
   caddy_config:
