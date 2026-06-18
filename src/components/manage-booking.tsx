@@ -4,6 +4,7 @@ import { Check, Clock3, Trash2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { appPath } from "@/lib/app-path";
 import { bookingDurationOptions } from "@/lib/booking-constants";
 import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/types";
 
@@ -128,7 +129,7 @@ export function ManageBooking({
 
   useEffect(() => {
     startTransition(async () => {
-      const response = await fetch("/api/bookings/lookup", {
+      const response = await fetch(appPath("/api/bookings/lookup"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tokens: [manageToken] }),
@@ -163,7 +164,7 @@ export function ManageBooking({
     let canceled = false;
 
     startTransition(async () => {
-      const response = await fetch(`/api/availability?date=${selectedDate}`, { cache: "no-store" });
+      const response = await fetch(appPath(`/api/availability?date=${selectedDate}`), { cache: "no-store" });
       if (!response.ok || canceled) return;
       setAvailability((await response.json()) as AvailabilityResponse);
     });
@@ -186,7 +187,7 @@ export function ManageBooking({
     setIsSaving(true);
 
     try {
-      const response = await fetch(`/api/bookings/${bookingId}`, {
+      const response = await fetch(appPath(`/api/bookings/${bookingId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -220,7 +221,7 @@ export function ManageBooking({
     setIsCanceling(true);
 
     try {
-      const response = await fetch(`/api/bookings/${bookingId}`, {
+      const response = await fetch(appPath(`/api/bookings/${bookingId}`), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ manageToken }),

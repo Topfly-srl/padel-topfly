@@ -19,6 +19,7 @@ import {
 import Image from "next/image";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
@@ -458,7 +459,7 @@ export function BookingApp({
   }, [dayBlocks, dayBookings, end, ignoredBookingId, start]);
 
   const loadAvailability = useCallback(async () => {
-    const response = await fetch(`/api/availability?date=${selectedDate}`, {
+    const response = await fetch(appPath(`/api/availability?date=${selectedDate}`), {
       cache: "no-store",
     });
 
@@ -472,7 +473,7 @@ export function BookingApp({
   const loadAudit = useCallback(async () => {
     if (!isAdmin) return;
 
-    const response = await fetch("/api/admin/audit", { cache: "no-store" });
+    const response = await fetch(appPath("/api/admin/audit"), { cache: "no-store" });
     if (response.ok) {
       const json = (await response.json()) as { audit: AuditItem[] };
       setAudit(json.audit);
@@ -487,7 +488,7 @@ export function BookingApp({
       params.set("status", adminWaiverStatusFilter);
     }
 
-    const response = await fetch(`/api/admin/waivers?${params.toString()}`, { cache: "no-store" });
+    const response = await fetch(appPath(`/api/admin/waivers?${params.toString()}`), { cache: "no-store" });
     if (response.ok) {
       const json = (await response.json()) as { waivers: AdminWaiverItem[] };
       setAdminWaivers(json.waivers);
@@ -500,7 +501,7 @@ export function BookingApp({
       return;
     }
 
-    const response = await fetch("/api/bookings/lookup", {
+    const response = await fetch(appPath("/api/bookings/lookup"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tokens }),
@@ -686,7 +687,7 @@ export function BookingApp({
           },
         };
 
-    const response = await fetch(isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings", {
+    const response = await fetch(appPath(isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings"), {
       method: isEditing ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -741,7 +742,7 @@ export function BookingApp({
       return;
     }
 
-    const response = await fetch(`/api/bookings/${booking.id}`, {
+    const response = await fetch(appPath(`/api/bookings/${booking.id}`), {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ manageToken }),
@@ -778,7 +779,7 @@ export function BookingApp({
   }
 
   async function createBlock() {
-    const response = await fetch("/api/admin/blocks", {
+    const response = await fetch(appPath("/api/admin/blocks"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -802,7 +803,7 @@ export function BookingApp({
       return;
     }
 
-    const response = await fetch(`/api/admin/blocks/${id}`, { method: "DELETE" });
+    const response = await fetch(appPath(`/api/admin/blocks/${id}`), { method: "DELETE" });
 
     if (!response.ok) {
       setNotice({ type: "error", text: await readApiError(response) });
@@ -814,7 +815,7 @@ export function BookingApp({
   }
 
   async function retryWaiverEmail(signatureId: string) {
-    const response = await fetch(`/api/admin/waivers/${signatureId}/retry-email`, {
+    const response = await fetch(appPath(`/api/admin/waivers/${signatureId}/retry-email`), {
       method: "POST",
     });
 
@@ -860,7 +861,7 @@ export function BookingApp({
       duration: String(duration),
     });
 
-    window.location.assign(`/book?${params.toString()}`);
+    window.location.assign(appPath(`/book?${params.toString()}`));
   };
 
   return (
@@ -887,7 +888,7 @@ export function BookingApp({
         {isAdmin ? (
           <button
             className="icon-button"
-            onClick={() => signOut({ callbackUrl: "/signin" })}
+            onClick={() => signOut({ callbackUrl: appPath("/signin") })}
             type="button"
             aria-label="Esci"
             title="Esci"
@@ -1331,7 +1332,7 @@ export function BookingApp({
                           <div className="item-actions">
                             <a
                               className="mini-button"
-                              href={`/api/admin/waivers/${waiver.id}/pdf`}
+                              href={appPath(`/api/admin/waivers/${waiver.id}/pdf`)}
                               aria-label={`Scarica PDF di ${waiver.signerName}`}
                               title="Scarica PDF"
                             >
@@ -1499,8 +1500,8 @@ export function BookingApp({
                     birthDateIsValid={Boolean(birthDateIso)}
                     compact
                     helperText="Compiliamo il PDF ufficiale TOPFLY e lo inviamo alla Direzione."
-                    regulationUrl="/legal/regolamento-padel-topfly-v1.pdf"
-                    templateUrl="/legal/modulo-responsabilita-padel-template-v1.pdf"
+                    regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
+                    templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
                     showErrors={bookingSubmitAttempted}
                     signerName={organizerName}
                     touched={touchedFields}

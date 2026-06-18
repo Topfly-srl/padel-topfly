@@ -3,6 +3,7 @@
 import { Check, MailWarning } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import {
   WaiverFormSection,
@@ -145,7 +146,7 @@ export function WaiverSigning({
   const bookingEnd = useMemo(() => (waiver ? new Date(waiver.booking.end) : null), [waiver]);
 
   const loadWaiver = useCallback(async () => {
-    const response = await fetch(`/api/waivers/${bookingId}?token=${encodeURIComponent(token)}`, {
+    const response = await fetch(appPath(`/api/waivers/${bookingId}?token=${encodeURIComponent(token)}`), {
       cache: "no-store",
     });
 
@@ -180,7 +181,7 @@ export function WaiverSigning({
       return;
     }
 
-    const response = await fetch(`/api/waivers/${bookingId}/sign`, {
+    const response = await fetch(appPath(`/api/waivers/${bookingId}/sign`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -308,8 +309,8 @@ export function WaiverSigning({
                     birthDateIsValid={Boolean(birthDateIso)}
                     compact
                     helperText="Compiliamo il PDF ufficiale TOPFLY e lo inviamo alla Direzione."
-                    regulationUrl={waiver.booking.regulationUrl}
-                    templateUrl="/legal/modulo-responsabilita-padel-template-v1.pdf"
+                    regulationUrl={appPath(waiver.booking.regulationUrl)}
+                    templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
                     showErrors={submitAttempted}
                     signerName={signerName}
                     touched={touchedFields}

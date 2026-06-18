@@ -19,9 +19,18 @@
 {$APP_DOMAIN} {
 	import padel_security_headers
 
-	reverse_proxy app:3000 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
+	handle /test* {
+		reverse_proxy app_preview:3000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	handle {
+		reverse_proxy app:3000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 }
 

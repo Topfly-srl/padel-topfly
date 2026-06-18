@@ -22,9 +22,11 @@ services:
       - .env.production
     environment:
       APP_ENV: preview
-      APP_PUBLIC_ORIGIN: https://padel-test.topflysolutions.com
-      AUTH_URL: https://padel-test.topflysolutions.com
+      APP_BASE_PATH: /test
+      APP_PUBLIC_ORIGIN: https://padel.topflysolutions.com/test
+      AUTH_URL: https://padel.topflysolutions.com/test
       DATABASE_URL: postgresql://padel_preview:padel_preview@postgres_preview:5432/padel_topfly_preview?schema=public
+      NEXT_PUBLIC_APP_BASE_PATH: /test
     depends_on:
       postgres_preview:
         condition: service_healthy

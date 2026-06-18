@@ -8,12 +8,14 @@ URL produzione:
 
 ## Ambiente Test / Preview
 
-Per pubblicare una versione solo test, usare `APP_ENV=preview` e un
-`APP_PUBLIC_ORIGIN` dedicato al test, ad esempio:
+Per pubblicare una versione solo test, usare `APP_ENV=preview` sotto il path
+dedicato `/test` del dominio gia' attivo:
 
 ```env
 APP_ENV=preview
-APP_PUBLIC_ORIGIN=https://padel-test.topflysolutions.com
+APP_BASE_PATH=/test
+APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com/test
+NEXT_PUBLIC_APP_BASE_PATH=/test
 ```
 
 In modalita' preview l'app mostra il badge `TEST`, gli inviti Outlook e le email PDF

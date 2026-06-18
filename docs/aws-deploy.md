@@ -184,7 +184,9 @@ Impostare invece:
 
 ```env
 APP_ENV=preview
-APP_PUBLIC_ORIGIN=https://padel-test.topflysolutions.com
+APP_BASE_PATH=/test
+APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com/test
+NEXT_PUBLIC_APP_BASE_PATH=/test
 ```
 
 Con `APP_ENV=preview`:

@@ -221,7 +221,7 @@ jobs:
 
           for attempt in $(seq 1 36); do
             if sudo docker compose -f docker-compose.production.yml exec -T app_preview \
-              node -e "fetch('http://127.0.0.1:3000').then(r => r.text()).then(t => process.exit(t.includes('TEST') ? 0 : 1)).catch(() => process.exit(1))"; then
+              node -e "fetch('http://127.0.0.1:3000/test').then(r => r.text()).then(t => process.exit(t.includes('TEST') ? 0 : 1)).catch(() => process.exit(1))"; then
               echo "Preview app responded with TEST marker"
               exit 0
             fi
@@ -251,20 +251,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! getent hosts padel-test.topflysolutions.com > /tmp/padel-preview-hosts.txt; then
-            echo "::warning::padel-test.topflysolutions.com does not resolve yet. Internal preview smoke test passed; retry public check after DNS propagation."
-            exit 0
-          fi
-
           if ! curl --fail --silent --show-error --location --retry 18 --retry-delay 10 \
-            https://padel-test.topflysolutions.com > /tmp/padel-preview.html; then
-            echo "::warning::Preview DNS resolves, but HTTPS is not ready yet. Internal preview smoke test passed; retry after Caddy obtains the certificate."
-            exit 0
+            https://padel.topflysolutions.com/test > /tmp/padel-preview.html; then
+            echo "::error::Preview path is not reachable."
+            exit 1
           fi
 
           grep -q 'TEST' /tmp/padel-preview.html
 
-          headers="$(curl --fail --silent --show-error --head https://padel-test.topflysolutions.com)"
+          headers="$(curl --fail --silent --show-error --head https://padel.topflysolutions.com/test)"
           printf '%s\n' "${headers}" | grep -qi '^content-security-policy:'
           printf '%s\n' "${headers}" | grep -qi '^x-content-type-options: nosniff'
           printf '%s\n' "${headers}" | grep -qi '^x-frame-options: DENY'

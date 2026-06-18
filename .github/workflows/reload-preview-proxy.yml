@@ -83,11 +83,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! getent hosts padel-test.topflysolutions.com; then
-            echo "::warning::padel-test.topflysolutions.com does not resolve from this runner yet."
-            exit 0
-          fi
-
           curl --fail --silent --show-error --location --retry 12 --retry-delay 10 \
-            https://padel-test.topflysolutions.com > /tmp/padel-preview.html
+            https://padel.topflysolutions.com/test > /tmp/padel-preview.html
           grep -q 'TEST' /tmp/padel-preview.html

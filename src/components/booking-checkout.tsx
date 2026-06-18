@@ -4,6 +4,7 @@ import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Send, Users } from "l
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
 import {
@@ -236,7 +237,7 @@ export function BookingCheckout({
     }
 
     setIsSubmitting(true);
-    const response = await fetch("/api/bookings", {
+    const response = await fetch(appPath("/api/bookings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -446,8 +447,8 @@ export function BookingCheckout({
                 compact
                 helperText="Modulo e regolamento restano allegati al PDF firmato."
                 layout="checkout"
-                regulationUrl="/legal/regolamento-padel-topfly-v1.pdf"
-                templateUrl="/legal/modulo-responsabilita-padel-template-v1.pdf"
+                regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
+                templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
                 showErrors={submitAttempted}
                 signerName={organizerName}
                 touched={touchedFields}

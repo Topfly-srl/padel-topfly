@@ -50,8 +50,15 @@ function shouldApplySecurityHeaders() {
   return process.env.VERCEL_ENV === "production" || process.env.APP_ENV === "production";
 }
 
+function normalizedBasePath() {
+  const rawBasePath = process.env.APP_BASE_PATH?.trim() || process.env.NEXT_PUBLIC_APP_BASE_PATH?.trim();
+  if (!rawBasePath || rawBasePath === "/") return undefined;
+  return `/${rawBasePath.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+}
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: localDevOrigins(),
+  basePath: normalizedBasePath(),
   poweredByHeader: false,
   async headers() {
     if (!shouldApplySecurityHeaders()) {
