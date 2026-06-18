@@ -69,8 +69,8 @@ const consentRows: Array<{
   },
   {
     field: "liabilityAccepted",
-    title: "Accetto responsabilita e manleva",
-    shortTitle: "Accetto responsabilita e manleva",
+    title: "Accetto responsabilità e manleva",
+    shortTitle: "Accetto responsabilità e manleva",
     copy: "Accetto nei limiti previsti dalla legge.",
   },
   {

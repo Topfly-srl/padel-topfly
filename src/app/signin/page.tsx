@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Image from "next/image";
 import { signIn } from "@/auth";
 import { appConfig, hasMicrosoftAuthConfig } from "@/lib/config";
+import { appPath } from "@/lib/app-path";
 import { getCurrentUser } from "@/lib/server-auth";
 
 export default async function SignInPage() {
@@ -28,7 +29,7 @@ export default async function SignInPage() {
       <section className="signin-card">
         <div className="signin-brand">
           <Image
-            src="/topfly-logo.png"
+            src={appPath("/topfly-logo.png")}
             alt="TOPFLY GPS solutions"
             width={678}
             height={147}

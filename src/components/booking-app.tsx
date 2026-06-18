@@ -869,7 +869,7 @@ export function BookingApp({
       <header className="topbar">
         <div className="brand-lockup">
           <Image
-            src="/topfly-logo.png"
+            src={appPath("/topfly-logo.png")}
             alt="TOPFLY GPS solutions"
             width={678}
             height={147}

@@ -122,10 +122,10 @@ export function WaiverSigning({
     if (!isValidEmail(signerEmail)) missing.push("email valida");
     if (!birthDateIso) missing.push("data di nascita");
     if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
-    if (!waiverForm.isAdultConfirmed) missing.push("maggiore eta");
+    if (!waiverForm.isAdultConfirmed) missing.push("maggiore età");
     if (!waiverForm.privacyAccepted) missing.push("privacy");
     if (!waiverForm.regulationAccepted) missing.push("regolamento");
-    if (!waiverForm.liabilityAccepted) missing.push("responsabilita");
+    if (!waiverForm.liabilityAccepted) missing.push("responsabilità");
     if (!waiverForm.specificApprovalAccepted) missing.push("clausole specifiche");
     if (!waiverForm.signatureImageDataUrl) missing.push("firma nel riquadro");
     return missing;
@@ -224,7 +224,7 @@ export function WaiverSigning({
     <main className="app-shell compact-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <Image src="/topfly-logo.png" alt="TOPFLY GPS solutions" width={678} height={147} priority />
+          <Image src={appPath("/topfly-logo.png")} alt="TOPFLY GPS solutions" width={678} height={147} priority />
           <div>
             <p className="muted-label">Padel aziendale</p>
             <h1>Firma accesso campo</h1>
@@ -326,7 +326,7 @@ export function WaiverSigning({
                       ? "Tutto pronto: puoi firmare."
                       : `Completa: ${missingFields.slice(0, 3).join(", ")}${
                           missingFields.length > 3 ? "..." : ""
-                        }.`}
+                        }`}
                   </small>
                   <button
                     className="primary-button full-width"

@@ -20,7 +20,8 @@ NEXT_PUBLIC_APP_BASE_PATH=/test
 
 In modalita' preview l'app mostra il badge `TEST`, gli inviti Outlook e le email PDF
 hanno oggetto con prefisso `[TEST]`, il corpo email contiene un avviso `AMBIENTE TEST`
-e i link di gestione/firma ospiti includono `test=1`.
+e i link di gestione/firma ospiti includono `test=1`. Sul preview pubblico i PDF dello
+scarico vengono inviati a `antony.buffone@gmail.com`, cosi' Cecilia non riceve test.
 
 ## Stato Produzione
 

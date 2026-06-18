@@ -194,7 +194,8 @@ Con `APP_ENV=preview`:
 - l'interfaccia mostra il badge `TEST`;
 - gli oggetti Outlook/email partono con `[TEST]`;
 - i corpi email mostrano `AMBIENTE TEST`;
-- i link gestione/firma includono anche `test=1`.
+- i link gestione/firma includono anche `test=1`;
+- i PDF dello scarico vengono inviati a `antony.buffone@gmail.com`, non a Cecilia.
 
 Attenzione:
 

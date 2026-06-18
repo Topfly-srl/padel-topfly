@@ -186,10 +186,10 @@ export function BookingCheckout({
     if (!isValidEmail(organizerEmail)) missing.push("email valida");
     if (!birthDateIso) missing.push("data di nascita");
     if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
-    if (!waiverForm.isAdultConfirmed) missing.push("maggiore eta");
+    if (!waiverForm.isAdultConfirmed) missing.push("maggiore età");
     if (!waiverForm.privacyAccepted) missing.push("privacy");
     if (!waiverForm.regulationAccepted) missing.push("regolamento");
-    if (!waiverForm.liabilityAccepted) missing.push("responsabilita");
+    if (!waiverForm.liabilityAccepted) missing.push("responsabilità");
     if (!waiverForm.specificApprovalAccepted) missing.push("clausole specifiche");
     if (!waiverForm.signatureImageDataUrl) missing.push("firma nel riquadro");
     return missing;
@@ -213,7 +213,7 @@ export function BookingCheckout({
     invalid && (submitAttempted || Boolean(touchedFields[field]));
   const missingCopy = canSubmit
     ? "Tutto pronto: confermiamo la prenotazione e inviamo il PDF."
-    : `Manca: ${missingFields.slice(0, 3).join(", ")}${missingFields.length > 3 ? "..." : ""}.`;
+    : `Completa: ${missingFields.slice(0, 3).join(", ")}${missingFields.length > 3 ? "..." : ""}`;
 
   async function copyGuestWaiverLink(linkOverride?: string) {
     const link = linkOverride ?? createdBooking?.guestWaiverUrl;
@@ -290,7 +290,7 @@ export function BookingCheckout({
           <ArrowLeft size={17} />
         </Link>
         <div className="brand-lockup">
-          <Image src="/topfly-logo.png" alt="TOPFLY GPS solutions" width={678} height={147} priority />
+          <Image src={appPath("/topfly-logo.png")} alt="TOPFLY GPS solutions" width={678} height={147} priority />
           <div>
             <p className="muted-label">Padel aziendale</p>
             <h1>{createdBooking ? "Prenotazione confermata" : "Completa prenotazione"}</h1>
@@ -438,7 +438,7 @@ export function BookingCheckout({
               <div className="checkout-section-title">
                 <span>2</span>
                 <div>
-                  <strong>Scarico responsabilita</strong>
+                  <strong>Scarico responsabilità</strong>
                   <small>PDF ufficiale, conferme e firma.</small>
                 </div>
               </div>

@@ -248,7 +248,7 @@ export function ManageBooking({
       <section className="signin-card manage-card">
         <div className="signin-brand">
           <Image
-            src="/topfly-logo.png"
+            src={appPath("/topfly-logo.png")}
             alt="TOPFLY GPS solutions"
             width={678}
             height={147}

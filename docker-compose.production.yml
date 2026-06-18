@@ -33,6 +33,7 @@ services:
       AUTH_URL: https://padel.topflysolutions.com/test
       DATABASE_URL: postgresql://padel_preview:padel_preview@postgres_preview:5432/padel_topfly_preview?schema=public
       NEXT_PUBLIC_APP_BASE_PATH: /test
+      APP_WAIVER_RECIPIENT_EMAIL: antony.buffone@gmail.com
     depends_on:
       postgres_preview:
         condition: service_healthy
