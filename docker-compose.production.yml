@@ -18,6 +18,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_ENV: preview
+        APP_BASE_PATH: /test
+        APP_PUBLIC_ORIGIN: https://padel.topflysolutions.com/test
+        AUTH_URL: https://padel.topflysolutions.com/test
+        NEXT_PUBLIC_APP_BASE_PATH: /test
     env_file:
       - .env.production
     environment:
