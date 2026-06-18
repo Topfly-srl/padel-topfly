@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isoDateOnlySchema } from "@/lib/date-only";
 import { jsonResponse, routeError } from "@/lib/errors";
 import { assertRateLimit, assertTrustedOrigin, clientIp } from "@/lib/request-guard";
+import { getPublicBaseUrl } from "@/lib/public-url";
 import { signGuestWaiver } from "@/lib/waiver-service";
 
 const signWaiverSchema = z.object({
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         ip: clientIp(request),
         userAgent: request.headers.get("user-agent"),
       },
+      getPublicBaseUrl(request),
     );
 
     return jsonResponse({ waiver }, { status: 201 });

@@ -46,9 +46,13 @@ type DemoWaiverSignature = {
   id: string;
   bookingId: string;
   bookingRevision: number;
+  status: "ACTIVE" | "CANCELED";
   signerName: string;
   signerEmail: string;
   emailStatus: WaiverEmailStatus;
+  cancelTokenHash: string | null;
+  cancelTokenExpiresAt: Date | null;
+  canceledAt: Date | null;
   signedAt: Date;
 };
 
@@ -102,7 +106,9 @@ function buildGuestWaiverUrl(baseUrl: string | undefined, bookingId: string, tok
 function demoWaiverSummary(booking: DemoBooking) {
   const current = waiverSignatures.filter(
     (signature) =>
-      signature.bookingId === booking.id && signature.bookingRevision === booking.waiverRevision,
+      signature.bookingId === booking.id &&
+      signature.bookingRevision === booking.waiverRevision &&
+      signature.status === "ACTIVE",
   );
   const statuses = current.map((signature) => signature.emailStatus);
   const emailStatus: WaiverEmailStatus | null =
@@ -339,9 +345,13 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     id: id("waiver"),
     bookingId: booking.id,
     bookingRevision: booking.waiverRevision,
+    status: "ACTIVE",
     signerName: identity.organizerName,
     signerEmail: identity.organizerEmail,
     emailStatus: "SKIPPED",
+    cancelTokenHash: null,
+    cancelTokenExpiresAt: null,
+    canceledAt: null,
     signedAt: now,
   });
   addAudit(identity.organizerEmail, "BOOKING_CREATED", "Booking", booking.id);
@@ -526,24 +536,98 @@ export async function demoSignGuestWaiver(
       (signature) =>
         signature.bookingId === booking.id &&
         signature.bookingRevision === booking.waiverRevision &&
-        signature.signerEmail === signerEmail,
+        signature.signerEmail === signerEmail &&
+        signature.status === "ACTIVE",
     )
   ) {
     throw new AppError("Questa email ha gia' firmato lo scarico per questa prenotazione.", 409);
   }
 
+  const cancelToken = createManageToken();
   waiverSignatures.push({
     id: id("waiver"),
     bookingId: booking.id,
     bookingRevision: booking.waiverRevision,
+    status: "ACTIVE",
     signerName,
     signerEmail,
     emailStatus: "SKIPPED",
+    cancelTokenHash: hashManageToken(cancelToken),
+    cancelTokenExpiresAt: manageTokenExpiresAt(booking.end),
+    canceledAt: null,
     signedAt: new Date(),
   });
   addAudit(signerEmail, "WAIVER_SIGNED", "WaiverSignature", booking.id);
 
   return demoGetWaiverContext(bookingId, token);
+}
+
+function assertDemoGuestCancelAccess(signature: DemoWaiverSignature, token: string | null | undefined) {
+  if (
+    !isManageTokenValid(
+      {
+        manageTokenHash: signature.cancelTokenHash,
+        manageTokenExpiresAt: signature.cancelTokenExpiresAt,
+      },
+      token,
+    )
+  ) {
+    throw new AppError("Link rinuncia posto non valido o scaduto.", 403);
+  }
+}
+
+function demoCancelContext(signature: DemoWaiverSignature) {
+  const booking = bookings.find((item) => item.id === signature.bookingId);
+  if (!booking) throw new AppError("Prenotazione non trovata.", 404);
+  const summary = demoWaiverSummary(booking);
+
+  return {
+    signature: {
+      id: signature.id,
+      signerName: signature.signerName,
+      signerEmail: signature.signerEmail,
+      status: signature.status,
+      canceledAt: signature.canceledAt?.toISOString() ?? null,
+    },
+    booking: {
+      id: booking.id,
+      start: booking.start.toISOString(),
+      end: booking.end.toISOString(),
+      organizerName: booking.organizerName,
+      playerCount: booking.playerCount,
+      waiverSignedCount: summary.signedCount,
+      remainingSignatures: summary.remainingCount,
+      status: booking.status,
+    },
+  };
+}
+
+export async function demoGetGuestWaiverCancelContext(signatureId: string, token: string | null) {
+  const signature = waiverSignatures.find((item) => item.id === signatureId);
+  if (!signature) throw new AppError("Firma waiver non trovata.", 404);
+
+  assertDemoGuestCancelAccess(signature, token);
+  return demoCancelContext(signature);
+}
+
+export async function demoCancelGuestWaiverSignature(signatureId: string, token: string | null) {
+  const signature = waiverSignatures.find((item) => item.id === signatureId);
+  if (!signature) throw new AppError("Firma waiver non trovata.", 404);
+
+  assertDemoGuestCancelAccess(signature, token);
+  const booking = bookings.find((item) => item.id === signature.bookingId);
+  if (!booking) throw new AppError("Prenotazione non trovata.", 404);
+  if (booking.status !== "CONFIRMED") {
+    throw new AppError("La prenotazione non e' piu' attiva.", 409);
+  }
+
+  if (signature.status !== "CANCELED") {
+    signature.status = "CANCELED";
+    signature.canceledAt = new Date();
+    addAudit(signature.signerEmail, "WAIVER_SIGNATURE_CANCELED", "WaiverSignature", signature.id);
+  }
+
+  return demoCancelContext(signature);
 }
 
 export function demoReset() {

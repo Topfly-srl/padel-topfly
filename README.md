@@ -62,7 +62,8 @@ scarico vengono inviati a `antony.buffone@gmail.com`, cosi' Cecilia non riceve t
 - Next.js App Router + TypeScript.
 - Prisma + Postgres.
 - Auth.js / NextAuth con Microsoft Entra ID solo per area admin.
-- Microsoft Graph per inviti Outlook, promemoria, cancellazioni native Outlook e invio PDF waiver.
+- Microsoft Graph per inviti Outlook, promemoria, cancellazioni native Outlook, invio PDF waiver
+  e conferme ospiti con allegato calendario.
 - Docker Compose in produzione:
   - `app`: Next.js;
   - `postgres`: database locale;

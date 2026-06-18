@@ -346,6 +346,145 @@ function waiverMailPayload(input: {
   };
 }
 
+function icsText(value: string) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function icsDate(date: Date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function guestCalendarAttachment(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  cancelUrl?: string;
+}) {
+  const description = [
+    appConfig.isPreview ? "AMBIENTE TEST - Non usare per prenotazioni reali." : "",
+    "Firma scarico responsabilita' registrata.",
+    input.cancelUrl ? `Se non puoi partecipare, rinuncia al posto qui: ${input.cancelUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//TOPFLY//Padel TOPFLY//IT",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${icsText(`${input.booking.id}-${input.signerEmail}`)}@padel.topflysolutions.com`,
+    `DTSTAMP:${icsDate(new Date())}`,
+    `DTSTART:${icsDate(input.booking.start)}`,
+    `DTEND:${icsDate(input.booking.end)}`,
+    `SUMMARY:${icsText(`${testPrefix()}Padel TOPFLY - Accesso campo`)}`,
+    `DESCRIPTION:${icsText(description)}`,
+    "LOCATION:Campo Padel TOPFLY",
+    `ATTENDEE;CN=${icsText(input.signerName)}:mailto:${input.signerEmail}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+
+  return {
+    "@odata.type": "#microsoft.graph.fileAttachment",
+    name: `${appConfig.isPreview ? "test-" : ""}padel-topfly.ics`,
+    contentType: "text/calendar",
+    contentBytes: Buffer.from(ics).toString("base64"),
+  };
+}
+
+function guestWaiverConfirmationPayload(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  signedAt: Date;
+  cancelUrl?: string;
+}) {
+  const dateLabel = escapeHtml(formatEventDate(input.booking.start));
+  const startLabel = escapeHtml(formatEventTime(input.booking.start));
+  const endLabel = escapeHtml(formatEventTime(input.booking.end));
+  const signerName = escapeHtml(input.signerName);
+  const safeCancelUrl = input.cancelUrl ? escapeHtml(input.cancelUrl) : null;
+  const signedAt = escapeHtml(
+    new Intl.DateTimeFormat("it-IT", {
+      dateStyle: "short",
+      timeStyle: "short",
+      timeZone: appConfig.timeZone,
+    }).format(input.signedAt),
+  );
+
+  return {
+    message: {
+      subject: `${testPrefix()}Padel TOPFLY - Firma accesso campo confermata`,
+      body: {
+        contentType: "HTML",
+        content: `
+          <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+            <div style="background: #f80d17; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
+              <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;">TOPFLY GPS Solutions</div>
+              <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">Firma accesso campo confermata</div>
+            </div>
+            <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
+              ${testBannerHtml()}
+              <p style="margin: 0 0 16px; font-size: 16px;">
+                Ciao ${signerName},<br>
+                la tua firma per l'accesso al campo Padel TOPFLY e' stata registrata.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
+                <tr>
+                  <td style="padding: 14px 16px; color: #6b7280; font-size: 13px; width: 36%;">Giorno</td>
+                  <td style="padding: 14px 16px; font-weight: 700;">${dateLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Orario</td>
+                  <td style="padding: 0 16px 14px; font-weight: 700;">${startLabel} - ${endLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Firmato il</td>
+                  <td style="padding: 0 16px 14px;">${signedAt}</td>
+                </tr>
+              </table>
+              <p style="margin: 16px 0 0; color: #4b5563;">
+                In allegato trovi un file calendario per salvare l'evento.
+              </p>
+              ${
+                safeCancelUrl
+                  ? `
+              <p style="margin: 22px 0 10px;">
+                <a href="${safeCancelUrl}" style="display: inline-block; background: #24262d; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
+                  Rinuncia al posto${appConfig.isPreview ? " TEST" : ""}
+                </a>
+              </p>
+              <p style="margin: 0; color: #6b7280; font-size: 13px;">
+                Se non puoi essere presente, usa questo link: <a href="${safeCancelUrl}" style="color: #374151;">${safeCancelUrl}</a>
+              </p>
+                  `
+                  : ""
+              }
+            </div>
+          </div>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.signerEmail,
+            name: input.signerName,
+          },
+        },
+      ],
+      attachments: [guestCalendarAttachment(input)],
+    },
+    saveToSentItems: true,
+  };
+}
+
 function cancelComment(organizer: OrganizerContact) {
   return [
     ...(appConfig.isPreview ? ["AMBIENTE TEST - Cancellazione di prova.", ""] : []),
@@ -436,6 +575,33 @@ export async function sendWaiverEmail(input: {
           recipientEmail: appConfig.waiver.recipientEmail,
         }),
       ),
+    });
+
+    return { status: "SENT" };
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "Graph sendMail failed",
+    };
+  }
+}
+
+export async function sendGuestWaiverConfirmationEmail(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  signedAt: Date;
+  cancelUrl?: string;
+}): Promise<WaiverMailResult> {
+  const disabled = graphDisabled();
+  if (disabled) {
+    return { status: "SKIPPED", error: disabled.error };
+  }
+
+  try {
+    await graphFetch(mailboxPath("/sendMail"), {
+      method: "POST",
+      body: JSON.stringify(guestWaiverConfirmationPayload(input)),
     });
 
     return { status: "SENT" };

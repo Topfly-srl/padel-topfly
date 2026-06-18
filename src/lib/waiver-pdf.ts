@@ -131,22 +131,18 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
   const usageDate = `${localDate(input.booking.start)} ${localTime(input.booking.start)}-${localTime(input.booking.end)}`;
   const placeAndDate = `Pretoro, ${localDate(input.signedAt)}`;
   const signatureLabel = "Firma elettronica semplice acquisita tramite web app";
+  const signatureReference = "Firma web acquisita";
   const signatureImage = input.signer.signatureImageBytes
     ? await pdfDoc.embedPng(input.signer.signatureImageBytes)
     : null;
-  const drawSignature = (y: number) => {
-    if (signatureImage) {
-      const scaled = signatureImage.scaleToFit(178, 42);
-      page.drawImage(signatureImage, {
-        x: 305,
-        y: y + 8,
-        width: scaled.width,
-        height: scaled.height,
-      });
-    } else {
+  const drawSignatureReference = (y: number) => {
+    if (!signatureImage) {
       page.drawText(pdfSafe(input.signer.signatureText), { x: 305, y: y + 16, size: 12, font: italic, color: dark });
+      page.drawText(pdfSafe(signatureLabel), { x: 305, y, size: 7, font: italic, color: dark });
+      return;
     }
-    page.drawText(pdfSafe(signatureLabel), { x: 305, y, size: 7, font: italic, color: dark });
+
+    page.drawText(pdfSafe(signatureReference), { x: 305, y: y + 3, size: 7, font: italic, color: dark });
   };
 
   page.drawText(pdfSafe(input.signer.name), { x: 168, y: 655, size: 10, font, color: dark });
@@ -160,9 +156,9 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
   page.drawText(pdfSafe(usageDate), { x: 168, y: 606, size: 10, font, color: dark });
 
   page.drawText(pdfSafe(placeAndDate), { x: 64, y: 282, size: 9, font, color: dark });
-  drawSignature(282);
+  drawSignatureReference(282);
   page.drawText(pdfSafe(placeAndDate), { x: 64, y: 194, size: 9, font, color: dark });
-  drawSignature(194);
+  drawSignatureReference(194);
 
   page.drawText("Documento compilato digitalmente", {
     x: 54,
@@ -206,7 +202,7 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
     }
   };
 
-  evidencePage.drawText("Evidenza digitale - Scarico responsabilita' Padel TOPFLY", {
+  evidencePage.drawText("Evidenza digitale - Scarico responsabilità Padel TOPFLY", {
     x: 54,
     y,
     size: 16,
@@ -222,7 +218,7 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
   drawLabel("Booking", `${input.booking.id} - revisione waiver ${input.booking.waiverRevision}`);
   drawLabel("Firmato il", localDateTime(input.signedAt));
   drawLabel("Ambiente", appConfig.isPreview ? "TEST - verifica tecnica" : "Produzione");
-  drawLabel("Modalita' firma", "touch/canvas web app - firma elettronica semplice");
+  drawLabel("Modalità firma", "touch/canvas web app - firma elettronica semplice");
   drawLabel("Hash firma disegnata", input.signer.signatureImageSha256 ?? "non disponibile");
   drawLabel("Versione documenti", input.documentVersion);
   drawLabel("IP hash", input.ipHash ?? "non disponibile");
@@ -233,7 +229,7 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
   y -= 22;
   drawBullet("Confermo di essere maggiorenne; per minori serve autorizzazione preventiva della Direzione.");
   drawBullet("Dichiaro di aver letto e accettato integralmente il regolamento Padel TOPFLY.");
-  drawBullet("Dichiaro di assumermi le responsabilita' e la manleva nei limiti consentiti dalla legge.");
+  drawBullet("Dichiaro di assumermi le responsabilità e la manleva nei limiti consentiti dalla legge.");
   drawBullet("Approvo specificamente le clausole richiamate ai sensi degli artt. 1341 e 1342 c.c., ove applicabili.");
   drawBullet("Dichiaro di aver ricevuto o potuto consultare l'informativa privacy applicabile.");
 

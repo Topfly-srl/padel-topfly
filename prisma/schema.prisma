@@ -36,6 +36,11 @@ enum WaiverEmailStatus {
   SKIPPED
 }
 
+enum WaiverSignatureStatus {
+  ACTIVE
+  CANCELED
+}
+
 model User {
   id          String       @id @default(cuid())
   email       String       @unique
@@ -83,6 +88,7 @@ model WaiverSignature {
   bookingId                  String
   booking                    Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   bookingRevision            Int
+  status                     WaiverSignatureStatus @default(ACTIVE)
   signerRole                 WaiverSignerRole
   signerName                 String
   signerEmail                String
@@ -106,12 +112,21 @@ model WaiverSignature {
   emailStatus                WaiverEmailStatus @default(PENDING)
   emailError                 String?
   emailSentAt                DateTime?
+  guestEmailStatus           WaiverEmailStatus @default(SKIPPED)
+  guestEmailError            String?
+  guestEmailSentAt           DateTime?
+  cancelTokenHash            String?
+  cancelTokenExpiresAt       DateTime?
+  canceledAt                 DateTime?
   createdAt                  DateTime          @default(now())
   updatedAt                  DateTime          @updatedAt
 
-  @@unique([bookingId, bookingRevision, signerEmail])
   @@index([bookingId, bookingRevision])
+  @@index([bookingId, bookingRevision, signerEmail])
+  @@index([cancelTokenHash])
   @@index([emailStatus])
+  @@index([guestEmailStatus])
+  @@index([status])
 }
 
 model AdminBlock {

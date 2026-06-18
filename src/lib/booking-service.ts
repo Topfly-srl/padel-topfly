@@ -80,7 +80,7 @@ function buildManageUrl(baseUrl: string | undefined, bookingId: string, token: s
 }
 
 type BookingWithWaiverSignatures = Booking & {
-  waiverSignatures?: Array<{ bookingRevision: number; emailStatus: WaiverEmailStatus }>;
+  waiverSignatures?: Array<{ bookingRevision: number; emailStatus: WaiverEmailStatus; status?: "ACTIVE" | "CANCELED" }>;
 };
 
 function serializeBooking(booking: BookingWithWaiverSignatures): AvailabilityBooking {
@@ -232,7 +232,7 @@ async function getBookingWithWaivers(bookingId: string) {
     where: { id: bookingId },
     include: {
       waiverSignatures: {
-        select: { bookingRevision: true, emailStatus: true },
+        select: { bookingRevision: true, emailStatus: true, status: true },
       },
     },
   });
@@ -365,7 +365,7 @@ export async function getAvailability(dateValue: string | null) {
       },
       include: {
         waiverSignatures: {
-          select: { bookingRevision: true, emailStatus: true },
+          select: { bookingRevision: true, emailStatus: true, status: true },
         },
       },
       orderBy: { start: "asc" },
@@ -410,7 +410,7 @@ export async function lookupBookings(tokens: string[], baseUrl?: string) {
     },
     include: {
       waiverSignatures: {
-        select: { bookingRevision: true, emailStatus: true },
+        select: { bookingRevision: true, emailStatus: true, status: true },
       },
     },
     orderBy: [{ status: "asc" }, { start: "asc" }],
@@ -434,7 +434,7 @@ export async function listBookings(currentUser: CurrentUser) {
   const bookings = await prisma.booking.findMany({
     include: {
       waiverSignatures: {
-        select: { bookingRevision: true, emailStatus: true },
+        select: { bookingRevision: true, emailStatus: true, status: true },
       },
     },
     orderBy: { start: "desc" },

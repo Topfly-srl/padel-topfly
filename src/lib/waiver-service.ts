@@ -1,8 +1,13 @@
 import { createHash } from "crypto";
 import type { Booking, Prisma, User, WaiverEmailStatus, WaiverSignature } from "@prisma/client";
 import { AppError } from "@/lib/errors";
-import { demoGetWaiverContext, demoSignGuestWaiver } from "@/lib/demo-store";
-import { sendWaiverEmail } from "@/lib/graph";
+import {
+  demoCancelGuestWaiverSignature,
+  demoGetGuestWaiverCancelContext,
+  demoGetWaiverContext,
+  demoSignGuestWaiver,
+} from "@/lib/demo-store";
+import { sendGuestWaiverConfirmationEmail, sendWaiverEmail } from "@/lib/graph";
 import {
   createManageToken,
   hashManageToken,
@@ -64,12 +69,33 @@ export type AdminWaiverSignatureItem = {
   playerCount: number;
 };
 
+export type GuestWaiverCancelContext = {
+  signature: {
+    id: string;
+    signerName: string;
+    signerEmail: string;
+    status: "ACTIVE" | "CANCELED";
+    canceledAt: string | null;
+  };
+  booking: {
+    id: string;
+    start: string;
+    end: string;
+    organizerName: string;
+    playerCount: number;
+    waiverSignedCount: number;
+    remainingSignatures: number;
+    status: "CONFIRMED" | "CANCELED";
+  };
+};
+
 type BookingForWaiver = Pick<
   Booking,
   "id" | "start" | "end" | "status" | "playerCount" | "waiverRevision"
 >;
 
 type SignatureForSummary = Pick<WaiverSignature, "bookingRevision" | "emailStatus">;
+type SignatureForSummaryWithStatus = Pick<WaiverSignature, "bookingRevision" | "emailStatus" | "status">;
 
 const minBirthDate = new Date("1900-01-01T00:00:00.000Z");
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -220,13 +246,28 @@ export function buildGuestWaiverUrl(baseUrl: string | undefined, bookingId: stri
   return `${baseUrl.replace(/\/$/, "")}/waiver/${bookingId}?${params.toString()}`;
 }
 
+export function buildGuestWaiverCancelUrl(
+  baseUrl: string | undefined,
+  signatureId: string,
+  token: string | undefined,
+) {
+  if (!baseUrl || !token) return undefined;
+  const params = new URLSearchParams({ token });
+  if (appConfig.isPreview) params.set("test", "1");
+  return `${baseUrl.replace(/\/$/, "")}/waiver/cancel/${signatureId}?${params.toString()}`;
+}
+
 export function summarizeWaiverSignatures(input: {
   playerCount: number;
   waiverRevision: number;
-  waiverSignatures?: SignatureForSummary[];
+  waiverSignatures?: Array<SignatureForSummary | SignatureForSummaryWithStatus>;
 }) {
   const currentSignatures =
-    input.waiverSignatures?.filter((signature) => signature.bookingRevision === input.waiverRevision) ?? [];
+    input.waiverSignatures?.filter(
+      (signature) =>
+        signature.bookingRevision === input.waiverRevision &&
+        (!("status" in signature) || signature.status === "ACTIVE"),
+    ) ?? [];
   const signedCount = currentSignatures.length;
   const statuses = currentSignatures.map((signature) => signature.emailStatus);
   const emailStatus: WaiverEmailStatus | null =
@@ -253,6 +294,10 @@ export async function createWaiverSignature(
   input: WaiverInput,
   signerRole: "ORGANIZER" | "GUEST",
   evidence: WaiverEvidence,
+  options: {
+    cancelToken?: string;
+    guestEmailStatus?: WaiverEmailStatus;
+  } = {},
 ) {
   const now = new Date();
   const normalized = normalizeWaiverInput(input, now);
@@ -302,6 +347,9 @@ export async function createWaiverSignature(
         pdfBytes: Buffer.from(pdf.bytes),
         pdfSha256: pdf.sha256,
         emailStatus: "PENDING",
+        guestEmailStatus: options.guestEmailStatus ?? "SKIPPED",
+        cancelTokenHash: options.cancelToken ? hashManageToken(options.cancelToken) : null,
+        cancelTokenExpiresAt: options.cancelToken ? manageTokenExpiresAt(booking.end) : null,
       },
     });
   } catch (error) {
@@ -347,6 +395,40 @@ export async function sendWaiverSignatureEmail(signatureId: string) {
   });
 }
 
+export async function sendGuestWaiverEmail(signatureId: string, cancelUrl?: string) {
+  if (!appConfig.databaseConfigured) return;
+
+  const signature = await prisma.waiverSignature.findUnique({
+    where: { id: signatureId },
+    include: { booking: true },
+  });
+
+  if (!signature) {
+    throw new AppError("Firma waiver non trovata.", 404);
+  }
+
+  if (signature.signerRole !== "GUEST") {
+    return;
+  }
+
+  const result = await sendGuestWaiverConfirmationEmail({
+    booking: signature.booking,
+    signerName: signature.signerName,
+    signerEmail: signature.signerEmail,
+    signedAt: signature.signedAt,
+    cancelUrl,
+  });
+
+  await prisma.waiverSignature.update({
+    where: { id: signature.id },
+    data: {
+      guestEmailStatus: result.status,
+      guestEmailError: result.status === "FAILED" || result.status === "SKIPPED" ? result.error ?? null : null,
+      guestEmailSentAt: result.status === "SENT" ? new Date() : null,
+    },
+  });
+}
+
 function assertGuestWaiverAccess(
   booking: Pick<Booking, "guestWaiverTokenHash" | "guestWaiverTokenExpiresAt" | "status">,
   token: string | null | undefined,
@@ -368,6 +450,53 @@ function assertGuestWaiverAccess(
   }
 }
 
+function assertGuestCancelAccess(
+  signature: Pick<WaiverSignature, "cancelTokenHash" | "cancelTokenExpiresAt" | "signerRole">,
+  token: string | null | undefined,
+) {
+  const isValid = isManageTokenValid(
+    {
+      manageTokenHash: signature.cancelTokenHash,
+      manageTokenExpiresAt: signature.cancelTokenExpiresAt,
+    },
+    token,
+  );
+
+  if (signature.signerRole !== "GUEST" || !isValid) {
+    throw new AppError("Link rinuncia posto non valido o scaduto.", 403);
+  }
+}
+
+function serializeGuestCancelContext(
+  signature: WaiverSignature & {
+    booking: Booking & {
+      waiverSignatures?: Array<SignatureForSummaryWithStatus>;
+    };
+  },
+): GuestWaiverCancelContext {
+  const summary = summarizeWaiverSignatures(signature.booking);
+
+  return {
+    signature: {
+      id: signature.id,
+      signerName: signature.signerName,
+      signerEmail: signature.signerEmail,
+      status: signature.status,
+      canceledAt: signature.canceledAt?.toISOString() ?? null,
+    },
+    booking: {
+      id: signature.booking.id,
+      start: signature.booking.start.toISOString(),
+      end: signature.booking.end.toISOString(),
+      organizerName: signature.booking.organizerName,
+      playerCount: signature.booking.playerCount,
+      waiverSignedCount: summary.signedCount,
+      remainingSignatures: summary.remainingCount,
+      status: signature.booking.status,
+    },
+  };
+}
+
 export async function getWaiverContext(bookingId: string, token: string | null): Promise<WaiverContext> {
   if (!appConfig.databaseConfigured) {
     return demoGetWaiverContext(bookingId, token);
@@ -377,7 +506,7 @@ export async function getWaiverContext(bookingId: string, token: string | null):
     where: { id: bookingId },
     include: {
       waiverSignatures: {
-        select: { bookingRevision: true, emailStatus: true },
+        select: { bookingRevision: true, emailStatus: true, status: true },
       },
     },
   });
@@ -411,18 +540,20 @@ export async function signGuestWaiver(
   token: string | null,
   input: WaiverInput,
   evidence: WaiverEvidence,
+  baseUrl?: string,
 ) {
   if (!appConfig.databaseConfigured) {
     return demoSignGuestWaiver(bookingId, token, input, evidence);
   }
 
+  const cancelToken = createManageToken();
   const signature = await prisma.$transaction(
     async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
         include: {
           waiverSignatures: {
-            select: { bookingRevision: true, emailStatus: true },
+            select: { bookingRevision: true, emailStatus: true, status: true },
           },
         },
       });
@@ -443,6 +574,7 @@ export async function signGuestWaiver(
           bookingId: booking.id,
           bookingRevision: booking.waiverRevision,
           signerEmail: normalizeEmail(input.signerEmail),
+          status: "ACTIVE",
         },
         select: { id: true },
       });
@@ -451,7 +583,10 @@ export async function signGuestWaiver(
         throw new AppError("Questa email ha gia' firmato lo scarico per questa prenotazione.", 409);
       }
 
-      const saved = await createWaiverSignature(tx, booking, input, "GUEST", evidence);
+      const saved = await createWaiverSignature(tx, booking, input, "GUEST", evidence, {
+        cancelToken,
+        guestEmailStatus: "PENDING",
+      });
       await tx.auditLog.create({
         data: {
           actorEmail: saved.signerEmail,
@@ -475,7 +610,117 @@ export async function signGuestWaiver(
   );
 
   await sendWaiverSignatureEmail(signature.id);
+  await sendGuestWaiverEmail(
+    signature.id,
+    buildGuestWaiverCancelUrl(baseUrl ?? appConfig.publicOrigin, signature.id, cancelToken),
+  );
   return getWaiverContext(bookingId, token);
+}
+
+export async function getGuestWaiverCancelContext(
+  signatureId: string,
+  token: string | null,
+): Promise<GuestWaiverCancelContext> {
+  if (!appConfig.databaseConfigured) {
+    return demoGetGuestWaiverCancelContext(signatureId, token);
+  }
+
+  const signature = await prisma.waiverSignature.findUnique({
+    where: { id: signatureId },
+    include: {
+      booking: {
+        include: {
+          waiverSignatures: {
+            select: { bookingRevision: true, emailStatus: true, status: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!signature) {
+    throw new AppError("Firma waiver non trovata.", 404);
+  }
+
+  assertGuestCancelAccess(signature, token);
+  return serializeGuestCancelContext(signature);
+}
+
+export async function cancelGuestWaiverSignature(signatureId: string, token: string | null) {
+  if (!appConfig.databaseConfigured) {
+    return demoCancelGuestWaiverSignature(signatureId, token);
+  }
+
+  const canceled = await prisma.$transaction(
+    async (tx) => {
+      const signature = await tx.waiverSignature.findUnique({
+        where: { id: signatureId },
+        include: {
+          booking: {
+            include: {
+              waiverSignatures: {
+                select: { bookingRevision: true, emailStatus: true, status: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!signature) {
+        throw new AppError("Firma waiver non trovata.", 404);
+      }
+
+      assertGuestCancelAccess(signature, token);
+
+      if (signature.status === "CANCELED") {
+        return signature;
+      }
+
+      if (signature.booking.status !== "CONFIRMED") {
+        throw new AppError("La prenotazione non e' piu' attiva.", 409);
+      }
+
+      const saved = await tx.waiverSignature.update({
+        where: { id: signature.id },
+        data: {
+          status: "CANCELED",
+          canceledAt: new Date(),
+        },
+        include: {
+          booking: {
+            include: {
+              waiverSignatures: {
+                select: { bookingRevision: true, emailStatus: true, status: true },
+              },
+            },
+          },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorEmail: saved.signerEmail,
+          action: "WAIVER_SIGNATURE_CANCELED",
+          entityType: "WaiverSignature",
+          entityId: saved.id,
+          before: {
+            status: "ACTIVE",
+            bookingId: saved.bookingId,
+            bookingRevision: saved.bookingRevision,
+          },
+          after: {
+            status: "CANCELED",
+            canceledAt: saved.canceledAt?.toISOString() ?? null,
+          },
+        },
+      });
+
+      return saved;
+    },
+    { isolationLevel: "Serializable" },
+  );
+
+  return serializeGuestCancelContext(canceled);
 }
 
 export async function retryWaiverEmail(signatureId: string, actor: Pick<User, "id" | "email">) {

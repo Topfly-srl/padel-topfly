@@ -560,6 +560,64 @@ button:disabled {
   margin: 0;
 }
 
+.guest-success-card,
+.guest-cancel-action,
+.guest-cancel-details {
+  display: grid;
+  gap: 10px;
+}
+
+.guest-success-card {
+  border: 1px solid rgba(15, 122, 79, 0.14);
+  border-radius: 8px;
+  background: var(--success-soft);
+  color: #14583d;
+  padding: 12px;
+}
+
+.guest-success-card strong {
+  font-size: 0.96rem;
+  font-weight: 560;
+}
+
+.guest-success-card p,
+.guest-cancel-action p {
+  margin: 0;
+  color: inherit;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.guest-cancel-details {
+  grid-template-columns: 1fr 1fr;
+}
+
+.guest-cancel-details span {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.guest-cancel-details small,
+.guest-cancel-details strong {
+  display: block;
+  min-width: 0;
+}
+
+.guest-cancel-details small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  margin-bottom: 3px;
+}
+
+.guest-cancel-details strong {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 560;
+}
+
 .waiver-page-card .waiver-head {
   border: 1px solid rgba(15, 122, 79, 0.14);
   border-radius: 8px;
@@ -1010,6 +1068,11 @@ summary:focus-visible {
 .summary-state-icon.warning {
   background: #fff5db;
   color: #a16207;
+}
+
+.summary-state-icon.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .summary-state h2 {
@@ -1665,6 +1728,31 @@ summary:focus-visible {
   font-size: 0.8rem;
 }
 
+.danger-button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(184, 0, 17, 0.22);
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  padding: 0 14px;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.danger-button:disabled {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.danger-button:not(:disabled):hover {
+  background: #9f0010;
+}
+
 .danger-action {
   color: var(--danger);
 }
@@ -2019,6 +2107,10 @@ summary:focus-visible {
   }
 
   .guest-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .guest-cancel-details {
     grid-template-columns: 1fr;
   }
 

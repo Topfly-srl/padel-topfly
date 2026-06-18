@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { demoCreateBooking, demoGetWaiverContext, demoReset, demoSignGuestWaiver } from "@/lib/demo-store";
-import { normalizeWaiverInput, validatePlayerCount, type WaiverInput } from "@/lib/waiver-service";
+import {
+  normalizeWaiverInput,
+  summarizeWaiverSignatures,
+  validatePlayerCount,
+  type WaiverInput,
+} from "@/lib/waiver-service";
 
 const signatureImageDataUrl =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
@@ -148,14 +153,34 @@ describe("waiver service", () => {
     await expect(demoSignGuestWaiver(booking.id, token, guestWaiver, {})).rejects.toThrow("gia' firmato");
   });
 
+  it("non conta le firme ospite rinunciate nel totale firme", () => {
+    const summary = summarizeWaiverSignatures({
+      playerCount: 4,
+      waiverRevision: 1,
+      waiverSignatures: [
+        { bookingRevision: 1, emailStatus: "SENT", status: "ACTIVE" },
+        { bookingRevision: 1, emailStatus: "SENT", status: "ACTIVE" },
+        { bookingRevision: 1, emailStatus: "SENT", status: "CANCELED" },
+        { bookingRevision: 2, emailStatus: "SENT", status: "ACTIVE" },
+      ],
+    });
+
+    expect(summary.signedCount).toBe(2);
+    expect(summary.remainingCount).toBe(2);
+    expect(summary.emailStatus).toBe("SENT");
+  });
+
   it("marca i link firma ospiti con test=1 in ambiente preview", async () => {
     vi.resetModules();
     vi.stubEnv("APP_ENV", "preview");
 
-    const { buildGuestWaiverUrl } = await import("@/lib/waiver-service");
+    const { buildGuestWaiverCancelUrl, buildGuestWaiverUrl } = await import("@/lib/waiver-service");
 
     expect(buildGuestWaiverUrl("https://padel.topflysolutions.com/test", "booking_1", "abc")).toBe(
       "https://padel.topflysolutions.com/test/waiver/booking_1?token=abc&test=1",
+    );
+    expect(buildGuestWaiverCancelUrl("https://padel.topflysolutions.com/test", "waiver_1", "cancel")).toBe(
+      "https://padel.topflysolutions.com/test/waiver/cancel/waiver_1?token=cancel&test=1",
     );
   });
 });

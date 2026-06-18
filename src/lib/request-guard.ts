@@ -13,6 +13,7 @@ type RateLimitAction =
   | "booking:lookup"
   | "booking:manage"
   | "admin:waiver-email-retry"
+  | "waiver:cancel"
   | "waiver:read"
   | "waiver:sign";
 
@@ -22,6 +23,7 @@ const rateLimitPolicy: Record<RateLimitAction, { max: number; windowMs: number }
   "booking:lookup": { max: 40, windowMs: 60_000 },
   "booking:manage": { max: 30, windowMs: 60_000 },
   "admin:waiver-email-retry": { max: 12, windowMs: 15 * 60_000 },
+  "waiver:cancel": { max: 20, windowMs: 15 * 60_000 },
   "waiver:read": { max: 60, windowMs: 60_000 },
   "waiver:sign": { max: 10, windowMs: 15 * 60_000 },
 };

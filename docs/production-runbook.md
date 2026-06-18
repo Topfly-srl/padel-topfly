@@ -346,6 +346,11 @@ Scarichi responsabilita':
 - il referente firma durante la prenotazione;
 - dopo la prenotazione il referente vede il link ospiti completo e puo' copiarlo o aprirlo;
 - gli ospiti firmano da `/waiver/[bookingId]?token=...`;
+- gli ospiti ricevono una mail di conferma con allegato calendario `.ics` e link personale
+  per rinunciare al posto;
+- se un ospite rinuncia, la firma resta nello storico ma non conta piu' nel limite giocatori;
+- quando le firme attive arrivano a `playerCount/playerCount`, il link ospiti non permette
+  nuove firme;
 - ogni firma genera un PDF archiviato in Postgres;
 - l'app invia il PDF a Cecilia tramite Graph `sendMail`;
 - se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`.

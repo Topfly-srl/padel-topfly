@@ -99,6 +99,7 @@ export function WaiverSigning({
   const [waiverForm, setWaiverForm] = useState<WaiverFormValue>(emptyWaiverForm);
   const [touchedFields, setTouchedFields] = useState<Partial<Record<GuestField, boolean>>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [hasSigned, setHasSigned] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
@@ -206,12 +207,14 @@ export function WaiverSigning({
 
     const json = (await response.json()) as { waiver: WaiverContext };
     setWaiver(json.waiver);
-    setNotice({ type: "success", text: "Firma registrata. Il modulo ufficiale firmato e' stato inviato alla Direzione." });
+    setNotice(null);
+    setHasSigned(true);
     setSignerName("");
     setSignerEmail("");
     setWaiverForm(emptyWaiverForm);
     setTouchedFields({});
     setSubmitAttempted(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const showFieldError = (field: GuestField, invalid: boolean) =>
@@ -255,12 +258,21 @@ export function WaiverSigning({
               </span>
             </div>
 
-            {waiver.booking.remainingSignatures <= 0 ? (
+            {hasSigned ? (
+              <div className="guest-success-card">
+                <strong>Firma registrata.</strong>
+                <p>
+                  Il modulo ufficiale firmato è stato inviato alla Direzione. Ti mandiamo anche una
+                  mail con il riepilogo, l&apos;evento calendario e il link per rinunciare al posto se non
+                  puoi esserci.
+                </p>
+              </div>
+            ) : waiver.booking.remainingSignatures <= 0 ? (
               <div className="notice success">
                 <Check size={17} />
                 <div>
-                  <strong>Tutte le firme risultano raccolte.</strong>
-                  <span>Non devi fare altro per questa prenotazione.</span>
+                  <strong>Posti completi.</strong>
+                  <span>Tutte le firme per questa prenotazione risultano raccolte.</span>
                 </div>
               </div>
             ) : (
