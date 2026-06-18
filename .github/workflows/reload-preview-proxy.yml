@@ -70,6 +70,14 @@ jobs:
           git checkout main
           git pull --ff-only origin main
 
+          echo "Host Caddyfile preview route:"
+          sed -n '1,90p' docker/Caddyfile
+
+          sudo docker compose -f docker-compose.production.yml up -d --force-recreate caddy
+          echo "Container Caddyfile preview route:"
+          sudo docker compose -f docker-compose.production.yml exec -T caddy \
+            sed -n '1,90p' /etc/caddy/Caddyfile \
+            < /dev/null
           sudo docker compose -f docker-compose.production.yml exec -T caddy \
             caddy validate --config /etc/caddy/Caddyfile \
             < /dev/null
