@@ -1093,8 +1093,8 @@ export function BookingApp({
                       <Mail size={17} />
                     </span>
                   <div>
-                      <strong>Prenotazione e modulo PDF</strong>
-                      <small>Conferma via email, poi invio del modulo firmato alla Direzione.</small>
+                      <strong>Prenotazione e scarico responsabilità</strong>
+                      <small>Ricevi la conferma via email; il modulo firmato viene inviato alla Direzione.</small>
                   </div>
                 </div>
                 )}
