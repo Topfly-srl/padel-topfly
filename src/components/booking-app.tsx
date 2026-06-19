@@ -9,7 +9,6 @@ import {
   Edit3,
   FileText,
   Lock,
-  Mail,
   LogOut,
   MailWarning,
   RotateCcw,
@@ -1087,30 +1086,28 @@ export function BookingApp({
                   >
                     {notice.text}
                   </div>
-                ) : (
-                  <div className="summary-next">
-                    <span aria-hidden="true">
-                      <Mail size={17} />
-                    </span>
-                  <div>
-                      <strong>Prenotazione e scarico responsabilità</strong>
-                      <small>Ricevi la conferma via email; il modulo firmato viene inviato alla Direzione.</small>
-                  </div>
-                </div>
-                )}
+                ) : null}
 
               </>
             )}
             {isConfirmedSelection || selectionConflict ? null : (
-              <button
-                className="primary-button full-width"
-                disabled={!canPressPrimary || (editingBookingId ? !canSave : false)}
-                onClick={editingBookingId ? saveBooking : openBookingCheckout}
-                type="button"
-              >
-                <Check size={18} />
-                {selectionConflict ? "Slot occupato" : editingBookingId ? "Salva modifica" : "Prenota"}
-              </button>
+              <>
+                <button
+                  className="primary-button full-width"
+                  disabled={!canPressPrimary || (editingBookingId ? !canSave : false)}
+                  onClick={editingBookingId ? saveBooking : openBookingCheckout}
+                  type="button"
+                >
+                  <Check size={18} />
+                  {editingBookingId ? "Salva modifica" : "Prenota e firma scarico responsabilità"}
+                </button>
+                {editingBookingId ? null : (
+                  <p className="summary-action-note">
+                    Ricevi la conferma via email; lo scarico firmato viene inviato
+                    all&apos;Amministrazione.
+                  </p>
+                )}
+              </>
             )}
 
             {editingBookingId ? (
