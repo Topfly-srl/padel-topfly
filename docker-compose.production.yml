@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_ENV: development
     env_file:
       - .env.production
     depends_on:
