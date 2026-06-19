@@ -53,11 +53,9 @@ async function readApiError(response: Response) {
 }
 
 export function WaiverCancel({
-  environmentLabel = "",
   signatureId,
   token,
 }: {
-  environmentLabel?: string;
   signatureId: string;
   token: string;
 }) {
@@ -132,7 +130,6 @@ export function WaiverCancel({
           <div>
             <p className="muted-label">Padel aziendale</p>
             <h1>Rinuncia posto</h1>
-            {environmentLabel ? <span className="environment-badge">{environmentLabel}</span> : null}
           </div>
         </div>
       </header>

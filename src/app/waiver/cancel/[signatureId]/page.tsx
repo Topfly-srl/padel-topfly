@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { WaiverCancel } from "@/components/waiver-cancel";
-import { appConfig } from "@/lib/config";
 
 export const metadata: Metadata = {
   referrer: "no-referrer",
@@ -14,11 +13,5 @@ type PageProps = {
 export default async function WaiverCancelPage({ params, searchParams }: PageProps) {
   const [{ signatureId }, query] = await Promise.all([params, searchParams]);
 
-  return (
-    <WaiverCancel
-      environmentLabel={appConfig.publicEnvironmentLabel}
-      signatureId={signatureId}
-      token={query.token ?? ""}
-    />
-  );
+  return <WaiverCancel signatureId={signatureId} token={query.token ?? ""} />;
 }

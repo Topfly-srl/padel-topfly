@@ -4,7 +4,6 @@ import { Copy } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
 
 type GuestLinkPanelProps = {
-  environmentLabel?: string;
   link: string;
   copied?: boolean;
   onCopy: (link: string) => void;
@@ -37,31 +36,28 @@ function normalizeGuestWaiverLink(link: string, origin: string) {
 }
 
 export function GuestLinkPanel({
-  environmentLabel = "",
   link,
   copied = false,
   onCopy,
 }: GuestLinkPanelProps) {
   const origin = useSyncExternalStore(subscribeToOrigin, getClientOrigin, getServerOrigin);
   const usableLink = useMemo(() => normalizeGuestWaiverLink(link, origin), [link, origin]);
-  const linkLabel = environmentLabel ? `firma ospiti ${environmentLabel}` : "firma ospiti";
 
   return (
     <div className="guest-share-card">
       <div>
-        <strong>{environmentLabel ? `Firma ospiti - ${environmentLabel}` : "Firma ospiti"}</strong>
+        <strong>Firma ospiti</strong>
         <small>
-          Condividi questo link {environmentLabel ? `di ${environmentLabel.toLowerCase()}` : ""} con chi gioca con te.
-          Il link completo resta visibile qui sotto.
+          Condividi questo link con chi gioca con te. Il link completo resta visibile qui sotto.
         </small>
       </div>
       <div className="guest-share-actions">
         <button className="ghost-button full-width" onClick={() => onCopy(usableLink)} type="button">
           <Copy size={16} />
-          {copied ? "Copiato" : `Copia link ${environmentLabel || ""}`.trim()}
+          {copied ? "Copiato" : "Copia link"}
         </button>
         <a className="ghost-button full-width" href={usableLink}>
-          Apri {linkLabel}
+          Apri firma ospiti
         </a>
       </div>
       <input

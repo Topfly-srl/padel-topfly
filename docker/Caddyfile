@@ -19,14 +19,8 @@
 {$APP_DOMAIN} {
 	import padel_security_headers
 
-	@token_pages path /manage/* /waiver/* /test/manage/* /test/waiver/*
+	@token_pages path /manage/* /waiver/*
 	header @token_pages Referrer-Policy "no-referrer"
-
-	handle /test* {
-		reverse_proxy app_preview:3000 {
-			header_up X-Real-IP {remote_host}
-		}
-	}
 
 	handle {
 		reverse_proxy app:3000 {

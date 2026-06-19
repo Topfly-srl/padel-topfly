@@ -350,7 +350,6 @@ describe("Microsoft Graph sync", () => {
 
   it("invia conferma ospite con allegato calendario e link rinuncia", async () => {
     vi.resetModules();
-    vi.stubEnv("APP_ENV", "preview");
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
     vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
     vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
@@ -401,7 +400,7 @@ describe("Microsoft Graph sync", () => {
       signerName: "Laura Bianchi",
       signerEmail: "laura@example.com",
       signedAt: now,
-      cancelUrl: "https://padel.topflysolutions.com/test/waiver/cancel/waiver_1?token=abc&test=1",
+      cancelUrl: "https://padel.topflysolutions.com/waiver/cancel/waiver_1?token=abc",
     });
 
     const sendMailCall = calls.find((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
@@ -409,78 +408,11 @@ describe("Microsoft Graph sync", () => {
     expect(sendMailCall).toBeDefined();
 
     const payload = JSON.parse(sendMailCall!.body!);
-    expect(payload.message.subject).toContain("[TEST]");
+    expect(payload.message.subject).toBe("Padel TOPFLY - Firma accesso campo confermata");
     expect(payload.message.toRecipients[0].emailAddress.address).toBe("laura@example.com");
     expect(payload.message.body.content).toContain("Rinuncia al posto");
-    expect(payload.message.body.content).toContain("/test/waiver/cancel/waiver_1");
-    expect(payload.message.attachments[0].name).toBe("test-padel-topfly.ics");
+    expect(payload.message.body.content).toContain("/waiver/cancel/waiver_1");
+    expect(payload.message.attachments[0].name).toBe("padel-topfly.ics");
     expect(payload.message.attachments[0].contentType).toBe("text/calendar");
-  });
-
-  it("marca inviti e link come TEST in ambiente preview", async () => {
-    vi.resetModules();
-    vi.stubEnv("APP_ENV", "preview");
-    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
-    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
-    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
-    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
-
-    const calls: Array<{ url: string; body?: string; method?: string }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = input.toString();
-        calls.push({ url, body: init?.body?.toString(), method: init?.method });
-
-        if (url.includes("login.microsoftonline.com")) {
-          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
-            status: 200,
-          });
-        }
-
-        return new Response(JSON.stringify({ id: "event_test" }), { status: 201 });
-      }),
-    );
-
-    const { createOutlookEvent } = await import("@/lib/graph");
-    const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
-      id: "booking_test",
-      start: new Date("2026-06-04T16:00:00.000Z"),
-      end: new Date("2026-06-04T17:00:00.000Z"),
-      status: "CONFIRMED",
-      organizerName: "Mario Rossi",
-      organizerEmail: "mario@topfly.it",
-      manageTokenHash: null,
-      manageTokenExpiresAt: null,
-      outlookEventId: null,
-      outlookSyncStatus: "PENDING",
-      outlookSyncError: null,
-      playerCount: 4,
-      waiverRevision: 1,
-      guestWaiverTokenHash: null,
-      guestWaiverTokenExpiresAt: null,
-      createdAt: now,
-      updatedAt: now,
-      organizerId: null,
-    };
-
-    await expect(
-      createOutlookEvent(
-        booking,
-        { email: booking.organizerEmail, name: booking.organizerName },
-        "https://padel.topflysolutions.com/test/manage/booking_test?token=abc&test=1",
-        "https://padel.topflysolutions.com/test/waiver/booking_test?token=guest&test=1",
-      ),
-    ).resolves.toMatchObject({ status: "SYNCED" });
-
-    const eventCall = calls.find((call) => call.url.includes("/calendar/events"));
-    expect(eventCall).toBeDefined();
-
-    const payload = JSON.parse(eventCall!.body!);
-    expect(payload.subject).toBe("[TEST] Padel TOPFLY - Campo prenotato");
-    expect(payload.body.content).toContain("AMBIENTE TEST");
-    expect(payload.body.content).toContain("Link TEST firma ospiti");
-    expect(payload.body.content).toContain("test=1");
   });
 });

@@ -75,7 +75,6 @@ export type BookingAccess = {
 function buildManageUrl(baseUrl: string | undefined, bookingId: string, token: string | undefined) {
   if (!baseUrl || !token) return undefined;
   const params = new URLSearchParams({ token });
-  if (appConfig.isPreview) params.set("test", "1");
   return `${baseUrl.replace(/\/$/, "")}/manage/${bookingId}?${params.toString()}`;
 }
 

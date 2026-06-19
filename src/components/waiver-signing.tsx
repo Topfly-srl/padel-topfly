@@ -82,11 +82,9 @@ function friendlyLoadError(message: string) {
 
 export function WaiverSigning({
   bookingId,
-  environmentLabel = "",
   token,
 }: {
   bookingId: string;
-  environmentLabel?: string;
   token: string;
 }) {
   const [waiver, setWaiver] = useState<WaiverContext | null>(null);
@@ -238,7 +236,6 @@ export function WaiverSigning({
           <div>
             <p className="muted-label">Padel aziendale</p>
             <h1>Firma accesso campo</h1>
-            {environmentLabel ? <span className="environment-badge">{environmentLabel}</span> : null}
           </div>
         </div>
       </header>

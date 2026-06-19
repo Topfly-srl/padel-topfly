@@ -355,19 +355,12 @@ Scarichi responsabilita':
 - l'app invia il PDF a Cecilia tramite Graph `sendMail`;
 - se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`.
 
-Ambienti e destinatari:
-
-| Ambiente | Path | Destinatario PDF | Note |
-| --- | --- | --- | --- |
-| Preview test | `/test` | `antony.buffone@gmail.com` | badge `TEST`, DB preview, email con prefisso `[TEST]` |
-| Produzione | `/` | `cecilia.faieta@topflysolutions.com` | dati reali e Graph mailbox `padel@topflysolutions.com` |
-
 Privacy e retention:
 
 - il DB conserva dati personali, firma immagine, PDF firmato, hash IP/User-Agent e stati email;
 - prima del go-live produzione, TOPFLY deve confermare tempi di conservazione e procedura di
   richiesta/cancellazione dati;
-- non usare `/test` con dati reali non necessari.
+- evitare prenotazioni di prova non concordate e rimuoverle/cancellarle quando non servono piu'.
 
 Cancellazioni:
 

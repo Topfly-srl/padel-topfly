@@ -108,7 +108,7 @@ export function waiverPdfFilename(input: {
     .replace(/^-|-$/g, "")
     .slice(0, 48);
   const day = input.signedAt.toISOString().slice(0, 10);
-  return `${appConfig.isPreview ? "test-" : ""}scarico-responsabilita-padel-${day}-${cleanName || "firmatario"}-${input.bookingId.slice(0, 8)}.pdf`;
+  return `scarico-responsabilita-padel-${day}-${cleanName || "firmatario"}-${input.bookingId.slice(0, 8)}.pdf`;
 }
 
 export async function generateWaiverPdf(input: WaiverPdfInput): Promise<GeneratedWaiverPdf> {
@@ -126,7 +126,6 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
   const [page] = pdfDoc.getPages();
   const dark = rgb(0.12, 0.13, 0.16);
   const brand = rgb(0.95, 0.07, 0.09);
-  const warning = rgb(0.67, 0.2, 0.07);
 
   const usageDate = `${localDate(input.booking.start)} ${localTime(input.booking.start)}-${localTime(input.booking.end)}`;
   const placeAndDate = `Pretoro, ${localDate(input.signedAt)}`;
@@ -174,16 +173,6 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
     font,
     color: dark,
   });
-  if (appConfig.isPreview) {
-    page.drawText("AMBIENTE TEST - Documento non valido per prenotazioni reali", {
-      x: 54,
-      y: 48,
-      size: 8,
-      font: bold,
-      color: warning,
-    });
-  }
-
   const evidencePage = pdfDoc.addPage([595.32, 841.92]);
   let y = 780;
   const drawLabel = (label: string, value: string) => {
@@ -217,7 +206,7 @@ export async function generateWaiverPdf(input: WaiverPdfInput): Promise<Generate
   drawLabel("Prenotazione", `${usageDate} - ${input.booking.playerCount} giocatori`);
   drawLabel("Booking", `${input.booking.id} - revisione waiver ${input.booking.waiverRevision}`);
   drawLabel("Firmato il", localDateTime(input.signedAt));
-  drawLabel("Ambiente", appConfig.isPreview ? "TEST - verifica tecnica" : "Produzione");
+  drawLabel("Ambiente", "Produzione");
   drawLabel("Modalità firma", "touch/canvas web app - firma elettronica semplice");
   drawLabel("Hash firma disegnata", input.signer.signatureImageSha256 ?? "non disponibile");
   drawLabel("Versione documenti", input.documentVersion);

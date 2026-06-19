@@ -177,27 +177,6 @@ MS_GRAPH_CLIENT_SECRET=
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
 ```
 
-### Env Preview/Test
-
-Per un ambiente pubblicato solo per test, non usare `APP_ENV=production`.
-Impostare invece:
-
-```env
-APP_ENV=preview
-APP_BASE_PATH=/test
-APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com/test
-NEXT_PUBLIC_APP_BASE_PATH=/test
-```
-
-Con `APP_ENV=preview`:
-
-- l'interfaccia mostra il badge `TEST`;
-- gli oggetti Outlook/email partono con `[TEST]`;
-- i corpi email mostrano `AMBIENTE TEST`;
-- i link gestione/firma includono anche `test=1`;
-- i PDF dello scarico vengono inviati a `antony.buffone@gmail.com`, non a Cecilia.
-- il container preview imposta `APP_WAIVER_RECIPIENT_EMAIL=antony.buffone@gmail.com`.
-
 Attenzione:
 
 - `APP_DOMAIN` con dominio HTTPS non deve avere `:` davanti.

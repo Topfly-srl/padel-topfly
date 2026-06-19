@@ -112,20 +112,6 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
-function testPrefix() {
-  return appConfig.isPreview ? "[TEST] " : "";
-}
-
-function testBannerHtml() {
-  if (!appConfig.isPreview) return "";
-
-  return `
-    <div style="background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; padding: 12px 14px; border-radius: 8px; margin: 0 0 16px; font-weight: 700;">
-      AMBIENTE TEST - Non usare questo link per prenotazioni reali.
-    </div>
-  `;
-}
-
 function formatEventDate(date: Date) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "short",
@@ -166,25 +152,25 @@ function eventPayload(
     ? `
       <p style="margin: 22px 0 10px;">
         <a href="${safeManageUrl}" style="display: inline-block; background: #f80d17; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
-          Gestisci prenotazione${appConfig.isPreview ? " TEST" : ""}
+          Gestisci prenotazione
         </a>
       </p>
       <p style="margin: 0; color: #6b7280; font-size: 13px;">
-        Link ${appConfig.isPreview ? "TEST " : ""}diretto: <a href="${safeManageUrl}" style="color: #b91c1c;">${safeManageUrl}</a>
+        Link diretto: <a href="${safeManageUrl}" style="color: #b91c1c;">${safeManageUrl}</a>
       </p>
       ${
         safeGuestWaiverUrl
           ? `
       <p style="margin: 18px 0 8px; font-weight: 700;">
-        Fai firmare anche gli altri giocatori${appConfig.isPreview ? " - TEST" : ""}:
+        Fai firmare anche gli altri giocatori:
       </p>
       <p style="margin: 0 0 8px;">
         <a href="${safeGuestWaiverUrl}" style="display: inline-block; background: #24262d; color: #ffffff; text-decoration: none; font-weight: 700; padding: 12px 16px; border-radius: 8px;">
-          Link ${appConfig.isPreview ? "TEST " : ""}firma ospiti
+          Link firma ospiti
         </a>
       </p>
       <p style="margin: 0; color: #6b7280; font-size: 13px;">
-        Link ${appConfig.isPreview ? "TEST " : ""}ospiti: <a href="${safeGuestWaiverUrl}" style="color: #374151;">${safeGuestWaiverUrl}</a>
+        Link ospiti: <a href="${safeGuestWaiverUrl}" style="color: #374151;">${safeGuestWaiverUrl}</a>
       </p>
           `
           : ""
@@ -212,7 +198,7 @@ function eventPayload(
     : "Se cambi programma, modifica o cancella la prenotazione: cos&igrave; lasci libero il campo per gli altri.";
 
   return {
-    subject: `${testPrefix()}${isCanceled ? "Padel TOPFLY - Prenotazione cancellata" : "Padel TOPFLY - Campo prenotato"}`,
+    subject: isCanceled ? "Padel TOPFLY - Prenotazione cancellata" : "Padel TOPFLY - Campo prenotato",
     body: {
       contentType: "HTML",
       content: `
@@ -227,7 +213,6 @@ function eventPayload(
           </div>
 
           <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
-            ${testBannerHtml()}
             <p style="margin: 0 0 16px; font-size: 16px;">
               Ciao ${organizerName},<br>
               ${intro}
@@ -308,12 +293,11 @@ function waiverMailPayload(input: {
 
   return {
     message: {
-      subject: `${testPrefix()}Padel TOPFLY - Scarico responsabilita' ${signerName}`,
+      subject: `Padel TOPFLY - Scarico responsabilita' ${signerName}`,
       body: {
         contentType: "HTML",
         content: `
           <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
-            ${testBannerHtml()}
             <h2 style="margin: 0 0 12px;">Scarico responsabilita' Padel TOPFLY</h2>
             <p style="margin: 0 0 12px;">
               In allegato il modulo firmato digitalmente per l'accesso al campo.
@@ -378,7 +362,6 @@ function guestCalendarAttachment(input: {
   cancelUrl?: string;
 }) {
   const description = [
-    appConfig.isPreview ? "AMBIENTE TEST - Non usare per prenotazioni reali." : "",
     "Firma scarico responsabilita' registrata.",
     input.cancelUrl ? `Se non puoi partecipare, rinuncia al posto qui: ${input.cancelUrl}` : "",
   ]
@@ -395,7 +378,7 @@ function guestCalendarAttachment(input: {
     `DTSTAMP:${icsDate(new Date())}`,
     `DTSTART:${icsDate(input.booking.start)}`,
     `DTEND:${icsDate(input.booking.end)}`,
-    `SUMMARY:${icsText(`${testPrefix()}Padel TOPFLY - Accesso campo`)}`,
+    `SUMMARY:${icsText("Padel TOPFLY - Accesso campo")}`,
     `DESCRIPTION:${icsText(description)}`,
     "LOCATION:Campo Padel TOPFLY",
     `ATTENDEE;CN=${icsText(input.signerName)}:mailto:${input.signerEmail}`,
@@ -406,7 +389,7 @@ function guestCalendarAttachment(input: {
 
   return {
     "@odata.type": "#microsoft.graph.fileAttachment",
-    name: `${appConfig.isPreview ? "test-" : ""}padel-topfly.ics`,
+    name: "padel-topfly.ics",
     contentType: "text/calendar",
     contentBytes: Buffer.from(ics).toString("base64"),
   };
@@ -434,7 +417,7 @@ function guestWaiverConfirmationPayload(input: {
 
   return {
     message: {
-      subject: `${testPrefix()}Padel TOPFLY - Firma accesso campo confermata`,
+      subject: "Padel TOPFLY - Firma accesso campo confermata",
       body: {
         contentType: "HTML",
         content: `
@@ -444,7 +427,6 @@ function guestWaiverConfirmationPayload(input: {
               <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">Firma accesso campo confermata</div>
             </div>
             <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
-              ${testBannerHtml()}
               <p style="margin: 0 0 16px; font-size: 16px;">
                 Ciao ${signerName},<br>
                 la tua firma per l'accesso al campo Padel TOPFLY e' stata registrata.
@@ -471,7 +453,7 @@ function guestWaiverConfirmationPayload(input: {
                   ? `
               <p style="margin: 22px 0 10px;">
                 <a href="${safeCancelUrl}" style="display: inline-block; background: #24262d; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
-                  Rinuncia al posto${appConfig.isPreview ? " TEST" : ""}
+                  Rinuncia al posto
                 </a>
               </p>
               <p style="margin: 0; color: #6b7280; font-size: 13px;">
@@ -500,7 +482,6 @@ function guestWaiverConfirmationPayload(input: {
 
 function cancelComment(organizer: OrganizerContact) {
   return [
-    ...(appConfig.isPreview ? ["AMBIENTE TEST - Cancellazione di prova.", ""] : []),
     `Ciao ${organizer.name},`,
     "",
     "la tua prenotazione del campo Padel TOPFLY e' stata cancellata.",

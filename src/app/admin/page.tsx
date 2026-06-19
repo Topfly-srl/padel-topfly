@@ -14,7 +14,6 @@ export default async function AdminPage() {
   return (
     <BookingApp
       adminMode
-      environmentLabel={appConfig.publicEnvironmentLabel}
       initialState={createBookingInitialState(new Date(), appConfig.timeZone)}
       initialUser={user}
     />

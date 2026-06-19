@@ -6,28 +6,6 @@ URL produzione:
 
 - <https://padel.topflysolutions.com>
 
-## Ambiente Test / Preview
-
-Per pubblicare una versione solo test, usare `APP_ENV=preview` sotto il path
-dedicato `/test` del dominio gia' attivo:
-
-```env
-APP_ENV=preview
-APP_BASE_PATH=/test
-APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com/test
-NEXT_PUBLIC_APP_BASE_PATH=/test
-```
-
-In modalita' preview l'app mostra il badge `TEST`, gli inviti Outlook e le email PDF
-hanno oggetto con prefisso `[TEST]`, il corpo email contiene un avviso `AMBIENTE TEST`
-e i link di gestione/firma ospiti includono `test=1`. Sul preview pubblico i PDF dello
-scarico vengono inviati a `antony.buffone@gmail.com`, cosi' Cecilia non riceve test.
-
-| Ambiente | URL | Badge | Database | Destinatario PDF scarico |
-| --- | --- | --- | --- | --- |
-| Preview test | `https://padel.topflysolutions.com/test` | `TEST` | `postgres_preview` | `antony.buffone@gmail.com` |
-| Produzione | `https://padel.topflysolutions.com` | nessuno | `postgres` | `cecilia.faieta@topflysolutions.com` |
-
 ## Stato Produzione
 
 - Hosting: AWS Lightsail, istanza `padel-topfly`, regione Frankfurt `eu-central-1`.
@@ -303,7 +281,7 @@ Privacy e conservazione:
 
 - il database conserva PDF firmati, immagine firma, dati anagrafici, email e hash tecnici;
 - la policy di conservazione definitiva va confermata da TOPFLY prima del go-live pieno;
-- fino a decisione formale, evitare export non necessari e usare `/test` solo per dati di prova.
+- fino a decisione formale, evitare export non necessari e prenotazioni di prova non concordate.
 
 Verifica rapida da server:
 

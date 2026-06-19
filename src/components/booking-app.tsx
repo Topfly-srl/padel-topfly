@@ -312,12 +312,10 @@ function writeStoredGuestWaiverLinks(links: GuestWaiverLinks) {
 
 export function BookingApp({
   adminMode = false,
-  environmentLabel = "",
   initialState = fallbackInitialState,
   initialUser,
 }: {
   adminMode?: boolean;
-  environmentLabel?: string;
   initialState?: BookingInitialState;
   initialUser?: CurrentUser;
 }) {
@@ -895,7 +893,6 @@ export function BookingApp({
                 ? `Admin ${initialUser?.name?.split(" ")[0] ?? initialUser?.email.split("@")[0]}`
                 : "Prenota il campo"}
             </h1>
-            {environmentLabel ? <span className="environment-badge">{environmentLabel}</span> : null}
           </div>
         </div>
         {isAdmin ? (
@@ -1054,7 +1051,6 @@ export function BookingApp({
                 {selectedOwnGuestWaiverLink ? (
                   <GuestLinkPanel
                     copied={copiedGuestWaiverLink === normalizeGuestWaiverLink(selectedOwnGuestWaiverLink)}
-                    environmentLabel={environmentLabel}
                     link={normalizeGuestWaiverLink(selectedOwnGuestWaiverLink)}
                     onCopy={copyGuestWaiverLink}
                   />

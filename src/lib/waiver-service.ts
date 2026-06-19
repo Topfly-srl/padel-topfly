@@ -310,7 +310,6 @@ export function createGuestWaiverToken() {
 export function buildGuestWaiverUrl(baseUrl: string | undefined, bookingId: string, token: string | undefined) {
   if (!baseUrl || !token) return undefined;
   const params = new URLSearchParams({ token });
-  if (appConfig.isPreview) params.set("test", "1");
   return `${baseUrl.replace(/\/$/, "")}/waiver/${bookingId}?${params.toString()}`;
 }
 
@@ -321,7 +320,6 @@ export function buildGuestWaiverCancelUrl(
 ) {
   if (!baseUrl || !token) return undefined;
   const params = new URLSearchParams({ token });
-  if (appConfig.isPreview) params.set("test", "1");
   return `${baseUrl.replace(/\/$/, "")}/waiver/cancel/${signatureId}?${params.toString()}`;
 }
 

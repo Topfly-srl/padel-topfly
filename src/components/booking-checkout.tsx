@@ -141,13 +141,11 @@ export function BookingCheckout({
   selectedTime,
   duration,
   allowedDomain,
-  environmentLabel = "",
 }: {
   selectedDate: string;
   selectedTime: string;
   duration: number;
   allowedDomain: string;
-  environmentLabel?: string;
 }) {
   const [organizerName, setOrganizerName] = useState("");
   const [organizerEmail, setOrganizerEmail] = useState("");
@@ -301,7 +299,6 @@ export function BookingCheckout({
           <div>
             <p className="muted-label">Padel aziendale</p>
             <h1>{createdBooking ? "Prenotazione confermata" : "Completa prenotazione"}</h1>
-            {environmentLabel ? <span className="environment-badge">{environmentLabel}</span> : null}
           </div>
         </div>
       </header>
@@ -380,7 +377,6 @@ export function BookingCheckout({
                 </div>
                 <GuestLinkPanel
                   copied={copiedGuestWaiverLink}
-                  environmentLabel={environmentLabel}
                   link={createdBooking.guestWaiverUrl}
                   onCopy={copyGuestWaiverLink}
                 />

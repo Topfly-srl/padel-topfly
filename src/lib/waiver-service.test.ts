@@ -228,17 +228,14 @@ describe("waiver service", () => {
     expect(summary.emailStatus).toBe("SENT");
   });
 
-  it("marca i link firma ospiti con test=1 in ambiente preview", async () => {
-    vi.resetModules();
-    vi.stubEnv("APP_ENV", "preview");
-
+  it("genera link firma ospiti e rinuncia senza marcatori di test", async () => {
     const { buildGuestWaiverCancelUrl, buildGuestWaiverUrl } = await import("@/lib/waiver-service");
 
-    expect(buildGuestWaiverUrl("https://padel.topflysolutions.com/test", "booking_1", "abc")).toBe(
-      "https://padel.topflysolutions.com/test/waiver/booking_1?token=abc&test=1",
+    expect(buildGuestWaiverUrl("https://padel.topflysolutions.com", "booking_1", "abc")).toBe(
+      "https://padel.topflysolutions.com/waiver/booking_1?token=abc",
     );
-    expect(buildGuestWaiverCancelUrl("https://padel.topflysolutions.com/test", "waiver_1", "cancel")).toBe(
-      "https://padel.topflysolutions.com/test/waiver/cancel/waiver_1?token=cancel&test=1",
+    expect(buildGuestWaiverCancelUrl("https://padel.topflysolutions.com", "waiver_1", "cancel")).toBe(
+      "https://padel.topflysolutions.com/waiver/cancel/waiver_1?token=cancel",
     );
   });
 });

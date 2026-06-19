@@ -28,7 +28,6 @@ export default async function BookPage({ searchParams }: BookPageProps) {
     <BookingCheckout
       allowedDomain={appConfig.allowedDomain}
       duration={safeDuration(query.duration)}
-      environmentLabel={appConfig.publicEnvironmentLabel}
       selectedDate={selectedDate}
       selectedTime={selectedTime}
     />

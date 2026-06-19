@@ -87,7 +87,6 @@ Da salvare:
 - permessi Graph attesi: `Calendars.ReadWrite` e `Mail.Send` Application con admin consent;
 - nota: `Mail.Send` serve solo per inviare a Cecilia i PDF dello scarico responsabilita';
 - env produzione `APP_WAIVER_RECIPIENT_EMAIL=cecilia.faieta@topflysolutions.com`;
-- env preview/test `APP_WAIVER_RECIPIENT_EMAIL=antony.buffone@gmail.com`;
 - nota sicurezza: accesso Graph da limitare alla sola mailbox `padel@topflysolutions.com`
   tramite Exchange Application Access Policy o RBAC for Applications, includendo `Mail.Send`;
 - stato della policy Exchange: configurata/non configurata, data verifica, chi l'ha

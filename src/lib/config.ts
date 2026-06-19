@@ -7,7 +7,7 @@ const optionalUrl = z.preprocess(
 );
 
 const envSchema = z.object({
-  APP_ENV: z.enum(["development", "preview", "production"]).optional(),
+  APP_ENV: z.enum(["development", "production"]).optional(),
   APP_ALLOWED_DOMAIN: z.string().default("azienda.it"),
   APP_ADMIN_EMAILS: z.string().default(""),
   APP_PUBLIC_ORIGIN: optionalUrl,
@@ -31,7 +31,6 @@ const env = envSchema.parse(process.env);
 const appEnvironment = env.APP_ENV ?? "development";
 const isProductionDeployment =
   process.env.VERCEL_ENV === "production" || env.APP_ENV === "production";
-const isPreviewDeployment = appEnvironment === "preview" || process.env.VERCEL_ENV === "preview";
 
 if (isProductionDeployment && env.AUTH_DEV_MODE === "true") {
   throw new Error("AUTH_DEV_MODE non puo' essere attivo in produzione.");
@@ -73,9 +72,7 @@ export const appConfig = {
   publicOrigin: env.APP_PUBLIC_ORIGIN?.trim().replace(/\/$/, ""),
   timeZone: env.APP_TIME_ZONE,
   isProduction: isProductionDeployment,
-  isPreview: isPreviewDeployment,
   environmentName: appEnvironment,
-  publicEnvironmentLabel: isPreviewDeployment ? "TEST" : "",
   authDevMode: env.AUTH_DEV_MODE === "true",
   databaseConfigured: Boolean(env.DATABASE_URL),
   devUser: {

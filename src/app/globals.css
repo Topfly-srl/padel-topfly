@@ -150,23 +150,6 @@ button:disabled {
   letter-spacing: 0;
 }
 
-.environment-badge {
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  margin-top: 7px;
-  padding: 5px 8px;
-  text-transform: uppercase;
-}
-
 .summary-card h2,
 .signin-card h1 {
   margin: 0;
