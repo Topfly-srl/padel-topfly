@@ -127,7 +127,32 @@ jobs:
           git pull --ff-only origin main
           echo "Remote commit: $(git rev-parse --short HEAD)"
 
-          sudo docker compose -f docker-compose.production.yml up -d --build
+          if [ -f .env.production ]; then
+            cp -p .env.production "${BACKUP_DIR}/env.production.$(date +%Y%m%d-%H%M%S).bak"
+
+            set_env_key() {
+              key="$1"
+              value="$2"
+
+              if grep -q "^${key}=" .env.production; then
+                sed -i "s|^${key}=.*|${key}=\"${value}\"|" .env.production
+              else
+                printf '\n%s="%s"\n' "${key}" "${value}" >> .env.production
+              fi
+            }
+
+            set_env_key APP_ENV production
+            set_env_key APP_PUBLIC_ORIGIN https://padel.topflysolutions.com
+            set_env_key APP_WAIVER_RECIPIENT_EMAIL cecilia.faieta@topflysolutions.com
+            sed -i \
+              -e '/^APP_BASE_PATH=/d' \
+              -e '/^NEXT_PUBLIC_APP_BASE_PATH=/d' \
+              -e '/^APP_PREVIEW_/d' \
+              -e '/^PREVIEW_/d' \
+              .env.production
+          fi
+
+          sudo docker compose -f docker-compose.production.yml up -d --build --remove-orphans
           sudo docker compose -f docker-compose.production.yml restart caddy
           sudo docker compose -f docker-compose.production.yml exec -T app \
             sh -lc 'grep -q "Content-Security-Policy" next.config.ts && echo "Next security headers: present"' \
