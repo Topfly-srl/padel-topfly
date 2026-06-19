@@ -383,10 +383,11 @@ Privacy e retention:
 
 Cancellazioni:
 
-- aggiornano l'evento con contenuto di cancellazione;
 - cancellano l'evento Outlook tramite Graph `event/cancel`;
-- se l'aggiornamento accessorio dell'evento fallisce, la cancellazione calendario resta
-  valida e il warning viene salvato in `outlookSyncError`.
+- non fanno un update evento prima del cancel, per evitare doppie mail su Gmail/Google
+  Calendar;
+- gli ospiti gia' firmatari ricevono una mail custom separata, perche' non sono invitati
+  diretti dell'evento Outlook principale.
 
 Verifica Graph da server senza stampare segreti:
 

@@ -389,8 +389,9 @@ del referente usano gli inviti/eventi Outlook; gli ospiti gia' firmatari ricevon
 una mail custom se la prenotazione viene modificata o cancellata.
 
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
-La cancellazione aggiorna l'evento e poi cancella l'evento Outlook per il referente; gli
-ospiti gia' firmatari vengono avvisati via `sendMail`.
+La cancellazione del referente usa solo `event/cancel`, cosi' Gmail/Google Calendar non
+riceve un update duplicato prima del cancel. Gli ospiti gia' firmatari vengono avvisati via
+`sendMail`.
 La mail automatica con prefisso `Canceled:` e' generata da Outlook: l'app controlla solo
 il commento testuale, che deve restare breve e chiaro.
 

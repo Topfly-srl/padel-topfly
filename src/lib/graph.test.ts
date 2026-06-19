@@ -148,7 +148,7 @@ describe("Microsoft Graph sync", () => {
     }
   });
 
-  it("aggiorna l'evento e cancella l'evento Outlook senza mail custom separata", async () => {
+  it("cancella l'evento Outlook senza inviare update duplicati", async () => {
     vi.resetModules();
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
     vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
@@ -203,22 +203,17 @@ describe("Microsoft Graph sync", () => {
     const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
 
     expect(result).toEqual({ status: "SYNCED", eventId: "event_1" });
-    expect(patchCall).toBeDefined();
+    expect(patchCall).toBeUndefined();
     expect(sendMailCall).toBeUndefined();
     expect(cancelCall).toBeDefined();
 
-    const eventPayload = JSON.parse(patchCall!.body!);
     const cancelPayload = JSON.parse(cancelCall!.body!);
-    expect(eventPayload.subject).toBe("Padel TOPFLY - Prenotazione cancellata");
-    expect(eventPayload.body.content).toContain("Prenotazione campo cancellata");
-    expect(eventPayload.showAs).toBe("free");
-    expect(eventPayload.isReminderOn).toBe(false);
     expect(cancelPayload.comment).toContain("la tua prenotazione del campo Padel TOPFLY");
     expect(cancelPayload.comment).toContain("Il campo torna disponibile per gli altri colleghi.");
     expect(cancelPayload.comment).not.toContain("Durata:");
   });
 
-  it("segna sync riuscito con warning se l'update del contenuto fallisce ma il cancel Outlook riesce", async () => {
+  it("segna sync fallito se la cancellazione Outlook fallisce", async () => {
     vi.resetModules();
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
     vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
@@ -238,13 +233,9 @@ describe("Microsoft Graph sync", () => {
           });
         }
 
-        if (url.includes("/events/event_1") && init?.method === "PATCH") {
-          return new Response(JSON.stringify({ error: { message: "patch failed" } }), {
-            status: 403,
-          });
-        }
-
-        return new Response(null, { status: 202 });
+        return new Response(JSON.stringify({ error: { code: "ErrorItemNotFound" } }), {
+          status: 404,
+        });
       }),
     );
 
@@ -274,9 +265,9 @@ describe("Microsoft Graph sync", () => {
     const result = await deleteOutlookEvent(booking);
     const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
 
-    expect(result.status).toBe("SYNCED");
+    expect(result.status).toBe("FAILED");
     expect(result.eventId).toBe("event_1");
-    expect(result.error).toContain("Evento cancellazione non aggiornato");
+    expect(result.error).toContain("Graph 404");
     expect(cancelCall).toBeDefined();
   });
 

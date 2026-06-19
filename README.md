@@ -303,9 +303,6 @@ sudo docker compose -f docker-compose.production.yml logs app --tail=120
 ```
 
 Se una prenotazione resta con stato Outlook `FAILED`, controllare `outlookSyncError` nel DB o nei log app.
-Se invece `outlookSyncStatus` e' `SYNCED` ma `outlookSyncError` contiene un warning,
-la cancellazione calendario e' riuscita ma un aggiornamento accessorio dell'evento non e'
-andato a buon fine.
 
 ## Documentazione Operativa
 

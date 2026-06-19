@@ -852,33 +852,11 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
 
   try {
     const organizer = { email: booking.organizerEmail, name: booking.organizerName };
-    const warnings: string[] = [];
-
-    try {
-      await graphFetch(mailboxPath(`/events/${booking.outlookEventId}`), {
-        method: "PATCH",
-        body: JSON.stringify(eventPayload(booking, organizer)),
-      });
-    } catch (error) {
-      warnings.push(
-        `Evento cancellazione non aggiornato: ${
-          error instanceof Error ? error.message : "Graph update before cancel failed"
-        }`,
-      );
-    }
 
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}/cancel`), {
       method: "POST",
       body: JSON.stringify({ comment: cancelComment(organizer) }),
     });
-
-    if (warnings.length > 0) {
-      return {
-        status: "SYNCED",
-        eventId: booking.outlookEventId,
-        error: warnings.join(" | "),
-      };
-    }
 
     return { status: "SYNCED", eventId: booking.outlookEventId };
   } catch (error) {
