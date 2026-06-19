@@ -1145,12 +1145,16 @@ summary:focus-visible {
 
 .guest-share-card {
   display: grid;
-  gap: 8px;
+  gap: 9px;
   border: 1px solid #cfe0ff;
   border-radius: 8px;
   background: var(--blue-soft);
   margin: 10px 0;
   padding: 10px;
+}
+
+.guest-share-card.compact {
+  margin-bottom: 0;
 }
 
 .guest-share-card strong {

@@ -246,12 +246,14 @@ Evidence:
 Impact:
 
 - se il client secret viene compromesso o abusato, l'app potrebbe accedere a calendari
-  oltre la mailbox `padel@topflysolutions.com`.
+  o inviare email oltre la mailbox `padel@topflysolutions.com`, se la policy tenant-side
+  non e' limitata correttamente.
 
 Fix raccomandato:
 
 - mantenere solo i permessi necessari: `Calendars.ReadWrite` e `Mail.Send` Application;
-- usare `Mail.Send` solo per inviare a Cecilia i PDF degli scarichi responsabilita';
+- usare `Mail.Send` solo per inviare i PDF degli scarichi responsabilita' alla mailbox
+  condivisa Padel;
 - configurare Exchange Application Access Policy o RBAC for Applications per limitare
   l'app alla mailbox `padel@topflysolutions.com`;
 - verificare con `Test-ApplicationAccessPolicy` o test Graph equivalente.

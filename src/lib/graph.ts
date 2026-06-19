@@ -395,6 +395,42 @@ function guestCalendarAttachment(input: {
   };
 }
 
+function guestCancellationCalendarAttachment(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+}) {
+  const description = "Prenotazione campo Padel TOPFLY cancellata.";
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//TOPFLY//Padel TOPFLY//IT",
+    "CALSCALE:GREGORIAN",
+    "METHOD:CANCEL",
+    "BEGIN:VEVENT",
+    `UID:${icsText(`${input.booking.id}-${input.signerEmail}`)}@padel.topflysolutions.com`,
+    `DTSTAMP:${icsDate(new Date())}`,
+    `DTSTART:${icsDate(input.booking.start)}`,
+    `DTEND:${icsDate(input.booking.end)}`,
+    "STATUS:CANCELLED",
+    "SEQUENCE:1",
+    `SUMMARY:${icsText("Padel TOPFLY - Accesso campo cancellato")}`,
+    `DESCRIPTION:${icsText(description)}`,
+    "LOCATION:Campo Padel TOPFLY",
+    `ATTENDEE;CN=${icsText(input.signerName)}:mailto:${input.signerEmail}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+
+  return {
+    "@odata.type": "#microsoft.graph.fileAttachment",
+    name: "padel-topfly-cancellazione.ics",
+    contentType: "text/calendar; method=CANCEL",
+    contentBytes: Buffer.from(ics).toString("base64"),
+  };
+}
+
 function guestWaiverConfirmationPayload(input: {
   booking: Booking;
   signerName: string;
@@ -475,6 +511,153 @@ function guestWaiverConfirmationPayload(input: {
         },
       ],
       attachments: [guestCalendarAttachment(input)],
+    },
+    saveToSentItems: true,
+  };
+}
+
+function guestBookingUpdatedPayload(input: {
+  previousBooking: Booking;
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  guestWaiverUrl?: string;
+}) {
+  const signerName = escapeHtml(input.signerName);
+  const previousDateLabel = escapeHtml(formatEventDate(input.previousBooking.start));
+  const previousStartLabel = escapeHtml(formatEventTime(input.previousBooking.start));
+  const previousEndLabel = escapeHtml(formatEventTime(input.previousBooking.end));
+  const dateLabel = escapeHtml(formatEventDate(input.booking.start));
+  const startLabel = escapeHtml(formatEventTime(input.booking.start));
+  const endLabel = escapeHtml(formatEventTime(input.booking.end));
+  const organizerName = escapeHtml(input.booking.organizerName);
+  const safeGuestWaiverUrl = input.guestWaiverUrl ? escapeHtml(input.guestWaiverUrl) : null;
+
+  return {
+    message: {
+      subject: "Padel TOPFLY - Prenotazione modificata",
+      body: {
+        contentType: "HTML",
+        content: `
+          <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+            <div style="background: #f80d17; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
+              <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;">TOPFLY GPS Solutions</div>
+              <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">Prenotazione modificata</div>
+            </div>
+            <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
+              <p style="margin: 0 0 16px; font-size: 16px;">
+                Ciao ${signerName},<br>
+                la prenotazione Padel TOPFLY a cui avevi aderito e' stata modificata.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
+                <tr>
+                  <td style="padding: 14px 16px; color: #6b7280; font-size: 13px; width: 36%;">Prima</td>
+                  <td style="padding: 14px 16px;">${previousDateLabel} · ${previousStartLabel} - ${previousEndLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Nuovo orario</td>
+                  <td style="padding: 0 16px 14px; font-weight: 700;">${dateLabel} · ${startLabel} - ${endLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Referente</td>
+                  <td style="padding: 0 16px 14px;">${organizerName}</td>
+                </tr>
+              </table>
+              <p style="margin: 16px 0 0; color: #4b5563;">
+                La firma precedente resta archiviata, ma per il nuovo orario serve firmare di nuovo.
+              </p>
+              ${
+                safeGuestWaiverUrl
+                  ? `
+              <p style="margin: 22px 0 10px;">
+                <a href="${safeGuestWaiverUrl}" style="display: inline-block; background: #24262d; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
+                  Firma per il nuovo orario
+                </a>
+              </p>
+              <p style="margin: 0; color: #6b7280; font-size: 13px;">
+                Link diretto: <a href="${safeGuestWaiverUrl}" style="color: #374151;">${safeGuestWaiverUrl}</a>
+              </p>
+                  `
+                  : `
+              <p style="margin: 16px 0 0; color: #6b7280;">
+                Chiedi al referente il nuovo link firma ospiti.
+              </p>
+                  `
+              }
+            </div>
+          </div>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.signerEmail,
+            name: input.signerName,
+          },
+        },
+      ],
+    },
+    saveToSentItems: true,
+  };
+}
+
+function guestBookingCanceledPayload(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+}) {
+  const signerName = escapeHtml(input.signerName);
+  const dateLabel = escapeHtml(formatEventDate(input.booking.start));
+  const startLabel = escapeHtml(formatEventTime(input.booking.start));
+  const endLabel = escapeHtml(formatEventTime(input.booking.end));
+  const organizerName = escapeHtml(input.booking.organizerName);
+
+  return {
+    message: {
+      subject: "Padel TOPFLY - Prenotazione cancellata",
+      body: {
+        contentType: "HTML",
+        content: `
+          <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+            <div style="background: #4b5563; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
+              <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;">TOPFLY GPS Solutions</div>
+              <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">Prenotazione cancellata</div>
+            </div>
+            <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
+              <p style="margin: 0 0 16px; font-size: 16px;">
+                Ciao ${signerName},<br>
+                la prenotazione Padel TOPFLY a cui avevi aderito e' stata cancellata.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
+                <tr>
+                  <td style="padding: 14px 16px; color: #6b7280; font-size: 13px; width: 36%;">Giorno</td>
+                  <td style="padding: 14px 16px; font-weight: 700;">${dateLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Orario</td>
+                  <td style="padding: 0 16px 14px; font-weight: 700;">${startLabel} - ${endLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Referente</td>
+                  <td style="padding: 0 16px 14px;">${organizerName}</td>
+                </tr>
+              </table>
+              <p style="margin: 16px 0 0; color: #4b5563;">
+                Non devi fare altro: il tuo posto non risulta piu' valido e il campo torna disponibile.
+              </p>
+            </div>
+          </div>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.signerEmail,
+            name: input.signerName,
+          },
+        },
+      ],
+      attachments: [guestCancellationCalendarAttachment(input)],
     },
     saveToSentItems: true,
   };
@@ -596,6 +779,58 @@ export async function sendGuestWaiverConfirmationEmail(input: {
     await graphFetch(mailboxPath("/sendMail"), {
       method: "POST",
       body: JSON.stringify(guestWaiverConfirmationPayload(input)),
+    });
+
+    return { status: "SENT" };
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "Graph sendMail failed",
+    };
+  }
+}
+
+export async function sendGuestBookingUpdatedEmail(input: {
+  previousBooking: Booking;
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+  guestWaiverUrl?: string;
+}): Promise<WaiverMailResult> {
+  const disabled = graphDisabled();
+  if (disabled) {
+    return { status: "SKIPPED", error: disabled.error };
+  }
+
+  try {
+    await graphFetch(mailboxPath("/sendMail"), {
+      method: "POST",
+      body: JSON.stringify(guestBookingUpdatedPayload(input)),
+    });
+
+    return { status: "SENT" };
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "Graph sendMail failed",
+    };
+  }
+}
+
+export async function sendGuestBookingCanceledEmail(input: {
+  booking: Booking;
+  signerName: string;
+  signerEmail: string;
+}): Promise<WaiverMailResult> {
+  const disabled = graphDisabled();
+  if (disabled) {
+    return { status: "SKIPPED", error: disabled.error };
+  }
+
+  try {
+    await graphFetch(mailboxPath("/sendMail"), {
+      method: "POST",
+      body: JSON.stringify(guestBookingCanceledPayload(input)),
     });
 
     return { status: "SENT" };

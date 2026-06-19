@@ -143,7 +143,7 @@ jobs:
 
             set_env_key APP_ENV production
             set_env_key APP_PUBLIC_ORIGIN https://padel.topflysolutions.com
-            set_env_key APP_WAIVER_RECIPIENT_EMAIL cecilia.faieta@topflysolutions.com
+            set_env_key APP_WAIVER_RECIPIENT_EMAIL padel@topflysolutions.com
           fi
 
           sudo docker compose -f docker-compose.production.yml up -d --build --remove-orphans

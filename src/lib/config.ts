@@ -22,7 +22,7 @@ const envSchema = z.object({
   MS_GRAPH_CLIENT_ID: z.string().optional(),
   MS_GRAPH_CLIENT_SECRET: z.string().optional(),
   MS_GRAPH_MAILBOX: z.string().optional(),
-  APP_WAIVER_RECIPIENT_EMAIL: z.string().email().default("cecilia.faieta@topflysolutions.com"),
+  APP_WAIVER_RECIPIENT_EMAIL: z.string().email().default("padel@topflysolutions.com"),
   APP_WAIVER_DOCUMENT_VERSION: z.string().default("padel-waiver-v1"),
   DATABASE_URL: z.string().optional(),
 });

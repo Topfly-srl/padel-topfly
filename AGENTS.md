@@ -78,12 +78,13 @@ Per modifiche UI, verifica anche browser mobile/desktop quando possibile.
 ## Microsoft Graph E Email
 
 - Le conferme prenotazione creano/aggiornano eventi Outlook con invito e reminder 1h.
-- Le cancellazioni usano la cancellazione nativa Outlook (`event/cancel`) per evitare doppie
-  email.
+- Le cancellazioni del referente usano la cancellazione nativa Outlook (`event/cancel`) per
+  aggiornare l'invito principale senza doppie email all'organizzatore.
 - La mail `Canceled:` e' generata da Outlook: il codice controlla solo il commento testuale.
-- Non reintrodurre `/sendMail` per la cancellazione senza discutere il trade-off, perche'
-  produce una seconda comunicazione e richiede `Mail.Send`.
-- `/sendMail` e' ammesso solo per inviare a Cecilia i PDF degli scarichi responsabilita'.
+- Gli ospiti che hanno gia' firmato ricevono invece una mail custom su modifica/cancellazione,
+  perche' non sono invitati diretti dell'evento Outlook principale.
+- `/sendMail` e' ammesso per i PDF degli scarichi responsabilita' e per le email ospiti
+  legate a firma, modifica e cancellazione.
 
 ## Documentazione
 

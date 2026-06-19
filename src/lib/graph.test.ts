@@ -280,13 +280,13 @@ describe("Microsoft Graph sync", () => {
     expect(cancelCall).toBeDefined();
   });
 
-  it("invia lo scarico responsabilita' a Cecilia con PDF allegato", async () => {
+  it("invia lo scarico responsabilita' alla mailbox configurata con PDF allegato", async () => {
     vi.resetModules();
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
     vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
     vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
     vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
-    vi.stubEnv("APP_WAIVER_RECIPIENT_EMAIL", "cecilia.faieta@topflysolutions.com");
+    vi.stubEnv("APP_WAIVER_RECIPIENT_EMAIL", "padel@topflysolutions.com");
 
     const calls: Array<{ url: string; body?: string; method?: string }> = [];
     vi.stubGlobal(
@@ -342,7 +342,7 @@ describe("Microsoft Graph sync", () => {
     expect(sendMailCall).toBeDefined();
 
     const payload = JSON.parse(sendMailCall!.body!);
-    expect(payload.message.toRecipients[0].emailAddress.address).toBe("cecilia.faieta@topflysolutions.com");
+    expect(payload.message.toRecipients[0].emailAddress.address).toBe("padel@topflysolutions.com");
     expect(payload.message.attachments[0].name).toBe("scarico.pdf");
     expect(payload.message.attachments[0].contentType).toBe("application/pdf");
     expect(payload.message.attachments[0].contentBytes).toBe("JVBERg==");
@@ -414,5 +414,149 @@ describe("Microsoft Graph sync", () => {
     expect(payload.message.body.content).toContain("/waiver/cancel/waiver_1");
     expect(payload.message.attachments[0].name).toBe("padel-topfly.ics");
     expect(payload.message.attachments[0].contentType).toBe("text/calendar");
+  });
+
+  it("avvisa un ospite quando la prenotazione viene modificata e include il nuovo link firma", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string; method?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString(), method: init?.method });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { sendGuestBookingUpdatedEmail } = await import("@/lib/graph");
+    const now = new Date("2026-06-03T10:00:00.000Z");
+    const previousBooking: Booking = {
+      id: "booking_guest",
+      start: new Date("2026-06-04T16:00:00.000Z"),
+      end: new Date("2026-06-04T17:00:00.000Z"),
+      status: "CONFIRMED",
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@topfly.it",
+      manageTokenHash: null,
+      manageTokenExpiresAt: null,
+      outlookEventId: "event_1",
+      outlookSyncStatus: "SYNCED",
+      outlookSyncError: null,
+      playerCount: 4,
+      waiverRevision: 1,
+      guestWaiverTokenHash: null,
+      guestWaiverTokenExpiresAt: null,
+      createdAt: now,
+      updatedAt: now,
+      organizerId: null,
+    };
+    const booking: Booking = {
+      ...previousBooking,
+      start: new Date("2026-06-04T18:00:00.000Z"),
+      end: new Date("2026-06-04T19:00:00.000Z"),
+      waiverRevision: 2,
+    };
+
+    const result = await sendGuestBookingUpdatedEmail({
+      previousBooking,
+      booking,
+      signerName: "Laura Bianchi",
+      signerEmail: "laura@example.com",
+      guestWaiverUrl: "https://padel.topflysolutions.com/w/booking_guest/token123",
+    });
+
+    const sendMailCall = calls.find((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
+    expect(result).toEqual({ status: "SENT" });
+    expect(sendMailCall).toBeDefined();
+
+    const payload = JSON.parse(sendMailCall!.body!);
+    expect(payload.message.subject).toBe("Padel TOPFLY - Prenotazione modificata");
+    expect(payload.message.toRecipients[0].emailAddress.address).toBe("laura@example.com");
+    expect(payload.message.body.content).toContain("Prenotazione modificata");
+    expect(payload.message.body.content).toContain("18:00 - 19:00");
+    expect(payload.message.body.content).toContain("Firma per il nuovo orario");
+    expect(payload.message.body.content).toContain("/w/booking_guest/token123");
+  });
+
+  it("avvisa un ospite quando la prenotazione viene cancellata con allegato calendario cancel", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string; method?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString(), method: init?.method });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { sendGuestBookingCanceledEmail } = await import("@/lib/graph");
+    const now = new Date("2026-06-03T10:00:00.000Z");
+    const booking: Booking = {
+      id: "booking_guest",
+      start: new Date("2026-06-04T16:00:00.000Z"),
+      end: new Date("2026-06-04T17:00:00.000Z"),
+      status: "CANCELED",
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@topfly.it",
+      manageTokenHash: null,
+      manageTokenExpiresAt: null,
+      outlookEventId: "event_1",
+      outlookSyncStatus: "SYNCED",
+      outlookSyncError: null,
+      playerCount: 4,
+      waiverRevision: 1,
+      guestWaiverTokenHash: null,
+      guestWaiverTokenExpiresAt: null,
+      createdAt: now,
+      updatedAt: now,
+      organizerId: null,
+    };
+
+    const result = await sendGuestBookingCanceledEmail({
+      booking,
+      signerName: "Laura Bianchi",
+      signerEmail: "laura@example.com",
+    });
+
+    const sendMailCall = calls.find((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
+    expect(result).toEqual({ status: "SENT" });
+    expect(sendMailCall).toBeDefined();
+
+    const payload = JSON.parse(sendMailCall!.body!);
+    expect(payload.message.subject).toBe("Padel TOPFLY - Prenotazione cancellata");
+    expect(payload.message.toRecipients[0].emailAddress.address).toBe("laura@example.com");
+    expect(payload.message.body.content).toContain("Prenotazione cancellata");
+    expect(payload.message.attachments[0].name).toBe("padel-topfly-cancellazione.ics");
+    expect(payload.message.attachments[0].contentType).toBe("text/calendar; method=CANCEL");
+
+    const ics = Buffer.from(payload.message.attachments[0].contentBytes, "base64").toString("utf8");
+    expect(ics).toContain("METHOD:CANCEL");
+    expect(ics).toContain("STATUS:CANCELLED");
+    expect(ics).toContain("UID:booking_guest-laura@example.com@padel.topflysolutions.com");
   });
 });

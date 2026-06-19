@@ -28,7 +28,7 @@ URL produzione:
 - Scarico responsabilita' digitale obbligatorio per il referente al momento della prenotazione.
 - Link firma ospiti separato, mostrato dopo la prenotazione e copiabile anche manualmente.
 - Firma col dito acquisita come firma elettronica semplice, con hash e audit tecnico.
-- PDF firmato archiviato in Postgres e inviato al destinatario configurato in
+- PDF firmato archiviato in Postgres e inviato alla mailbox condivisa configurata in
   `APP_WAIVER_RECIPIENT_EMAIL`.
 - Email non aziendali ammesse, con warning non bloccante lato UI.
 - Nome del prenotante visibile sugli slot occupati, email mai esposta pubblicamente.
@@ -48,7 +48,7 @@ URL produzione:
 - Prisma + Postgres.
 - Auth.js / NextAuth con Microsoft Entra ID solo per area admin.
 - Microsoft Graph per inviti Outlook, promemoria, cancellazioni native Outlook, invio PDF waiver
-  e conferme ospiti con allegato calendario.
+  e notifiche ospiti con allegati calendario quando servono.
 - Docker Compose in produzione:
   - `app`: Next.js;
   - `postgres`: database locale;
@@ -244,17 +244,18 @@ MS_GRAPH_TENANT_ID=...
 MS_GRAPH_CLIENT_ID=...
 MS_GRAPH_CLIENT_SECRET=...
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
-APP_WAIVER_RECIPIENT_EMAIL=cecilia.faieta@topflysolutions.com
+APP_WAIVER_RECIPIENT_EMAIL=padel@topflysolutions.com
 ```
 
 Permessi Microsoft Graph sull'app registration:
 
 - `Calendars.ReadWrite` Application, con consenso amministratore.
-- `Mail.Send` Application, con consenso amministratore, per inviare a Cecilia i PDF firmati.
+- `Mail.Send` Application, con consenso amministratore, per inviare i PDF firmati alla
+  mailbox condivisa Padel.
 
-`Mail.Send` e' richiesto solo per lo scarico responsabilita' digitale. La conferma e la
-cancellazione della prenotazione continuano a passare dagli inviti/eventi Outlook,
-evitando una seconda email custom quando l'utente cancella.
+`Mail.Send` e' richiesto per lo scarico responsabilita' digitale e per le email agli
+ospiti che hanno firmato. La conferma, modifica e cancellazione del referente continuano a
+passare dagli inviti/eventi Outlook, evitando una seconda email custom all'organizzatore.
 
 Per ridurre il blast radius dei permessi Application, limitare `Calendars.ReadWrite` e
 `Mail.Send` alla sola mailbox `padel@topflysolutions.com` tramite Exchange Application
@@ -275,7 +276,18 @@ Funzioni attese:
 - includere link firma ospiti nel corpo evento quando disponibile;
 - aggiornare evento quando cambia la prenotazione;
 - cancellare evento Outlook quando la prenotazione viene annullata;
-- inviare il PDF dello scarico responsabilita' firmato al destinatario configurato.
+- inviare il PDF dello scarico responsabilita' firmato alla mailbox condivisa configurata.
+- inviare agli ospiti gia' firmatari una notifica se la prenotazione viene modificata o
+  cancellata.
+
+Mailbox scarichi:
+
+- mailbox consigliata: `padel@topflysolutions.com`;
+- `MS_GRAPH_MAILBOX` e `APP_WAIVER_RECIPIENT_EMAIL` possono coincidere: l'app invia il PDF
+  dalla mailbox Padel alla stessa mailbox Padel, cosi' lo scarico resta archiviato senza
+  intasare una casella personale;
+- chi deve consultare gli scarichi puo' ricevere solo `FullAccess` alla shared mailbox;
+- non serve concedere `SendAs` agli utenti se devono solo leggere/gestire i PDF ricevuti.
 
 Privacy e conservazione:
 

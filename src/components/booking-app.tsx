@@ -23,6 +23,7 @@ import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
 import { isExternalEmailForDomain, isValidEmail, normalizeEmailInput } from "@/lib/email";
+import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
   AuditItem,
@@ -245,7 +246,7 @@ function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
     return {
       tone: "success",
       title: "Modulo ufficiale inviato alla Direzione",
-      text: "Il PDF di Cecilia e' stato compilato, archiviato e inviato via email.",
+      text: "Il PDF e' stato compilato, archiviato e inviato alla mailbox Padel.",
     };
   }
 
@@ -253,7 +254,7 @@ function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
     return {
       tone: "warning",
       title: "PDF salvato, email da reinviare",
-      text: "La firma resta registrata. Cecilia puo' scaricarlo o ritentare l'invio da admin.",
+      text: "La firma resta registrata. Il PDF si puo' scaricare o reinviare da admin.",
     };
   }
 
@@ -590,18 +591,9 @@ export function BookingApp({
     return nextLinks;
   }
 
-  function normalizeGuestWaiverLink(link: string) {
+  function getGuestShareLink(link: string) {
     if (typeof window === "undefined") return link;
-
-    try {
-      const url = new URL(link, window.location.origin);
-      if (url.pathname.startsWith("/waiver/")) {
-        return `${window.location.origin}${url.pathname}${url.search}${url.hash}`;
-      }
-      return url.toString();
-    } catch {
-      return link;
-    }
+    return buildShortGuestWaiverLink(link, window.location.origin);
   }
 
   async function writeClipboardText(text: string) {
@@ -632,7 +624,7 @@ export function BookingApp({
   }
 
   async function copyGuestWaiverLink(link: string) {
-    const normalizedLink = normalizeGuestWaiverLink(link);
+    const normalizedLink = getGuestShareLink(link);
     const copied = await writeClipboardText(normalizedLink);
 
     if (copied) {
@@ -644,7 +636,7 @@ export function BookingApp({
     } else {
       setNotice({
         type: "warning",
-        text: "Copia automatica non riuscita. Apri il link o selezionalo dal campo qui sotto.",
+        text: "Copia automatica non riuscita. Apri il link e copialo dalla barra indirizzi.",
       });
     }
   }
@@ -1050,8 +1042,8 @@ export function BookingApp({
                 ) : null}
                 {selectedOwnGuestWaiverLink ? (
                   <GuestLinkPanel
-                    copied={copiedGuestWaiverLink === normalizeGuestWaiverLink(selectedOwnGuestWaiverLink)}
-                    link={normalizeGuestWaiverLink(selectedOwnGuestWaiverLink)}
+                    copied={copiedGuestWaiverLink === getGuestShareLink(selectedOwnGuestWaiverLink)}
+                    link={selectedOwnGuestWaiverLink}
                     onCopy={copyGuestWaiverLink}
                   />
                 ) : null}

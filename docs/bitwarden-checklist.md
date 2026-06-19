@@ -85,8 +85,9 @@ Da salvare:
 - client secret;
 - data scadenza secret;
 - permessi Graph attesi: `Calendars.ReadWrite` e `Mail.Send` Application con admin consent;
-- nota: `Mail.Send` serve solo per inviare a Cecilia i PDF dello scarico responsabilita';
-- env produzione `APP_WAIVER_RECIPIENT_EMAIL=cecilia.faieta@topflysolutions.com`;
+- nota: `Mail.Send` serve solo per inviare i PDF dello scarico responsabilita' alla mailbox
+  condivisa Padel;
+- env produzione `APP_WAIVER_RECIPIENT_EMAIL=padel@topflysolutions.com`;
 - nota sicurezza: accesso Graph da limitare alla sola mailbox `padel@topflysolutions.com`
   tramite Exchange Application Access Policy o RBAC for Applications, includendo `Mail.Send`;
 - stato della policy Exchange: configurata/non configurata, data verifica, chi l'ha
@@ -101,6 +102,8 @@ Da salvare:
 - mailbox: `padel@topflysolutions.com`;
 - tipo mailbox: condivisa/tecnica;
 - proprietari o membri autorizzati;
+- utenti con accesso lettura/gestione: assegnare `FullAccess`;
+- `SendAs`: non necessario se gli utenti devono solo leggere gli scarichi;
 - eventuali alias;
 - note su licenza, se presente;
 - policy: non usare questa mailbox come account personale.

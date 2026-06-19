@@ -47,7 +47,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 - Login pubblico eliminato per gli utenti normali.
 - Prenotazione pubblica con nome/cognome + email.
 - Scarico responsabilita' digitale obbligatorio per referente e ospiti.
-- PDF scarico responsabilita' archiviato nel DB e inviato a `cecilia.faieta@topflysolutions.com`.
+- PDF scarico responsabilita' archiviato nel DB e inviato alla shared mailbox
+  `padel@topflysolutions.com`.
 - "Le mie prenotazioni" basata su token salvati nel browser.
 - Modifica/cancellazione prenotazione tramite token.
 - Area `/admin` protetta da Microsoft Entra ID.
@@ -90,7 +91,7 @@ Da browser normale:
 2. Creare una prenotazione con nome e email aziendale.
 3. Compilare e firmare lo scarico responsabilita' del referente.
 4. Copiare il link firma ospiti e firmare come ospite in finestra anonima/mobile.
-5. Verificare che a Cecilia arrivi il PDF firmato.
+5. Verificare che il PDF firmato arrivi nella mailbox condivisa `padel@topflysolutions.com`.
 6. Verificare che lo slot risulti occupato con solo nome visibile.
 7. Verificare "Le mie prenotazioni".
 8. Modificare la prenotazione e verificare che venga generato un nuovo link ospiti.
@@ -323,15 +324,29 @@ Permessi Graph richiesti:
 - `Calendars.ReadWrite` Application, consenso admin concesso.
 - `Mail.Send` Application, consenso admin concesso.
 
-`Mail.Send` e' usato solo per inviare a `cecilia.faieta@topflysolutions.com` il PDF
-dello scarico responsabilita' firmato. Conferme, modifiche e cancellazioni della
-prenotazione restano sugli inviti/eventi Outlook, senza seconda email custom all'utente.
+`Mail.Send` e' usato per inviare il PDF dello scarico responsabilita' firmato alla mailbox
+condivisa configurata in `APP_WAIVER_RECIPIENT_EMAIL` e per le email agli ospiti firmatari.
+In produzione il valore atteso e' `padel@topflysolutions.com`, cosi' gli scarichi restano
+nella casella Padel e non intasano una casella personale. Conferme, modifiche e cancellazioni
+del referente restano sugli inviti/eventi Outlook; gli ospiti gia' firmatari ricevono una
+notifica custom se la prenotazione cambia o viene annullata.
 
 La mailbox usata dall'app e':
 
 ```txt
 padel@topflysolutions.com
 ```
+
+Configurazione destinatario scarichi:
+
+```env
+MS_GRAPH_MAILBOX=padel@topflysolutions.com
+APP_WAIVER_RECIPIENT_EMAIL=padel@topflysolutions.com
+```
+
+La mailbox `padel@topflysolutions.com` puo' essere aperta dagli utenti autorizzati con
+permesso Exchange `FullAccess`. Non serve concedere `SendAs` se l'utente deve solo leggere
+o gestire gli scarichi ricevuti.
 
 Conferme:
 
@@ -348,11 +363,15 @@ Scarichi responsabilita':
 - gli ospiti firmano da `/waiver/[bookingId]?token=...`;
 - gli ospiti ricevono una mail di conferma con allegato calendario `.ics` e link personale
   per rinunciare al posto;
+- se il referente modifica la prenotazione, gli ospiti gia' firmatari ricevono una mail con
+  nuovo orario e nuovo link firma ospiti;
+- se il referente cancella la prenotazione, gli ospiti gia' firmatari ricevono una mail di
+  cancellazione con allegato calendario `.ics`;
 - se un ospite rinuncia, la firma resta nello storico ma non conta piu' nel limite giocatori;
 - quando le firme attive arrivano a `playerCount/playerCount`, il link ospiti non permette
   nuove firme;
 - ogni firma genera un PDF archiviato in Postgres;
-- l'app invia il PDF a Cecilia tramite Graph `sendMail`;
+- l'app invia il PDF alla mailbox condivisa Padel tramite Graph `sendMail`;
 - se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`.
 
 Privacy e retention:

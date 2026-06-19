@@ -19,7 +19,13 @@ import {
   demoLookupBookings,
   demoUpdateBooking,
 } from "@/lib/demo-store";
-import { createOutlookEvent, deleteOutlookEvent, updateOutlookEvent } from "@/lib/graph";
+import {
+  createOutlookEvent,
+  deleteOutlookEvent,
+  sendGuestBookingCanceledEmail,
+  sendGuestBookingUpdatedEmail,
+  updateOutlookEvent,
+} from "@/lib/graph";
 import {
   createManageToken,
   hashManageToken,
@@ -224,6 +230,83 @@ async function markOutlookDeleted(booking: Booking) {
       outlookSyncError: result.error ?? null,
     },
   });
+}
+
+type GuestSignatureForNotice = {
+  signerName: string;
+  signerEmail: string;
+};
+
+function uniqueGuestSigners(signatures: GuestSignatureForNotice[]) {
+  const seen = new Set<string>();
+  return signatures.filter((signature) => {
+    const key = signature.signerEmail.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function activeGuestSignersForBooking(
+  booking: Pick<Booking, "id" | "waiverRevision">,
+): Promise<GuestSignatureForNotice[]> {
+  const signatures = await prisma.waiverSignature.findMany({
+    where: {
+      bookingId: booking.id,
+      bookingRevision: booking.waiverRevision,
+      signerRole: "GUEST",
+      status: "ACTIVE",
+    },
+    select: {
+      signerName: true,
+      signerEmail: true,
+    },
+    orderBy: { signedAt: "asc" },
+  });
+
+  return uniqueGuestSigners(signatures);
+}
+
+async function notifyGuestSignersOfUpdate(input: {
+  previousBooking: Booking;
+  booking: Booking;
+  guests: GuestSignatureForNotice[];
+  guestWaiverUrl?: string;
+}) {
+  await Promise.all(
+    input.guests.map(async (guest) => {
+      try {
+        await sendGuestBookingUpdatedEmail({
+          previousBooking: input.previousBooking,
+          booking: input.booking,
+          signerName: guest.signerName,
+          signerEmail: guest.signerEmail,
+          guestWaiverUrl: input.guestWaiverUrl,
+        });
+      } catch {
+        // La modifica prenotazione non deve fallire se una notifica accessoria non parte.
+      }
+    }),
+  );
+}
+
+async function notifyGuestSignersOfCancellation(
+  booking: Booking,
+  guests: GuestSignatureForNotice[],
+) {
+  await Promise.all(
+    guests.map(async (guest) => {
+      try {
+        await sendGuestBookingCanceledEmail({
+          booking,
+          signerName: guest.signerName,
+          signerEmail: guest.signerEmail,
+        });
+      } catch {
+        // La cancellazione prenotazione resta valida anche se una notifica accessoria fallisce.
+      }
+    }),
+  );
 }
 
 async function getBookingWithWaivers(bookingId: string) {
@@ -550,7 +633,10 @@ export async function updateBooking(
     (booking.status !== "CONFIRMED" ||
       nextStart.getTime() !== booking.start.getTime() ||
       nextEnd.getTime() !== booking.end.getTime());
+  const isCancellation = booking.status !== "CANCELED" && nextStatus === "CANCELED";
   const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
+  const guestSignersToNotify =
+    requiresFreshWaivers || isCancellation ? await activeGuestSignersForBooking(booking) : [];
 
   const updated = await retryPrismaTransaction(() =>
     prisma.$transaction(
@@ -606,6 +692,21 @@ export async function updateBooking(
         )
       : await markOutlookDeleted(updated);
 
+  if (isCancellation && guestSignersToNotify.length > 0) {
+    await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
+  } else if (requiresFreshWaivers && guestSignersToNotify.length > 0) {
+    await notifyGuestSignersOfUpdate({
+      previousBooking: booking,
+      booking: synced,
+      guests: guestSignersToNotify,
+      guestWaiverUrl: buildGuestWaiverUrl(
+        access.baseUrl ?? appConfig.publicOrigin,
+        synced.id,
+        nextGuestWaiverToken,
+      ),
+    });
+  }
+
   const refreshed = await getBookingWithWaivers(synced.id);
   return serializeManagedBooking(
     refreshed ?? synced,
@@ -637,6 +738,8 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
     return serializeManagedBooking(refreshed ?? synced, access.manageToken ?? undefined, access.baseUrl);
   }
 
+  const guestSignersToNotify = await activeGuestSignersForBooking(booking);
+
   const canceled = await prisma.$transaction(async (tx) => {
     const saved = await tx.booking.update({
       where: { id: booking.id },
@@ -655,6 +758,10 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
   });
 
   const synced = await markOutlookDeleted(canceled);
+  if (guestSignersToNotify.length > 0) {
+    await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
+  }
+
   const refreshed = await getBookingWithWaivers(synced.id);
   return serializeManagedBooking(refreshed ?? synced, access.manageToken ?? undefined, access.baseUrl);
 }

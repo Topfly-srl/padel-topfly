@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
+import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
 import {
   WaiverFormSection,
@@ -224,11 +225,14 @@ export function BookingCheckout({
     const link = linkOverride ?? createdBooking?.guestWaiverUrl;
     if (!link) return;
 
-    const copied = await writeClipboardText(link);
+    const shareLink = buildShortGuestWaiverLink(link, window.location.origin);
+    const copied = await writeClipboardText(shareLink);
     setCopiedGuestWaiverLink(copied);
     setNotice({
       type: copied ? "success" : "warning",
-      text: copied ? "Link firma ospiti copiato." : "Copia automatica non riuscita. Seleziona il link manualmente.",
+      text: copied
+        ? "Link firma ospiti copiato."
+        : "Copia automatica non riuscita. Apri il link e copialo dalla barra indirizzi.",
     });
   }
 
@@ -372,7 +376,6 @@ export function BookingCheckout({
                 <div className="checkout-section-title plain">
                   <div>
                     <strong>Invia il link agli ospiti</strong>
-                    <small>Chi gioca con te firma da questo link.</small>
                   </div>
                 </div>
                 <GuestLinkPanel

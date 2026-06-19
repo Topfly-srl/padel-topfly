@@ -175,6 +175,7 @@ MS_GRAPH_TENANT_ID=
 MS_GRAPH_CLIENT_ID=
 MS_GRAPH_CLIENT_SECRET=
 MS_GRAPH_MAILBOX=padel@topflysolutions.com
+APP_WAIVER_RECIPIENT_EMAIL=padel@topflysolutions.com
 ```
 
 Attenzione:
@@ -381,12 +382,15 @@ Permessi Graph sull'app registration:
 - `Mail.Send` Application;
 - consenso amministratore concesso.
 
-`Mail.Send` serve solo per inviare a Cecilia i PDF degli scarichi responsabilita'.
-Conferme, modifiche e cancellazioni usano gli inviti/eventi Outlook, senza una seconda
-email custom separata.
+`Mail.Send` serve solo per inviare i PDF degli scarichi responsabilita' alla mailbox
+condivisa configurata in `APP_WAIVER_RECIPIENT_EMAIL`. In produzione il valore atteso e'
+`padel@topflysolutions.com`, non una casella personale. Conferme, modifiche e cancellazioni
+del referente usano gli inviti/eventi Outlook; gli ospiti gia' firmatari ricevono invece
+una mail custom se la prenotazione viene modificata o cancellata.
 
 La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
-La cancellazione aggiorna l'evento e poi cancella l'evento Outlook.
+La cancellazione aggiorna l'evento e poi cancella l'evento Outlook per il referente; gli
+ospiti gia' firmatari vengono avvisati via `sendMail`.
 La mail automatica con prefisso `Canceled:` e' generata da Outlook: l'app controlla solo
 il commento testuale, che deve restare breve e chiaro.
 
@@ -396,3 +400,5 @@ Hardening Microsoft 365 raccomandato:
   `padel@topflysolutions.com` con Exchange Application Access Policy o RBAC for
   Applications;
 - verificare che la mailbox sia tecnica/condivisa e non usata come account personale.
+- gli utenti che devono leggere gli scarichi possono avere `FullAccess` alla shared mailbox;
+- non serve `SendAs` se non devono inviare manualmente email come Padel.
