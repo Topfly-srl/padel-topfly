@@ -34,6 +34,7 @@ type WaiverFormSectionProps = {
   helperText: string;
   compact?: boolean;
   layout?: "default" | "checkout";
+  showSignature?: boolean;
   showErrors?: boolean;
   touched?: Partial<Record<WaiverField, boolean>>;
   onTouched?: (field: WaiverField) => void;
@@ -90,6 +91,7 @@ export function WaiverFormSection({
   helperText,
   compact = false,
   layout = "default",
+  showSignature = true,
   showErrors = false,
   touched = {},
   onTouched,
@@ -109,7 +111,6 @@ export function WaiverFormSection({
         <div className="checkout-waiver-group">
           <div className="checkout-mini-title">
             <strong>Dati personali</strong>
-            <small>Servono per compilare il PDF automaticamente.</small>
           </div>
           <div className="selector-row compact">
             <label>
@@ -145,24 +146,17 @@ export function WaiverFormSection({
         <div className="checkout-waiver-group">
           <div className="checkout-mini-title">
             <strong>Documenti</strong>
-            <small>{helperText}</small>
           </div>
           <div className="document-stack checkout-documents" aria-label="Documenti ufficiali">
             {templateUrl ? (
               <a className="document-link" href={templateUrl} rel="noreferrer" target="_blank">
                 <FileText size={17} />
-                <span>
-                  Modulo PDF
-                  <small>Apri modulo ufficiale</small>
-                </span>
+                <span>Modulo PDF</span>
               </a>
             ) : null}
             <a className="document-link secondary" href={regulationUrl} rel="noreferrer" target="_blank">
               <Shield size={17} />
-              <span>
-                Regolamento
-                <small>Apri regolamento</small>
-              </span>
+              <span>Regolamento</span>
             </a>
           </div>
         </div>
@@ -170,7 +164,6 @@ export function WaiverFormSection({
         <div className="checkout-waiver-group">
           <div className="checkout-mini-title">
             <strong>Conferme</strong>
-            <small>Spunta le dichiarazioni richieste.</small>
           </div>
           <div className="waiver-checklist checkout-checklist" aria-label="Consensi obbligatori">
             {consentRows.map((row) => (
@@ -192,17 +185,19 @@ export function WaiverFormSection({
           </div>
         </div>
 
-        <div className="checkout-waiver-group">
-          <SignaturePad
-            showError={fieldInvalid("signatureImageDataUrl", !value.signatureImageDataUrl)}
-            value={value.signatureImageDataUrl}
-            onChange={(signatureImageDataUrl) => update({ signatureImageDataUrl })}
-            onTouched={() => onTouched?.("signatureImageDataUrl")}
-          />
-          <small className="field-hint">
-            Firmatario: {signerName.trim() || "inserisci prima nome e cognome"}.
-          </small>
-        </div>
+        {showSignature ? (
+          <div className="checkout-waiver-group">
+            <SignaturePad
+              showError={fieldInvalid("signatureImageDataUrl", !value.signatureImageDataUrl)}
+              value={value.signatureImageDataUrl}
+              onChange={(signatureImageDataUrl) => update({ signatureImageDataUrl })}
+              onTouched={() => onTouched?.("signatureImageDataUrl")}
+            />
+            <small className="field-hint">
+              Firmatario: {signerName.trim() || "inserisci prima nome e cognome"}.
+            </small>
+          </div>
+        ) : null}
       </div>
     );
   }

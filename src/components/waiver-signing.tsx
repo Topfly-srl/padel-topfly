@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
+import { SignaturePad } from "@/components/signature-pad";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -33,6 +34,7 @@ type Notice = {
 };
 
 type GuestField = "signerName" | "signerEmail" | WaiverField;
+type GuestStep = 1 | 2;
 
 const emptyWaiverForm: WaiverFormValue = {
   birthDate: "",
@@ -92,20 +94,25 @@ export function WaiverSigning({
   const [signerName, setSignerName] = useState("");
   const [signerEmail, setSignerEmail] = useState("");
   const [waiverForm, setWaiverForm] = useState<WaiverFormValue>(emptyWaiverForm);
+  const [guestStep, setGuestStep] = useState<GuestStep>(1);
   const [touchedFields, setTouchedFields] = useState<Partial<Record<GuestField, boolean>>>({});
+  const [identityStepAttempted, setIdentityStepAttempted] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [hasSigned, setHasSigned] = useState(false);
   const [isPending, startTransition] = useTransition();
   const waiverCardRef = useRef<HTMLElement | null>(null);
 
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
+  const normalizedSignerName = signerName.trim().replace(/\s+/g, " ");
   const normalizedSignerEmail = normalizeEmailInput(signerEmail);
+  const canContinueGuest =
+    normalizedSignerName.length > 1 &&
+    isValidEmail(normalizedSignerEmail);
   const canSubmit =
     !isPending &&
     waiver &&
     waiver.booking.remainingSignatures > 0 &&
-    signerName.trim().length > 1 &&
-    isValidEmail(normalizedSignerEmail) &&
+    canContinueGuest &&
     Boolean(birthDateIso) &&
     waiverForm.birthPlace.trim().length > 1 &&
     waiverForm.isAdultConfirmed &&
@@ -114,31 +121,9 @@ export function WaiverSigning({
     waiverForm.liabilityAccepted &&
     waiverForm.specificApprovalAccepted &&
     Boolean(waiverForm.signatureImageDataUrl);
-  const missingFields = useMemo(() => {
-    const missing: string[] = [];
-    if (signerName.trim().length < 2) missing.push("nome e cognome");
-    if (!isValidEmail(normalizedSignerEmail)) missing.push("email valida");
-    if (!birthDateIso) missing.push("data di nascita");
-    if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
-    if (!waiverForm.isAdultConfirmed) missing.push("maggiore età");
-    if (!waiverForm.privacyAccepted) missing.push("privacy");
-    if (!waiverForm.regulationAccepted) missing.push("regolamento");
-    if (!waiverForm.liabilityAccepted) missing.push("responsabilità");
-    if (!waiverForm.specificApprovalAccepted) missing.push("clausole specifiche");
-    if (!waiverForm.signatureImageDataUrl) missing.push("firma nel riquadro");
-    return missing;
-  }, [
-    birthDateIso,
-    normalizedSignerEmail,
-    signerName,
-    waiverForm.birthPlace,
-    waiverForm.isAdultConfirmed,
-    waiverForm.liabilityAccepted,
-    waiverForm.privacyAccepted,
-    waiverForm.regulationAccepted,
-    waiverForm.signatureImageDataUrl,
-    waiverForm.specificApprovalAccepted,
-  ]);
+  const missingCopy = canSubmit
+    ? "Tutto pronto: puoi firmare."
+    : "Completa i campi mancanti per continuare.";
 
   const bookingStart = useMemo(() => (waiver ? new Date(waiver.booking.start) : null), [waiver]);
   const bookingEnd = useMemo(() => (waiver ? new Date(waiver.booking.end) : null), [waiver]);
@@ -182,6 +167,10 @@ export function WaiverSigning({
     setNotice(null);
 
     if (!canSubmit) {
+      if (!canContinueGuest) {
+        setGuestStep(1);
+        setIdentityStepAttempted(true);
+      }
       setSubmitAttempted(true);
       setNotice({ type: "warning", text: "Completa tutti i campi obbligatori prima di firmare." });
       return;
@@ -192,7 +181,7 @@ export function WaiverSigning({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token,
-        signerName,
+        signerName: normalizedSignerName,
         signerEmail: normalizedSignerEmail,
         birthDate: birthDateIso,
         birthPlace: waiverForm.birthPlace,
@@ -217,13 +206,40 @@ export function WaiverSigning({
     setSignerName("");
     setSignerEmail("");
     setWaiverForm(emptyWaiverForm);
+    setGuestStep(1);
     setTouchedFields({});
+    setIdentityStepAttempted(false);
     setSubmitAttempted(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function focusFirstInvalidField() {
+    window.requestAnimationFrame(() => {
+      waiverCardRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    });
+  }
+
+  function continueToWaiverStep() {
+    setNotice(null);
+    setIdentityStepAttempted(true);
+
+    if (!canContinueGuest) {
+      setNotice({ type: "warning", text: "Completa i tuoi dati per continuare." });
+      focusFirstInvalidField();
+      return;
+    }
+
+    setSignerName(normalizedSignerName);
+    setSignerEmail(normalizedSignerEmail);
+    setGuestStep(2);
+    window.requestAnimationFrame(() => {
+      waiverCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  const isIdentityField = (field: GuestField) => field === "signerName" || field === "signerEmail";
   const showFieldError = (field: GuestField, invalid: boolean) =>
-    invalid && (submitAttempted || Boolean(touchedFields[field]));
+    invalid && (submitAttempted || Boolean(touchedFields[field]) || (identityStepAttempted && isIdentityField(field)));
   const markTouched = (field: GuestField) => {
     setTouchedFields((current) => ({ ...current, [field]: true }));
   };
@@ -288,82 +304,142 @@ export function WaiverSigning({
               </div>
             ) : (
               <div className="guest-sign-flow">
-                <section className="guest-section">
-                  <div className="guest-section-title">
-                    <strong>I tuoi dati</strong>
-                    <small>Servono per compilare il PDF automaticamente.</small>
-                  </div>
-                  <div className="guest-field-grid">
-                    <label>
-                      Nome e cognome
-                      <input
-                        autoComplete="name"
-                        required
-                        aria-invalid={showFieldError("signerName", signerName.trim().length < 2) || undefined}
-                        value={signerName}
-                        onBlur={() => markTouched("signerName")}
-                        onChange={(event) => setSignerName(event.target.value)}
-                        placeholder="Mario Rossi"
-                      />
-                    </label>
-                    <label>
-                      Email
-                      <input
-                        autoComplete="email"
-                        inputMode="email"
-                        required
-                        type="email"
-                        aria-invalid={showFieldError("signerEmail", !isValidEmail(normalizedSignerEmail)) || undefined}
-                        value={signerEmail}
-                        onBlur={() => {
-                          markTouched("signerEmail");
-                          setSignerEmail(normalizedSignerEmail);
-                        }}
-                        onChange={(event) => setSignerEmail(event.target.value)}
-                        placeholder="nome@topflysolutions.com"
-                      />
-                    </label>
-                  </div>
-                </section>
-
-                <section className="guest-section">
-                  <div className="guest-section-title">
-                    <strong>Firma e consensi</strong>
-                    <small>Dati, documenti, conferme e firma.</small>
-                  </div>
-                  <WaiverFormSection
-                    birthDateIsValid={Boolean(birthDateIso)}
-                    compact
-                    helperText="Modulo e regolamento saranno allegati al PDF firmato."
-                    regulationUrl={appPath(waiver.booking.regulationUrl)}
-                    templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
-                    showErrors={submitAttempted}
-                    signerName={signerName}
-                    touched={touchedFields}
-                    value={waiverForm}
-                    onChange={setWaiverForm}
-                    onTouched={markTouched}
-                  />
-                </section>
-
-                <div className="guest-action-bar">
-                  <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
-                    {canSubmit
-                      ? "Tutto pronto: puoi firmare."
-                      : `Completa: ${missingFields.slice(0, 3).join(", ")}${
-                          missingFields.length > 3 ? "..." : ""
-                        }`}
-                  </small>
+                <div className="checkout-stepper" aria-label="Avanzamento firma ospite">
                   <button
-                    className="primary-button full-width"
-                    disabled={!canSubmit}
-                    onClick={submitSignature}
+                    aria-current={guestStep === 1 ? "step" : undefined}
+                    className={guestStep === 1 ? "active" : "done"}
+                    onClick={() => {
+                      setGuestStep(1);
+                      setNotice(null);
+                    }}
                     type="button"
                   >
-                    <Check size={18} />
-                    Firma accesso campo
+                    <span>1</span>
+                    I tuoi dati
+                  </button>
+                  <button
+                    aria-current={guestStep === 2 ? "step" : undefined}
+                    className={guestStep === 2 ? "active" : ""}
+                    onClick={continueToWaiverStep}
+                    type="button"
+                  >
+                    <span>2</span>
+                    Scarico e firma
                   </button>
                 </div>
+
+                {guestStep === 1 ? (
+                  <section className="guest-section">
+                    <div className="guest-section-title">
+                      <strong>I tuoi dati</strong>
+                      <small>Servono per compilare il PDF automaticamente.</small>
+                    </div>
+                    <div className="guest-field-grid">
+                      <label>
+                        Nome e cognome
+                        <input
+                          autoComplete="name"
+                          required
+                          aria-invalid={showFieldError("signerName", normalizedSignerName.length < 2) || undefined}
+                          value={signerName}
+                          onBlur={() => markTouched("signerName")}
+                          onChange={(event) => setSignerName(event.target.value)}
+                          placeholder="Mario Rossi"
+                        />
+                      </label>
+                      <label>
+                        Email
+                        <input
+                          autoComplete="email"
+                          inputMode="email"
+                          required
+                          type="email"
+                          aria-invalid={showFieldError("signerEmail", !isValidEmail(normalizedSignerEmail)) || undefined}
+                          value={signerEmail}
+                          onBlur={() => {
+                            markTouched("signerEmail");
+                            setSignerEmail(normalizedSignerEmail);
+                          }}
+                          onChange={(event) => setSignerEmail(event.target.value)}
+                          placeholder="nome@topflysolutions.com"
+                        />
+                      </label>
+                    </div>
+                    <div className="checkout-step-actions">
+                      <button className="primary-button full-width" onClick={continueToWaiverStep} type="button">
+                        Continua
+                      </button>
+                    </div>
+                  </section>
+                ) : (
+                  <>
+                    <section className="guest-section">
+                      <div className="guest-section-title">
+                        <strong>Scarico responsabilità</strong>
+                        <small>Dati personali, documenti e conferme.</small>
+                      </div>
+                      <WaiverFormSection
+                        birthDateIsValid={Boolean(birthDateIso)}
+                        compact
+                        helperText="Modulo e regolamento saranno allegati al PDF firmato."
+                        layout="checkout"
+                        regulationUrl={appPath(waiver.booking.regulationUrl)}
+                        showSignature={false}
+                        templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
+                        showErrors={submitAttempted}
+                        signerName={signerName}
+                        touched={touchedFields}
+                        value={waiverForm}
+                        onChange={setWaiverForm}
+                        onTouched={markTouched}
+                      />
+                    </section>
+
+                    <section className="guest-section checkout-submit-panel">
+                      <div className="guest-section-title">
+                        <strong>Firma</strong>
+                        <small>Ultimo passaggio.</small>
+                      </div>
+                      <SignaturePad
+                        showError={showFieldError("signatureImageDataUrl", !waiverForm.signatureImageDataUrl)}
+                        value={waiverForm.signatureImageDataUrl}
+                        onChange={(signatureImageDataUrl) => {
+                          setWaiverForm((current) => ({ ...current, signatureImageDataUrl }));
+                        }}
+                        onTouched={() => markTouched("signatureImageDataUrl")}
+                      />
+                      <small className="field-hint">
+                        Firmatario: {normalizedSignerName || "inserisci prima nome e cognome"}.
+                      </small>
+                      {submitAttempted || canSubmit ? (
+                        <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
+                          {missingCopy}
+                        </small>
+                      ) : null}
+                      <div className="checkout-step-actions split">
+                        <button
+                          className="ghost-button full-width"
+                          onClick={() => {
+                            setGuestStep(1);
+                            setNotice(null);
+                          }}
+                          type="button"
+                        >
+                          Indietro
+                        </button>
+                        <button
+                          className="primary-button full-width"
+                          disabled={isPending}
+                          onClick={submitSignature}
+                          type="button"
+                        >
+                          <Check size={18} />
+                          Firma accesso campo
+                        </button>
+                      </div>
+                    </section>
+                  </>
+                )}
               </div>
             )}
           </>

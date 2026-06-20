@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Send, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -9,6 +9,7 @@ import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
+import { SignaturePad } from "@/components/signature-pad";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -21,6 +22,7 @@ type Notice = {
 };
 
 type CheckoutField = "organizerName" | "organizerEmail" | "playerCount" | WaiverField;
+type CheckoutStep = 1 | 2;
 
 type CreatedBooking = {
   id: string;
@@ -152,7 +154,9 @@ export function BookingCheckout({
   const [organizerEmail, setOrganizerEmail] = useState("");
   const [playerCount, setPlayerCount] = useState(4);
   const [waiverForm, setWaiverForm] = useState<WaiverFormValue>(emptyWaiverForm);
+  const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>(1);
   const [touchedFields, setTouchedFields] = useState<Partial<Record<CheckoutField, boolean>>>({});
+  const [bookingStepAttempted, setBookingStepAttempted] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [createdBooking, setCreatedBooking] = useState<CreatedBooking | null>(null);
@@ -165,11 +169,13 @@ export function BookingCheckout({
   const normalizedOrganizerName = normalizeName(organizerName);
   const normalizedOrganizerEmail = normalizeEmailInput(organizerEmail);
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
-  const canSubmit =
+  const canContinueBooking =
     normalizedOrganizerName.length > 1 &&
     isValidEmail(normalizedOrganizerEmail) &&
     playerCount >= 2 &&
-    playerCount <= 4 &&
+    playerCount <= 4;
+  const canSubmit =
+    canContinueBooking &&
     Boolean(birthDateIso) &&
     waiverForm.birthPlace.trim().length > 1 &&
     waiverForm.isAdultConfirmed &&
@@ -178,40 +184,19 @@ export function BookingCheckout({
     waiverForm.liabilityAccepted &&
     waiverForm.specificApprovalAccepted &&
     Boolean(waiverForm.signatureImageDataUrl);
-  const missingFields = useMemo(() => {
-    const missing: string[] = [];
-    if (normalizedOrganizerName.length < 2) missing.push("nome e cognome");
-    if (!isValidEmail(normalizedOrganizerEmail)) missing.push("email valida");
-    if (!birthDateIso) missing.push("data di nascita");
-    if (waiverForm.birthPlace.trim().length < 2) missing.push("luogo di nascita");
-    if (!waiverForm.isAdultConfirmed) missing.push("maggiore età");
-    if (!waiverForm.privacyAccepted) missing.push("privacy");
-    if (!waiverForm.regulationAccepted) missing.push("regolamento");
-    if (!waiverForm.liabilityAccepted) missing.push("responsabilità");
-    if (!waiverForm.specificApprovalAccepted) missing.push("clausole specifiche");
-    if (!waiverForm.signatureImageDataUrl) missing.push("firma nel riquadro");
-    return missing;
-  }, [
-    birthDateIso,
-    normalizedOrganizerName.length,
-    normalizedOrganizerEmail,
-    waiverForm.birthPlace,
-    waiverForm.isAdultConfirmed,
-    waiverForm.liabilityAccepted,
-    waiverForm.privacyAccepted,
-    waiverForm.regulationAccepted,
-    waiverForm.signatureImageDataUrl,
-    waiverForm.specificApprovalAccepted,
-  ]);
-
   const markTouched = (field: CheckoutField) => {
     setTouchedFields((current) => ({ ...current, [field]: true }));
   };
+  const isBookingField = (field: CheckoutField) =>
+    field === "organizerName" || field === "organizerEmail" || field === "playerCount";
   const showFieldError = (field: CheckoutField, invalid: boolean) =>
-    invalid && (submitAttempted || Boolean(touchedFields[field]));
+    invalid &&
+    (submitAttempted ||
+      Boolean(touchedFields[field]) ||
+      (bookingStepAttempted && isBookingField(field)));
   const missingCopy = canSubmit
-    ? "Tutto pronto: confermiamo la prenotazione e inviamo il PDF."
-    : `Completa: ${missingFields.slice(0, 3).join(", ")}${missingFields.length > 3 ? "..." : ""}`;
+    ? "Tutto pronto: puoi confermare la prenotazione."
+    : "Completa i campi mancanti per continuare.";
 
   useEffect(() => {
     if (!submitAttempted || canSubmit) return;
@@ -236,10 +221,39 @@ export function BookingCheckout({
     });
   }
 
+  function focusFirstInvalidField() {
+    window.requestAnimationFrame(() => {
+      checkoutCardRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    });
+  }
+
+  function continueToWaiverStep() {
+    setNotice(null);
+    setBookingStepAttempted(true);
+
+    if (!canContinueBooking) {
+      setNotice({ type: "warning", text: "Completa i dati della prenotazione per continuare." });
+      focusFirstInvalidField();
+      return;
+    }
+
+    setOrganizerName(normalizedOrganizerName);
+    setOrganizerEmail(normalizedOrganizerEmail);
+    setCheckoutStep(2);
+    setNotice(null);
+    window.requestAnimationFrame(() => {
+      checkoutCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   async function submitBooking() {
     setNotice(null);
 
     if (!canSubmit || !birthDateIso) {
+      if (!canContinueBooking) {
+        setCheckoutStep(1);
+        setBookingStepAttempted(true);
+      }
       setSubmitAttempted(true);
       setNotice({ type: "warning", text: "Completa i campi obbligatori prima di prenotare." });
       return;
@@ -302,7 +316,7 @@ export function BookingCheckout({
           <Image src={appPath("/topfly-logo.png")} alt="TOPFLY GPS solutions" width={678} height={147} priority />
           <div>
             <p className="muted-label">Padel aziendale</p>
-            <h1>{createdBooking ? "Prenotazione confermata" : "Completa prenotazione"}</h1>
+            <h1>{createdBooking ? "Prenotazione confermata" : "Prenota e firma"}</h1>
           </div>
         </div>
       </header>
@@ -312,7 +326,7 @@ export function BookingCheckout({
           <div className="checkout-recap-copy">
             <span className="checkout-kicker">
               <CalendarDays size={15} />
-              Campo prenotato
+              Prenotazione
             </span>
             <h2>{localSummaryDay(start)}</h2>
             <div className="checkout-meta">
@@ -324,13 +338,35 @@ export function BookingCheckout({
                 <Users size={15} />
                 {playerCount} giocatori
               </span>
+              <span>{duration} min</span>
             </div>
           </div>
-          <span className="checkout-duration">{duration} min</span>
         </div>
 
         {!createdBooking ? (
-          <p className="checkout-intro">Compila i dati, firma e conferma. Al PDF pensiamo noi.</p>
+          <div className="checkout-stepper" aria-label="Avanzamento prenotazione">
+            <button
+              aria-current={checkoutStep === 1 ? "step" : undefined}
+              className={checkoutStep === 1 ? "active" : "done"}
+              onClick={() => {
+                setCheckoutStep(1);
+                setNotice(null);
+              }}
+              type="button"
+            >
+              <span>1</span>
+              Prenotazione
+            </button>
+            <button
+              aria-current={checkoutStep === 2 ? "step" : undefined}
+              className={checkoutStep === 2 ? "active" : ""}
+              onClick={continueToWaiverStep}
+              type="button"
+            >
+              <span>2</span>
+              Scarico e firma
+            </button>
+          </div>
         ) : null}
 
         {notice ? (
@@ -393,102 +429,144 @@ export function BookingCheckout({
           </div>
         ) : (
           <div className="checkout-flow">
-            <section className="checkout-section">
-              <div className="checkout-section-title">
-                <span>1</span>
-                <div>
-                  <strong>Referente</strong>
-                  <small>Servono per conferma e link ospiti.</small>
+            {checkoutStep === 1 ? (
+              <section className="checkout-section">
+                <div className="checkout-section-title">
+                  <span>1</span>
+                  <div>
+                    <strong>Dati prenotazione</strong>
+                    <small>Nome, email e giocatori in campo.</small>
+                  </div>
                 </div>
-              </div>
-              <div className="checkout-field-grid">
-                <label>
-                  Nome e cognome
-                  <input
-                    autoComplete="name"
-                    required
-                    aria-invalid={showFieldError("organizerName", normalizedOrganizerName.length < 2) || undefined}
-                    value={organizerName}
-                    onBlur={() => markTouched("organizerName")}
-                    onChange={(event) => setOrganizerName(event.target.value)}
-                    placeholder="Mario Rossi"
-                  />
-                </label>
-                <label>
-                  Email
-                  <input
-                    autoComplete="email"
-                    inputMode="email"
-                    required
-                    type="email"
-                    aria-invalid={showFieldError("organizerEmail", !isValidEmail(normalizedOrganizerEmail)) || undefined}
-                    value={organizerEmail}
-                    onBlur={() => {
-                      markTouched("organizerEmail");
-                      setOrganizerEmail(normalizedOrganizerEmail);
-                    }}
-                    onChange={(event) => setOrganizerEmail(event.target.value)}
-                    placeholder={`nome@${allowedDomain}`}
-                  />
-                </label>
-                <label>
-                  Giocatori
-                  <select
-                    value={playerCount}
-                    onBlur={() => markTouched("playerCount")}
-                    onChange={(event) => {
-                      markTouched("playerCount");
-                      setPlayerCount(Number(event.target.value));
-                    }}
-                  >
-                    {[2, 3, 4].map((count) => (
-                      <option key={count} value={count}>
-                        {count} giocatori
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </section>
-
-            <section className="checkout-section">
-              <div className="checkout-section-title">
-                <span>2</span>
-                <div>
-                  <strong>Scarico responsabilità</strong>
-                  <small>Dati, documenti, conferme e firma.</small>
+                <div className="checkout-field-grid">
+                  <label>
+                    Nome e cognome
+                    <input
+                      autoComplete="name"
+                      required
+                      aria-invalid={showFieldError("organizerName", normalizedOrganizerName.length < 2) || undefined}
+                      value={organizerName}
+                      onBlur={() => markTouched("organizerName")}
+                      onChange={(event) => setOrganizerName(event.target.value)}
+                      placeholder="Mario Rossi"
+                    />
+                  </label>
+                  <label>
+                    Email
+                    <input
+                      autoComplete="email"
+                      inputMode="email"
+                      required
+                      type="email"
+                      aria-invalid={showFieldError("organizerEmail", !isValidEmail(normalizedOrganizerEmail)) || undefined}
+                      value={organizerEmail}
+                      onBlur={() => {
+                        markTouched("organizerEmail");
+                        setOrganizerEmail(normalizedOrganizerEmail);
+                      }}
+                      onChange={(event) => setOrganizerEmail(event.target.value)}
+                      placeholder={`nome@${allowedDomain}`}
+                    />
+                  </label>
+                  <label>
+                    Giocatori
+                    <select
+                      value={playerCount}
+                      onBlur={() => markTouched("playerCount")}
+                      onChange={(event) => {
+                        markTouched("playerCount");
+                        setPlayerCount(Number(event.target.value));
+                      }}
+                    >
+                      {[2, 3, 4].map((count) => (
+                        <option key={count} value={count}>
+                          {count} giocatori
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
-              </div>
-              <WaiverFormSection
-                birthDateIsValid={Boolean(birthDateIso)}
-                compact
-                helperText="Modulo e regolamento saranno allegati al PDF firmato."
-                layout="checkout"
-                regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
-                templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
-                showErrors={submitAttempted}
-                signerName={organizerName}
-                touched={touchedFields}
-                value={waiverForm}
-                onChange={setWaiverForm}
-                onTouched={markTouched}
-              />
-            </section>
+                <div className="checkout-step-actions">
+                  <button className="primary-button full-width" onClick={continueToWaiverStep} type="button">
+                    Continua
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <>
+                <section className="checkout-section">
+                  <div className="checkout-section-title">
+                    <span>2</span>
+                    <div>
+                      <strong>Scarico e firma</strong>
+                      <small>Dati personali, documenti e conferme.</small>
+                    </div>
+                  </div>
+                  <WaiverFormSection
+                    birthDateIsValid={Boolean(birthDateIso)}
+                    compact
+                    helperText="Modulo e regolamento saranno allegati al PDF firmato."
+                    layout="checkout"
+                    regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
+                    showSignature={false}
+                    templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
+                    showErrors={submitAttempted}
+                    signerName={organizerName}
+                    touched={touchedFields}
+                    value={waiverForm}
+                    onChange={setWaiverForm}
+                    onTouched={markTouched}
+                  />
+                </section>
 
-            <div className="checkout-submit-panel">
-              <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
-                {missingCopy}
-              </small>
-              <button
-                className="primary-button full-width"
-                disabled={!canSubmit || isSubmitting}
-                onClick={submitBooking}
-                type="button"
-              >
-                {isSubmitting ? <Check size={18} /> : <Send size={18} />}
-                {isSubmitting ? "Confermo..." : "Conferma e invia PDF"}
-              </button>
-            </div>
+                <section className="checkout-section checkout-submit-panel">
+                  <div className="checkout-section-title">
+                    <span>3</span>
+                    <div>
+                      <strong>Firma</strong>
+                      <small>Ultimo passaggio.</small>
+                    </div>
+                  </div>
+                  <SignaturePad
+                    showError={showFieldError("signatureImageDataUrl", !waiverForm.signatureImageDataUrl)}
+                    value={waiverForm.signatureImageDataUrl}
+                    onChange={(signatureImageDataUrl) => {
+                      setWaiverForm((current) => ({ ...current, signatureImageDataUrl }));
+                    }}
+                    onTouched={() => markTouched("signatureImageDataUrl")}
+                  />
+                  <small className="field-hint">
+                    Firmatario: {normalizedOrganizerName || "inserisci prima nome e cognome"}.
+                  </small>
+                  {submitAttempted || canSubmit ? (
+                    <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
+                      {missingCopy}
+                    </small>
+                  ) : null}
+                  <div className="checkout-step-actions split">
+                    <button
+                      className="ghost-button full-width"
+                      onClick={() => {
+                        setCheckoutStep(1);
+                        setNotice(null);
+                      }}
+                      type="button"
+                    >
+                      Indietro
+                    </button>
+                    <button
+                      className="primary-button full-width"
+                      disabled={isSubmitting}
+                      onClick={submitBooking}
+                      type="button"
+                    >
+                      <Check size={18} />
+                      {isSubmitting ? "Confermo..." : "Firma e conferma prenotazione"}
+                    </button>
+                  </div>
+                </section>
+              </>
+            )}
           </div>
         )}
       </section>

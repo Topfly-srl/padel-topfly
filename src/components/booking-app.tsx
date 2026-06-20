@@ -1098,13 +1098,12 @@ export function BookingApp({
                   onClick={editingBookingId ? saveBooking : openBookingCheckout}
                   type="button"
                 >
-                  <Check size={18} />
-                  {editingBookingId ? "Salva modifica" : "Prenota e firma scarico responsabilità"}
+                  {editingBookingId ? <Check size={16} /> : null}
+                  {editingBookingId ? "Salva modifica" : "Prenota e firma"}
                 </button>
                 {editingBookingId ? null : (
                   <p className="summary-action-note">
-                    Ricevi la conferma via email; lo scarico firmato viene inviato
-                    all&apos;Amministrazione.
+                    Ricevi conferma via email. Scarico inviato all&apos;Amministrazione.
                   </p>
                 )}
               </>
