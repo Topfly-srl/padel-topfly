@@ -37,15 +37,20 @@ const isProductionDeployment =
   // disattivando auth, header di sicurezza e controllo strict-origin.
   process.env.NODE_ENV === "production";
 
-if (isProductionDeployment && env.AUTH_DEV_MODE === "true") {
+// Durante `next build` Next imposta NODE_ENV=production ma i segreti di runtime non ci sono
+// (e non devono esserci in CI): i controlli fail-fast valgono solo a runtime, non in build.
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+const enforceProductionEnv = isProductionDeployment && !isBuildPhase;
+
+if (enforceProductionEnv && env.AUTH_DEV_MODE === "true") {
   throw new Error("AUTH_DEV_MODE non puo' essere attivo in produzione.");
 }
 
-if (isProductionDeployment && !env.DATABASE_URL) {
+if (enforceProductionEnv && !env.DATABASE_URL) {
   throw new Error("DATABASE_URL e' obbligatorio in produzione.");
 }
 
-if (isProductionDeployment) {
+if (enforceProductionEnv) {
   const missingProductionEnv = [
     ["APP_PUBLIC_ORIGIN", env.APP_PUBLIC_ORIGIN],
     ["APP_ADMIN_EMAILS", env.APP_ADMIN_EMAILS.trim()],
