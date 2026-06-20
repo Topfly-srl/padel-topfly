@@ -122,6 +122,13 @@ model WaiverSignature {
   updatedAt                  DateTime          @updatedAt
 
   @@index([bookingId, bookingRevision])
+  // NB: oltre a questo indice esiste un UNIQUE index PARZIALE
+  // "WaiverSignature_active_booking_revision_email_key" su
+  // (bookingId, bookingRevision, signerEmail) WHERE status = 'ACTIVE',
+  // creato via SQL grezzo (migrations/20260619090000_active_waiver_signature_unique_email).
+  // Prisma non sa esprimere indici parziali: NON usare `prisma db push` su questo DB,
+  // altrimenti l'indice viene droppato e salta la dedup su cui si appoggia il catch P2002
+  // in waiver-service.ts (createWaiverSignature). Usare solo `prisma migrate`.
   @@index([bookingId, bookingRevision, signerEmail])
   @@index([cancelTokenHash])
   @@index([emailStatus])

@@ -179,7 +179,10 @@ Non committare mai `.env.production`.
 
 ## Variabili Produzione
 
-Valori gia' attesi in produzione:
+Valori gia' attesi in produzione. La modalita' produzione si attiva con `APP_ENV=production`
+**oppure** automaticamente quando il container gira con `next start` (`NODE_ENV=production`):
+in quel caso l'app fa fail-fast all'avvio se mancano le env critiche (DB, Entra, Graph), per
+evitare di girare in modalita' "development" con auth e header di sicurezza degradati.
 
 ```env
 APP_DOMAIN=padel.topflysolutions.com
@@ -303,6 +306,16 @@ sudo docker compose -f docker-compose.production.yml logs app --tail=120
 ```
 
 Se una prenotazione resta con stato Outlook `FAILED`, controllare `outlookSyncError` nel DB o nei log app.
+
+### Esecuzione differita (email e Outlook)
+
+Per non far attendere l'utente sulla latenza di Microsoft Graph, l'invio email e il sync
+Outlook vengono eseguiti **dopo** che la risposta e' stata inviata, tramite l'helper
+`src/lib/after-response.ts` (basato su `after()` di Next.js). La prenotazione e la firma
+vengono salvate in modo transazionale **prima** della risposta, quindi la conferma e' immediata
+e accurata; gli step accessori partono subito dopo, dietro le quinte, e registrano comunque il
+proprio esito (`emailStatus`, `outlookSyncStatus`) per visibilita' e retry dall'area admin.
+Affidabile sul runtime a container long-running in produzione (`next start`).
 
 ## Documentazione Operativa
 

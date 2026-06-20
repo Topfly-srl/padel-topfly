@@ -2,7 +2,7 @@
 
 Audit applicativo e operativo per <https://padel.topflysolutions.com>.
 
-Data ultimo aggiornamento: 2026-06-08.
+Data ultimo aggiornamento: 2026-06-21.
 
 ## Executive Summary
 
@@ -57,6 +57,9 @@ Non incluso:
 | SEC-14 | Media | Fix applicato | Fail-fast env produzione |
 | SEC-15 | Media | Fix applicato | Limite dimensione richieste HTTP |
 | SEC-16 | Bassa | Fix applicato | Runtime Node GitHub Actions |
+| SEC-17 | Media | Fix applicato | Rilevamento produzione robusto (`NODE_ENV`) |
+| SEC-18 | Bassa | Fix applicato | Rate limit per-email su firma ospiti |
+| SEC-19 | Bassa | Fix applicato | Cancellazione prenotazione transazionale |
 
 ## Findings
 
@@ -485,6 +488,84 @@ Fix:
 
 - aggiunto `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` a livello workflow;
 - il job CI continua a usare Node 22 per build/test applicativi.
+
+### SEC-17 - Rilevamento produzione robusto su deploy non-Vercel
+
+Severity: Media.
+
+Location:
+
+- `src/lib/config.ts`, `next.config.ts`.
+
+Evidence:
+
+- la modalita' produzione era rilevata solo da `VERCEL_ENV=production` o `APP_ENV=production`;
+- il deploy reale e' su container AWS (`next start`), non Vercel: senza `APP_ENV` impostata
+  l'app sarebbe potuta girare in modalita' "development", abilitando `AUTH_DEV_MODE`,
+  disattivando gli header di sicurezza e allentando il controllo strict-origin.
+
+Impact:
+
+- una env mancante poteva degradare silenziosamente auth, header e CSRF in produzione.
+
+Fix:
+
+- aggiunto `NODE_ENV=production` (impostato automaticamente da `next start`) come ulteriore
+  segnale di produzione in `config.ts` e in `shouldApplySecurityHeaders` di `next.config.ts`;
+- conseguenza voluta: il container ora fa fail-fast all'avvio se mancano le env critiche
+  (vedi anche SEC-14).
+
+### SEC-18 - Rate limit per-email su firma ospiti
+
+Severity: Bassa.
+
+Location:
+
+- `src/lib/request-guard.ts`, `src/app/api/waivers/[bookingId]/sign/route.ts`.
+
+Evidence:
+
+- la firma ospiti era limitata solo per IP (`waiver:sign`), a differenza della creazione
+  prenotazione che ha anche un limite per-email.
+
+Fix:
+
+- aggiunta azione `waiver:sign-email` (8 tentativi / 15 min) applicata sull'email firmataria;
+- `normalizedRateScope` ora gestisce un set di azioni email-scoped.
+
+### SEC-19 - Cancellazione prenotazione transazionale
+
+Severity: Bassa.
+
+Location:
+
+- `src/lib/booking-service.ts`.
+
+Evidence:
+
+- `cancelBooking` usava una transazione semplice, senza isolamento `Serializable` ne' retry,
+  a differenza di create/update/block.
+
+Fix:
+
+- allineata a `retryPrismaTransaction` + isolamento `Serializable`.
+
+### Nota architetturale - Esecuzione differita delle chiamate Microsoft Graph
+
+Per ridurre la latenza percepita ed evitare falsi errori da timeout di Microsoft Graph,
+invio email e sync Outlook vengono ora eseguiti **dopo** la risposta HTTP tramite l'helper
+`src/lib/after-response.ts` (basato su `after()` di Next.js). La parte transazionale
+(creazione, firma, conteggi) resta sincrona e committata prima della risposta; gli effetti
+collaterali differiti persistono comunque il proprio esito (`emailStatus`, `outlookSyncStatus`),
+quindi lo stato resta visibile e ritentabile dall'area admin. Affidabile sul runtime a
+container long-running in uso (`next start`).
+
+### Nota manutenzione - Indice unique parziale via SQL grezzo
+
+La dedup "una sola firma ATTIVA per email/revisione" e' garantita da un UNIQUE index parziale
+(`WHERE status = 'ACTIVE'`) creato in `prisma/migrations`. Prisma non sa esprimere indici
+parziali: usare solo `prisma migrate`, mai `prisma db push`, altrimenti l'indice verrebbe
+droppato. Nota documentata anche in `prisma/schema.prisma`.
 
 ## Verifiche Automatiche Aggiunte
 

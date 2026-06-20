@@ -30,7 +30,12 @@ const envSchema = z.object({
 const env = envSchema.parse(process.env);
 const appEnvironment = env.APP_ENV ?? "development";
 const isProductionDeployment =
-  process.env.VERCEL_ENV === "production" || env.APP_ENV === "production";
+  process.env.VERCEL_ENV === "production" ||
+  env.APP_ENV === "production" ||
+  // `next start` (build di produzione, incluso il container Docker/AWS) imposta NODE_ENV=production.
+  // Lo includiamo per evitare che un deploy senza APP_ENV giri in modalita' "development"
+  // disattivando auth, header di sicurezza e controllo strict-origin.
+  process.env.NODE_ENV === "production";
 
 if (isProductionDeployment && env.AUTH_DEV_MODE === "true") {
   throw new Error("AUTH_DEV_MODE non puo' essere attivo in produzione.");

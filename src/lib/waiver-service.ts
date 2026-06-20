@@ -9,6 +9,7 @@ import type {
   WaiverSignerRole,
 } from "@prisma/client";
 import { PNG } from "pngjs";
+import { runAfterResponse } from "@/lib/after-response";
 import { AppError } from "@/lib/errors";
 import {
   demoCancelGuestWaiverSignature,
@@ -675,11 +676,17 @@ export async function signGuestWaiver(
     { isolationLevel: "Serializable" },
   );
 
-  await sendWaiverSignatureEmail(signature.id);
-  await sendGuestWaiverEmail(
-    signature.id,
-    buildGuestWaiverCancelUrl(baseUrl ?? appConfig.publicOrigin, signature.id, cancelToken),
-  );
+  // Le email (Microsoft Graph) sono lo step lento: dopo la risposta. La firma e' gia' committata,
+  // quindi getWaiverContext sotto riflette gia' il nuovo conteggio.
+  runAfterResponse(async () => {
+    await Promise.all([
+      sendWaiverSignatureEmail(signature.id),
+      sendGuestWaiverEmail(
+        signature.id,
+        buildGuestWaiverCancelUrl(baseUrl ?? appConfig.publicOrigin, signature.id, cancelToken),
+      ),
+    ]);
+  });
   return getWaiverContext(bookingId, token);
 }
 

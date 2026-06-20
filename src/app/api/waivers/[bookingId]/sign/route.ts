@@ -3,6 +3,7 @@ import { z } from "zod";
 import { jsonResponse, routeError } from "@/lib/errors";
 import { assertRateLimit, assertTrustedOrigin, clientIp } from "@/lib/request-guard";
 import { getPublicBaseUrl } from "@/lib/public-url";
+import { normalizeEmail } from "@/lib/manage-token";
 import { signGuestWaiver } from "@/lib/waiver-service";
 import { waiverPayloadSchema } from "@/lib/waiver-schema";
 
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     await assertRateLimit(request, "waiver:sign");
     const { bookingId } = await context.params;
     const body = signWaiverSchema.parse(await request.json());
+    await assertRateLimit(request, "waiver:sign-email", normalizeEmail(body.signerEmail));
     const waiver = await signGuestWaiver(
       bookingId,
       body.token,

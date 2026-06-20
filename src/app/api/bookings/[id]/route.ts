@@ -55,9 +55,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: NextRequest, context: RouteContext) {
+export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
-    const request = _request;
     assertTrustedOrigin(request);
     const user = await getCurrentUser();
     const adminUser = user?.role === "ADMIN" ? user : null;

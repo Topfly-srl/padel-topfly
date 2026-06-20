@@ -9,7 +9,6 @@ import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
-import { SignaturePad } from "@/components/signature-pad";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -431,13 +430,6 @@ export function BookingCheckout({
           <div className="checkout-flow">
             {checkoutStep === 1 ? (
               <section className="checkout-section">
-                <div className="checkout-section-title">
-                  <span>1</span>
-                  <div>
-                    <strong>Dati prenotazione</strong>
-                    <small>Nome, email e giocatori in campo.</small>
-                  </div>
-                </div>
                 <div className="checkout-field-grid">
                   <label>
                     Nome e cognome
@@ -493,79 +485,48 @@ export function BookingCheckout({
                 </div>
               </section>
             ) : (
-              <>
-                <section className="checkout-section">
-                  <div className="checkout-section-title">
-                    <span>2</span>
-                    <div>
-                      <strong>Scarico e firma</strong>
-                      <small>Dati personali, documenti e conferme.</small>
-                    </div>
-                  </div>
-                  <WaiverFormSection
-                    birthDateIsValid={Boolean(birthDateIso)}
-                    compact
-                    helperText="Modulo e regolamento saranno allegati al PDF firmato."
-                    layout="checkout"
-                    regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
-                    showSignature={false}
-                    templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
-                    showErrors={submitAttempted}
-                    signerName={organizerName}
-                    touched={touchedFields}
-                    value={waiverForm}
-                    onChange={setWaiverForm}
-                    onTouched={markTouched}
-                  />
-                </section>
-
-                <section className="checkout-section checkout-submit-panel">
-                  <div className="checkout-section-title">
-                    <span>3</span>
-                    <div>
-                      <strong>Firma</strong>
-                      <small>Ultimo passaggio.</small>
-                    </div>
-                  </div>
-                  <SignaturePad
-                    showError={showFieldError("signatureImageDataUrl", !waiverForm.signatureImageDataUrl)}
-                    value={waiverForm.signatureImageDataUrl}
-                    onChange={(signatureImageDataUrl) => {
-                      setWaiverForm((current) => ({ ...current, signatureImageDataUrl }));
-                    }}
-                    onTouched={() => markTouched("signatureImageDataUrl")}
-                  />
-                  <small className="field-hint">
-                    Firmatario: {normalizedOrganizerName || "inserisci prima nome e cognome"}.
+              <section className="checkout-section checkout-submit-panel">
+                <WaiverFormSection
+                  birthDateIsValid={Boolean(birthDateIso)}
+                  compact
+                  helperText="Modulo e regolamento saranno allegati al PDF firmato."
+                  layout="checkout"
+                  regulationUrl={appPath("/legal/regolamento-padel-topfly-v1.pdf")}
+                  templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
+                  showErrors={submitAttempted}
+                  signerName={normalizedOrganizerName}
+                  touched={touchedFields}
+                  value={waiverForm}
+                  onChange={setWaiverForm}
+                  onTouched={markTouched}
+                />
+                {submitAttempted || canSubmit ? (
+                  <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
+                    {missingCopy}
                   </small>
-                  {submitAttempted || canSubmit ? (
-                    <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
-                      {missingCopy}
-                    </small>
-                  ) : null}
-                  <div className="checkout-step-actions split">
-                    <button
-                      className="ghost-button full-width"
-                      onClick={() => {
-                        setCheckoutStep(1);
-                        setNotice(null);
-                      }}
-                      type="button"
-                    >
-                      Indietro
-                    </button>
-                    <button
-                      className="primary-button full-width"
-                      disabled={isSubmitting}
-                      onClick={submitBooking}
-                      type="button"
-                    >
-                      <Check size={18} />
-                      {isSubmitting ? "Confermo..." : "Firma e conferma prenotazione"}
-                    </button>
-                  </div>
-                </section>
-              </>
+                ) : null}
+                <div className="checkout-step-actions split">
+                  <button
+                    className="ghost-button full-width"
+                    onClick={() => {
+                      setCheckoutStep(1);
+                      setNotice(null);
+                    }}
+                    type="button"
+                  >
+                    Indietro
+                  </button>
+                  <button
+                    className="primary-button full-width"
+                    disabled={isSubmitting}
+                    onClick={submitBooking}
+                    type="button"
+                  >
+                    <Check size={18} />
+                    {isSubmitting ? "Confermo..." : "Firma e conferma prenotazione"}
+                  </button>
+                </div>
+              </section>
             )}
           </div>
         )}

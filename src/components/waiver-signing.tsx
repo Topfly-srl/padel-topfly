@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
-import { SignaturePad } from "@/components/signature-pad";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -330,10 +329,6 @@ export function WaiverSigning({
 
                 {guestStep === 1 ? (
                   <section className="guest-section">
-                    <div className="guest-section-title">
-                      <strong>I tuoi dati</strong>
-                      <small>Servono per compilare il PDF automaticamente.</small>
-                    </div>
                     <div className="guest-field-grid">
                       <label>
                         Nome e cognome
@@ -372,73 +367,48 @@ export function WaiverSigning({
                     </div>
                   </section>
                 ) : (
-                  <>
-                    <section className="guest-section">
-                      <div className="guest-section-title">
-                        <strong>Scarico responsabilità</strong>
-                        <small>Dati personali, documenti e conferme.</small>
-                      </div>
-                      <WaiverFormSection
-                        birthDateIsValid={Boolean(birthDateIso)}
-                        compact
-                        helperText="Modulo e regolamento saranno allegati al PDF firmato."
-                        layout="checkout"
-                        regulationUrl={appPath(waiver.booking.regulationUrl)}
-                        showSignature={false}
-                        templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
-                        showErrors={submitAttempted}
-                        signerName={signerName}
-                        touched={touchedFields}
-                        value={waiverForm}
-                        onChange={setWaiverForm}
-                        onTouched={markTouched}
-                      />
-                    </section>
-
-                    <section className="guest-section checkout-submit-panel">
-                      <div className="guest-section-title">
-                        <strong>Firma</strong>
-                        <small>Ultimo passaggio.</small>
-                      </div>
-                      <SignaturePad
-                        showError={showFieldError("signatureImageDataUrl", !waiverForm.signatureImageDataUrl)}
-                        value={waiverForm.signatureImageDataUrl}
-                        onChange={(signatureImageDataUrl) => {
-                          setWaiverForm((current) => ({ ...current, signatureImageDataUrl }));
-                        }}
-                        onTouched={() => markTouched("signatureImageDataUrl")}
-                      />
-                      <small className="field-hint">
-                        Firmatario: {normalizedSignerName || "inserisci prima nome e cognome"}.
+                  <section className="guest-section checkout-submit-panel">
+                    <WaiverFormSection
+                      birthDateIsValid={Boolean(birthDateIso)}
+                      compact
+                      helperText="Modulo e regolamento saranno allegati al PDF firmato."
+                      layout="checkout"
+                      regulationUrl={appPath(waiver.booking.regulationUrl)}
+                      templateUrl={appPath("/legal/modulo-responsabilita-padel-template-v1.pdf")}
+                      showErrors={submitAttempted}
+                      signerName={normalizedSignerName}
+                      touched={touchedFields}
+                      value={waiverForm}
+                      onChange={setWaiverForm}
+                      onTouched={markTouched}
+                    />
+                    {submitAttempted || canSubmit ? (
+                      <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
+                        {missingCopy}
                       </small>
-                      {submitAttempted || canSubmit ? (
-                        <small className={`form-submit-hint ${canSubmit ? "success" : ""}`}>
-                          {missingCopy}
-                        </small>
-                      ) : null}
-                      <div className="checkout-step-actions split">
-                        <button
-                          className="ghost-button full-width"
-                          onClick={() => {
-                            setGuestStep(1);
-                            setNotice(null);
-                          }}
-                          type="button"
-                        >
-                          Indietro
-                        </button>
-                        <button
-                          className="primary-button full-width"
-                          disabled={isPending}
-                          onClick={submitSignature}
-                          type="button"
-                        >
-                          <Check size={18} />
-                          Firma accesso campo
-                        </button>
-                      </div>
-                    </section>
-                  </>
+                    ) : null}
+                    <div className="checkout-step-actions split">
+                      <button
+                        className="ghost-button full-width"
+                        onClick={() => {
+                          setGuestStep(1);
+                          setNotice(null);
+                        }}
+                        type="button"
+                      >
+                        Indietro
+                      </button>
+                      <button
+                        className="primary-button full-width"
+                        disabled={isPending}
+                        onClick={submitSignature}
+                        type="button"
+                      >
+                        <Check size={18} />
+                        Firma accesso campo
+                      </button>
+                    </div>
+                  </section>
                 )}
               </div>
             )}

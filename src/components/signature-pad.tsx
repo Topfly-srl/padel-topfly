@@ -147,10 +147,10 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
     <div className="signature-pad-field">
       <div className="signature-pad-head">
         <div>
-          <strong>Firma col dito</strong>
-          <small>Firma elettronica semplice acquisita tramite web app.</small>
+          <strong>Firma</strong>
+          <small>Disegna nel riquadro.</small>
         </div>
-        <button className="ghost-button compact" onClick={clearSignature} type="button">
+        <button aria-label="Cancella firma" className="ghost-button compact signature-clear-button" onClick={clearSignature} type="button">
           <RotateCcw size={15} />
           Cancella
         </button>
@@ -171,7 +171,7 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
         <small className="field-hint error">Disegna la firma nel riquadro per continuare.</small>
       ) : (
         <small className={`field-hint ${hasSignature ? "success" : ""}`}>
-          {hasSignature ? "Firma acquisita." : "Usa il mouse o il polpastrello nel riquadro."}
+          {hasSignature ? "Firma acquisita." : ""}
         </small>
       )}
     </div>

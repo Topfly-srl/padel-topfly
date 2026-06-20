@@ -351,12 +351,12 @@ button:disabled {
 .checkout-flow,
 .checkout-success-flow {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .checkout-section {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .checkout-section + .checkout-section,
@@ -411,7 +411,7 @@ button:disabled {
 .checkout-field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 9px;
+  gap: 10px;
 }
 
 .checkout-field-grid label:last-child {
@@ -428,12 +428,19 @@ button:disabled {
 }
 
 .checkout-waiver-box {
-  gap: 11px;
+  gap: 14px;
 }
 
 .checkout-waiver-group {
   display: grid;
-  gap: 7px;
+  gap: 8px;
+}
+
+.checkout-checklist-title {
+  color: var(--foreground);
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .checkout-documents {
@@ -450,27 +457,49 @@ button:disabled {
 .checkout-checklist {
   gap: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid #edf0f4;
   border-radius: 8px;
   background: #fff;
 }
 
 .checkout-checklist .check-row {
-  min-height: 38px;
+  grid-template-columns: 20px 1fr;
+  min-height: 34px;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #edf0f4;
   border-radius: 0;
   background: #fff;
-  padding: 7px 10px;
+  gap: 7px;
+  padding: 6px 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 450;
 }
 
 .checkout-checklist .check-row:last-child {
   border-bottom: 0;
 }
 
+.checkout-checklist .check-row input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.checkout-checklist .check-row strong {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
 .checkout-submit-panel {
   display: grid;
-  gap: 9px;
+  gap: 12px;
+}
+
+.checkout-flow > .checkout-submit-panel:first-child,
+.checkout-stepper + .guest-section.checkout-submit-panel {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .checkout-submit-panel .form-submit-hint {
@@ -1410,6 +1439,10 @@ summary:focus-visible {
   background: #fff;
 }
 
+.document-link.secondary:hover {
+  border-color: rgba(40, 98, 201, 0.38);
+}
+
 .waiver-checklist {
   display: grid;
   gap: 6px;
@@ -1466,7 +1499,7 @@ summary:focus-visible {
 
 .signature-pad-field {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .signature-pad-head {
@@ -1480,20 +1513,27 @@ summary:focus-visible {
   display: block;
   color: var(--foreground);
   font-size: 0.86rem;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .signature-pad-head small {
   display: block;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   line-height: 1.3;
+}
+
+.signature-clear-button {
+  min-height: 34px;
+  width: auto;
+  padding: 0 11px;
+  font-size: 0.8rem;
 }
 
 .signature-pad {
   display: block;
   width: 100%;
-  height: 148px;
+  height: 146px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -1510,6 +1550,7 @@ summary:focus-visible {
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.3;
+  min-height: 1em;
 }
 
 .field-hint.success {
@@ -2195,7 +2236,7 @@ summary:focus-visible {
   }
 
   .signature-pad {
-    height: 170px;
+    height: 158px;
   }
 
   .booking-wizard-backdrop {

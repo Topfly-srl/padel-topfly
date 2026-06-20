@@ -15,7 +15,8 @@ type RateLimitAction =
   | "admin:waiver-email-retry"
   | "waiver:cancel"
   | "waiver:read"
-  | "waiver:sign";
+  | "waiver:sign"
+  | "waiver:sign-email";
 
 const rateLimitPolicy: Record<RateLimitAction, { max: number; windowMs: number }> = {
   "booking:create": { max: 8, windowMs: 5 * 60_000 },
@@ -26,7 +27,10 @@ const rateLimitPolicy: Record<RateLimitAction, { max: number; windowMs: number }
   "waiver:cancel": { max: 20, windowMs: 15 * 60_000 },
   "waiver:read": { max: 60, windowMs: 60_000 },
   "waiver:sign": { max: 10, windowMs: 15 * 60_000 },
+  "waiver:sign-email": { max: 8, windowMs: 15 * 60_000 },
 };
+
+const emailScopedActions = new Set<RateLimitAction>(["booking:create-email", "waiver:sign-email"]);
 
 const memoryBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -57,7 +61,7 @@ export function clientIp(request: NextRequest) {
 function normalizedRateScope(request: NextRequest, action: RateLimitAction, scope?: string) {
   const cleanScope = scope?.trim().toLowerCase().slice(0, 200);
 
-  if (action === "booking:create-email") {
+  if (emailScopedActions.has(action)) {
     return `email:${cleanScope || "unknown"}`;
   }
 

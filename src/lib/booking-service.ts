@@ -1,5 +1,6 @@
 import type { Booking, Prisma, WaiverEmailStatus } from "@prisma/client";
 import { BookingStatus, Prisma as PrismaNamespace } from "@prisma/client";
+import { runAfterResponse } from "@/lib/after-response";
 import { AppError } from "@/lib/errors";
 import {
   bookingPolicy,
@@ -596,11 +597,17 @@ export async function createBooking(input: PublicBookingInput) {
     ),
   );
 
-  await sendWaiverSignatureEmail(result.organizerWaiverId);
+  // Email e sync Outlook (Microsoft Graph) sono gli step lenti: li eseguiamo dopo la risposta.
+  // La firma organizer e' gia' committata, quindi il refetch sotto riporta waiverSignedCount=1.
+  runAfterResponse(async () => {
+    await Promise.all([
+      sendWaiverSignatureEmail(result.organizerWaiverId),
+      syncBooking(result.booking, "create", manageToken, input.baseUrl, guestWaiverToken),
+    ]);
+  });
 
-  const synced = await syncBooking(result.booking, "create", manageToken, input.baseUrl, guestWaiverToken);
-  const refreshed = await getBookingWithWaivers(synced.id);
-  return serializeManagedBooking(refreshed ?? synced, manageToken, input.baseUrl, guestWaiverToken);
+  const refreshed = await getBookingWithWaivers(result.booking.id);
+  return serializeManagedBooking(refreshed ?? result.booking, manageToken, input.baseUrl, guestWaiverToken);
 }
 
 export async function updateBooking(
@@ -681,35 +688,38 @@ export async function updateBooking(
     ),
   );
 
-  const synced =
-    updated.status === "CONFIRMED"
-      ? await syncBooking(
-          updated,
-          "update",
-          access.manageToken ?? undefined,
-          access.baseUrl,
+  // Sync Outlook e notifiche ospiti (Microsoft Graph) sono gli step lenti: dopo la risposta.
+  runAfterResponse(async () => {
+    const synced =
+      updated.status === "CONFIRMED"
+        ? await syncBooking(
+            updated,
+            "update",
+            access.manageToken ?? undefined,
+            access.baseUrl,
+            nextGuestWaiverToken,
+          )
+        : await markOutlookDeleted(updated);
+
+    if (isCancellation && guestSignersToNotify.length > 0) {
+      await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
+    } else if (requiresFreshWaivers && guestSignersToNotify.length > 0) {
+      await notifyGuestSignersOfUpdate({
+        previousBooking: booking,
+        booking: synced,
+        guests: guestSignersToNotify,
+        guestWaiverUrl: buildGuestWaiverUrl(
+          access.baseUrl ?? appConfig.publicOrigin,
+          synced.id,
           nextGuestWaiverToken,
-        )
-      : await markOutlookDeleted(updated);
+        ),
+      });
+    }
+  });
 
-  if (isCancellation && guestSignersToNotify.length > 0) {
-    await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
-  } else if (requiresFreshWaivers && guestSignersToNotify.length > 0) {
-    await notifyGuestSignersOfUpdate({
-      previousBooking: booking,
-      booking: synced,
-      guests: guestSignersToNotify,
-      guestWaiverUrl: buildGuestWaiverUrl(
-        access.baseUrl ?? appConfig.publicOrigin,
-        synced.id,
-        nextGuestWaiverToken,
-      ),
-    });
-  }
-
-  const refreshed = await getBookingWithWaivers(synced.id);
+  const refreshed = await getBookingWithWaivers(updated.id);
   return serializeManagedBooking(
-    refreshed ?? synced,
+    refreshed ?? updated,
     access.manageToken ?? undefined,
     access.baseUrl,
     nextGuestWaiverToken,
@@ -730,40 +740,47 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
   const actor = assertBookingAccess(booking, access);
 
   if (booking.status === "CANCELED") {
-    const synced = shouldRetryOutlookDelete(booking)
-      ? await markOutlookDeleted(booking)
-      : booking;
+    if (shouldRetryOutlookDelete(booking)) {
+      runAfterResponse(() => markOutlookDeleted(booking));
+    }
 
-    const refreshed = await getBookingWithWaivers(synced.id);
-    return serializeManagedBooking(refreshed ?? synced, access.manageToken ?? undefined, access.baseUrl);
+    const refreshed = await getBookingWithWaivers(booking.id);
+    return serializeManagedBooking(refreshed ?? booking, access.manageToken ?? undefined, access.baseUrl);
   }
 
   const guestSignersToNotify = await activeGuestSignersForBooking(booking);
 
-  const canceled = await prisma.$transaction(async (tx) => {
-    const saved = await tx.booking.update({
-      where: { id: booking.id },
-      data: { status: "CANCELED" },
-    });
+  const canceled = await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const saved = await tx.booking.update({
+          where: { id: booking.id },
+          data: { status: "CANCELED" },
+        });
 
-    await audit(tx, actor, {
-      action: "BOOKING_CANCELED",
-      entityType: "Booking",
-      entityId: booking.id,
-      before: booking,
-      after: saved,
-    });
+        await audit(tx, actor, {
+          action: "BOOKING_CANCELED",
+          entityType: "Booking",
+          entityId: booking.id,
+          before: booking,
+          after: saved,
+        });
 
-    return saved;
+        return saved;
+      },
+      { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
+    ),
+  );
+
+  runAfterResponse(async () => {
+    const synced = await markOutlookDeleted(canceled);
+    if (guestSignersToNotify.length > 0) {
+      await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
+    }
   });
 
-  const synced = await markOutlookDeleted(canceled);
-  if (guestSignersToNotify.length > 0) {
-    await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
-  }
-
-  const refreshed = await getBookingWithWaivers(synced.id);
-  return serializeManagedBooking(refreshed ?? synced, access.manageToken ?? undefined, access.baseUrl);
+  const refreshed = await getBookingWithWaivers(canceled.id);
+  return serializeManagedBooking(refreshed ?? canceled, access.manageToken ?? undefined, access.baseUrl);
 }
 
 export async function createAdminBlock(

@@ -109,9 +109,6 @@ export function WaiverFormSection({
     return (
       <div className="waiver-box checkout-waiver-box">
         <div className="checkout-waiver-group">
-          <div className="checkout-mini-title">
-            <strong>Dati personali</strong>
-          </div>
           <div className="selector-row compact">
             <label>
               Data di nascita
@@ -144,9 +141,6 @@ export function WaiverFormSection({
         </div>
 
         <div className="checkout-waiver-group">
-          <div className="checkout-mini-title">
-            <strong>Documenti</strong>
-          </div>
           <div className="document-stack checkout-documents" aria-label="Documenti ufficiali">
             {templateUrl ? (
               <a className="document-link" href={templateUrl} rel="noreferrer" target="_blank">
@@ -162,9 +156,7 @@ export function WaiverFormSection({
         </div>
 
         <div className="checkout-waiver-group">
-          <div className="checkout-mini-title">
-            <strong>Conferme</strong>
-          </div>
+          <strong className="checkout-checklist-title">Conferme</strong>
           <div className="waiver-checklist checkout-checklist" aria-label="Consensi obbligatori">
             {consentRows.map((row) => (
               <label className="check-row" key={row.field}>
