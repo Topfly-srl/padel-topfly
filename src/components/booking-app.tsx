@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { signOut } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
@@ -78,6 +78,12 @@ type AdminWaiverItem = {
   bookingStart: string;
   bookingEnd: string;
   playerCount: number;
+};
+
+type TimelineRange<T> = {
+  item: T;
+  startMs: number;
+  endMs: number;
 };
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
@@ -176,19 +182,21 @@ function dateTimeFromParts(day: string, time: string) {
   return new Date(`${day}T${time}:00`);
 }
 
-function rangeOverlaps(start: Date, end: Date, itemStart: string, itemEnd: string) {
-  const rightStart = new Date(itemStart);
-  const rightEnd = new Date(itemEnd);
-  return start < rightEnd && end > rightStart;
-}
-
 function rangeMatches(start: Date, end: Date, itemStart: string, itemEnd: string) {
   return start.getTime() === new Date(itemStart).getTime() && end.getTime() === new Date(itemEnd).getTime();
+}
+
+function rangeOverlapsMs(startMs: number, endMs: number, itemStartMs: number, itemEndMs: number) {
+  return startMs < itemEndMs && endMs > itemStartMs;
 }
 
 async function readApiError(response: Response) {
   const json = (await response.json().catch(() => null)) as { error?: string } | null;
   return json?.error ?? "Richiesta non riuscita.";
+}
+
+function errorText(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function syncLabel(status: string, bookingStatus?: string) {
@@ -312,10 +320,12 @@ function writeStoredGuestWaiverLinks(links: GuestWaiverLinks) {
 
 export function BookingApp({
   adminMode = false,
+  initialAvailability = null,
   initialState = fallbackInitialState,
   initialUser,
 }: {
   adminMode?: boolean;
+  initialAvailability?: AvailabilityResponse | null;
   initialState?: BookingInitialState;
   initialUser?: CurrentUser;
 }) {
@@ -323,7 +333,7 @@ export function BookingApp({
   const [selectedDate, setSelectedDate] = useState(initialState.date);
   const [selectedTime, setSelectedTime] = useState(initialState.time);
   const [duration, setDuration] = useState(60);
-  const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
+  const [availability, setAvailability] = useState<AvailabilityResponse | null>(initialAvailability);
   const [myBookings, setMyBookings] = useState<MyBooking[]>([]);
   const [audit, setAudit] = useState<AuditItem[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -349,7 +359,10 @@ export function BookingApp({
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("10:00");
   const [blockReason, setBlockReason] = useState("Manutenzione");
-  const [isPending, startTransition] = useTransition();
+  const [isAvailabilityLoading, setIsAvailabilityLoading] = useState(!initialAvailability);
+  const [isMyBookingsLoading, setIsMyBookingsLoading] = useState(false);
+  const [isAuditLoading, setIsAuditLoading] = useState(false);
+  const [isAdminWaiversLoading, setIsAdminWaiversLoading] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
   const dates = useMemo(
@@ -359,15 +372,18 @@ export function BookingApp({
   );
 
   const options = useMemo(() => timeOptions(), []);
-  const durationOptions = availability?.settings.durationOptions ?? bookingDurationOptions;
+  const currentAvailability = availability?.date === selectedDate ? availability : null;
+  const isAvailabilityBusy = isAvailabilityLoading || availability?.date !== selectedDate;
+  const isAdminLoading = isAuditLoading || isAdminWaiversLoading;
+  const durationOptions = currentAvailability?.settings.durationOptions ?? bookingDurationOptions;
   const start = useMemo(
     () => dateTimeFromParts(selectedDate, selectedTime),
     [selectedDate, selectedTime],
   );
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
 
-  const dayBookings = useMemo(() => availability?.bookings ?? [], [availability?.bookings]);
-  const dayBlocks = useMemo(() => availability?.blocks ?? [], [availability?.blocks]);
+  const dayBookings = useMemo(() => currentAvailability?.bookings ?? [], [currentAvailability?.bookings]);
+  const dayBlocks = useMemo(() => currentAvailability?.blocks ?? [], [currentAvailability?.blocks]);
   const activeMyBookings = useMemo(
     () => myBookings.filter((booking) => booking.status === "CONFIRMED"),
     [myBookings],
@@ -376,7 +392,7 @@ export function BookingApp({
     () => activeMyBookings.length,
     [activeMyBookings],
   );
-  const allowedDomain = availability?.settings.allowedDomain ?? "azienda.it";
+  const allowedDomain = currentAvailability?.settings.allowedDomain ?? "azienda.it";
   const normalizedOrganizerEmail = normalizeEmailInput(organizerEmail);
   const isExternalEmail = isExternalEmailForDomain(normalizedOrganizerEmail, allowedDomain);
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
@@ -399,6 +415,50 @@ export function BookingApp({
     isValidEmail(normalizedOrganizerEmail) &&
     playerCount >= 2 &&
     playerCount <= 4;
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  const bookingRanges = useMemo<Array<TimelineRange<AvailabilityBooking>>>(
+    () =>
+      dayBookings.map((booking) => ({
+        item: booking,
+        startMs: new Date(booking.start).getTime(),
+        endMs: new Date(booking.end).getTime(),
+      })),
+    [dayBookings],
+  );
+  const blockRanges = useMemo<Array<TimelineRange<AvailabilityBlock>>>(
+    () =>
+      dayBlocks.map((block) => ({
+        item: block,
+        startMs: new Date(block.start).getTime(),
+        endMs: new Date(block.end).getTime(),
+      })),
+    [dayBlocks],
+  );
+  const timelineSlots = useMemo(
+    () =>
+      options.map((option) => {
+        const slotStart = dateTimeFromParts(selectedDate, option);
+        const slotStartMs = slotStart.getTime();
+        const slotEndMs = slotStartMs + 15 * 60_000;
+        const booking = bookingRanges.find((range) =>
+          rangeOverlapsMs(slotStartMs, slotEndMs, range.startMs, range.endMs),
+        )?.item;
+        const block = blockRanges.find((range) =>
+          rangeOverlapsMs(slotStartMs, slotEndMs, range.startMs, range.endMs),
+        )?.item;
+        const isSelected = rangeOverlapsMs(slotStartMs, slotEndMs, startMs, endMs);
+
+        return {
+          option,
+          booking,
+          block,
+          isSelected,
+          isSelectedStart: option === selectedTime,
+        };
+      }),
+    [blockRanges, bookingRanges, endMs, options, selectedDate, selectedTime, startMs],
+  );
 
   const selectedOwnBooking = useMemo(
     () =>
@@ -448,20 +508,25 @@ export function BookingApp({
   ]);
 
   const selectionConflict = useMemo(() => {
-    const booking = dayBookings.find(
-      (item) => item.id !== ignoredBookingId && rangeOverlaps(start, end, item.start, item.end),
-    );
+    const booking = bookingRanges.find(
+      (range) =>
+        range.item.id !== ignoredBookingId &&
+        rangeOverlapsMs(startMs, endMs, range.startMs, range.endMs),
+    )?.item;
     if (booking) return `Occupato da ${booking.organizerName}`;
 
-    const block = dayBlocks.find((item) => rangeOverlaps(start, end, item.start, item.end));
+    const block = blockRanges.find((range) =>
+      rangeOverlapsMs(startMs, endMs, range.startMs, range.endMs),
+    )?.item;
     if (block) return `Bloccato: ${block.reason}`;
 
     return null;
-  }, [dayBlocks, dayBookings, end, ignoredBookingId, start]);
+  }, [blockRanges, bookingRanges, endMs, ignoredBookingId, startMs]);
 
-  const loadAvailability = useCallback(async () => {
-    const response = await fetch(appPath(`/api/availability?date=${selectedDate}`), {
+  const loadAvailability = useCallback(async (date: string, signal?: AbortSignal) => {
+    const response = await fetch(appPath(`/api/availability?date=${date}`), {
       cache: "no-store",
+      signal,
     });
 
     if (!response.ok) {
@@ -469,19 +534,21 @@ export function BookingApp({
     }
 
     setAvailability((await response.json()) as AvailabilityResponse);
-  }, [selectedDate]);
+  }, []);
 
-  const loadAudit = useCallback(async () => {
+  const loadAudit = useCallback(async (signal?: AbortSignal) => {
     if (!isAdmin) return;
 
-    const response = await fetch(appPath("/api/admin/audit"), { cache: "no-store" });
-    if (response.ok) {
-      const json = (await response.json()) as { audit: AuditItem[] };
-      setAudit(json.audit);
+    const response = await fetch(appPath("/api/admin/audit"), { cache: "no-store", signal });
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
     }
+
+    const json = (await response.json()) as { audit: AuditItem[] };
+    setAudit(json.audit);
   }, [isAdmin]);
 
-  const loadAdminWaivers = useCallback(async (cursor?: string) => {
+  const loadAdminWaivers = useCallback(async (cursor?: string, signal?: AbortSignal) => {
     if (!isAdmin) return;
 
     const params = new URLSearchParams({ limit: String(adminWaiverPageSize) });
@@ -498,15 +565,17 @@ export function BookingApp({
       params.set("cursor", cursor);
     }
 
-    const response = await fetch(appPath(`/api/admin/waivers?${params.toString()}`), { cache: "no-store" });
-    if (response.ok) {
-      const json = (await response.json()) as { waivers: AdminWaiverItem[]; nextCursor: string | null };
-      setAdminWaivers((current) => (cursor ? [...current, ...json.waivers] : json.waivers));
-      setAdminWaiverNextCursor(json.nextCursor);
+    const response = await fetch(appPath(`/api/admin/waivers?${params.toString()}`), { cache: "no-store", signal });
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
     }
+
+    const json = (await response.json()) as { waivers: AdminWaiverItem[]; nextCursor: string | null };
+    setAdminWaivers((current) => (cursor ? [...current, ...json.waivers] : json.waivers));
+    setAdminWaiverNextCursor(json.nextCursor);
   }, [adminWaiverQuery, adminWaiverRoleFilter, adminWaiverStatusFilter, isAdmin]);
 
-  const loadMyBookings = useCallback(async (tokens: string[]) => {
+  const loadMyBookings = useCallback(async (tokens: string[], signal?: AbortSignal) => {
     if (!tokens.length) {
       setMyBookings([]);
       return;
@@ -516,12 +585,15 @@ export function BookingApp({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tokens }),
+      signal,
     });
 
-    if (response.ok) {
-      const json = (await response.json()) as { bookings: MyBooking[] };
-      setMyBookings(json.bookings);
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
     }
+
+    const json = (await response.json()) as { bookings: MyBooking[] };
+    setMyBookings(json.bookings);
   }, []);
 
   useEffect(() => {
@@ -535,27 +607,108 @@ export function BookingApp({
   }, []);
 
   useEffect(() => {
-    startTransition(async () => {
-      try {
-        await loadAvailability();
-        await loadAudit();
-        await loadAdminWaivers();
-      } catch (error) {
-        setNotice({
-          type: "error",
-          text: error instanceof Error ? error.message : "Impossibile caricare il calendario.",
+    if (availability?.date === selectedDate) return;
+
+    const controller = new AbortController();
+
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+
+      loadAvailability(selectedDate, controller.signal)
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setNotice({
+            type: "error",
+            text: errorText(error, "Impossibile caricare il calendario."),
+          });
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setIsAvailabilityLoading(false);
+          }
         });
-      }
     });
-  }, [loadAdminWaivers, loadAudit, loadAvailability]);
+
+    return () => controller.abort();
+  }, [availability?.date, loadAvailability, selectedDate]);
 
   useEffect(() => {
     if (!storageReady) return;
 
-    startTransition(async () => {
-      await loadMyBookings(localTokens);
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+
+      setIsMyBookingsLoading(true);
+      loadMyBookings(localTokens, controller.signal)
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setNotice({
+            type: "warning",
+            text: errorText(error, "Impossibile caricare le tue prenotazioni."),
+          });
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setIsMyBookingsLoading(false);
+          }
+        });
     });
+
+    return () => controller.abort();
   }, [loadMyBookings, localTokens, storageReady]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+
+      setIsAuditLoading(true);
+      loadAudit(controller.signal)
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setNotice({
+            type: "warning",
+            text: errorText(error, "Impossibile caricare il registro admin."),
+          });
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setIsAuditLoading(false);
+          }
+        });
+    });
+
+    return () => controller.abort();
+  }, [isAdmin, loadAudit]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+
+      setIsAdminWaiversLoading(true);
+      loadAdminWaivers(undefined, controller.signal)
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setNotice({
+            type: "warning",
+            text: errorText(error, "Impossibile caricare gli scarichi responsabilita."),
+          });
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setIsAdminWaiversLoading(false);
+          }
+        });
+    });
+
+    return () => controller.abort();
+  }, [isAdmin, loadAdminWaivers]);
 
   useEffect(() => {
     const timeline = timelineRef.current;
@@ -567,13 +720,88 @@ export function BookingApp({
       0,
       selected.offsetTop - timeline.offsetTop - timeline.clientHeight / 2 + selected.clientHeight / 2,
     );
-  }, [availability?.blocks, availability?.bookings, duration, selectedDate, selectedTime]);
+  }, [timelineSlots]);
 
   async function refresh(tokens = localTokens) {
-    await loadAvailability();
-    await loadAudit();
-    await loadAdminWaivers();
-    await loadMyBookings(tokens);
+    const refreshTasks = [
+      (async () => {
+        setIsAvailabilityLoading(true);
+        try {
+          await loadAvailability(selectedDate);
+        } finally {
+          setIsAvailabilityLoading(false);
+        }
+      })(),
+      (async () => {
+        setIsMyBookingsLoading(true);
+        try {
+          await loadMyBookings(tokens);
+        } finally {
+          setIsMyBookingsLoading(false);
+        }
+      })(),
+    ];
+
+    if (isAdmin) {
+      refreshTasks.push(
+        (async () => {
+          setIsAuditLoading(true);
+          try {
+            await loadAudit();
+          } finally {
+            setIsAuditLoading(false);
+          }
+        })(),
+        (async () => {
+          setIsAdminWaiversLoading(true);
+          try {
+            await loadAdminWaivers();
+          } finally {
+            setIsAdminWaiversLoading(false);
+          }
+        })(),
+      );
+    }
+
+    const results = await Promise.allSettled(refreshTasks);
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+
+    if (failed) {
+      setNotice({
+        type: "warning",
+        text: errorText(failed.reason, "Aggiornamento incompleto. Riprova tra poco."),
+      });
+    }
+  }
+
+  async function loadMoreAdminWaivers() {
+    if (!adminWaiverNextCursor) return;
+
+    setIsAdminWaiversLoading(true);
+    try {
+      await loadAdminWaivers(adminWaiverNextCursor);
+    } catch (error) {
+      setNotice({
+        type: "warning",
+        text: errorText(error, "Impossibile caricare altri scarichi responsabilita."),
+      });
+    } finally {
+      setIsAdminWaiversLoading(false);
+    }
+  }
+
+  async function refreshAdminWaivers() {
+    setIsAdminWaiversLoading(true);
+    try {
+      await loadAdminWaivers();
+    } catch (error) {
+      setNotice({
+        type: "warning",
+        text: errorText(error, "Impossibile aggiornare gli scarichi responsabilita."),
+      });
+    } finally {
+      setIsAdminWaiversLoading(false);
+    }
   }
 
   function rememberToken(token: string) {
@@ -827,11 +1055,11 @@ export function BookingApp({
     }
 
     setNotice({ type: "success", text: "Invio PDF ritentato." });
-    await refresh();
+    await refreshAdminWaivers();
   }
 
-  const canSave = !selectionConflict && !isPending && !isConfirmedSelection && isBookingFormValid;
-  const canPressPrimary = !selectionConflict && !isPending && !isConfirmedSelection;
+  const canSave = !selectionConflict && !isAvailabilityBusy && !isConfirmedSelection && isBookingFormValid;
+  const canPressPrimary = !selectionConflict && !isAvailabilityBusy && !isConfirmedSelection;
   const showFieldError = (field: FormField, invalid: boolean) =>
     invalid && (bookingSubmitAttempted || Boolean(touchedFields[field]));
   const markTouched = (field: FormField) => {
@@ -931,7 +1159,7 @@ export function BookingApp({
                 <Clock3 size={18} />
                 Scegli orario
               </span>
-              {isPending ? <span className="loading-pill">Aggiorno</span> : null}
+              {isAvailabilityBusy ? <span className="loading-pill">Aggiorno</span> : null}
             </div>
 
             <div className="booking-controls">
@@ -960,18 +1188,7 @@ export function BookingApp({
             </div>
 
             <div className="timeline" role="group" aria-label="Disponibilita del giorno" ref={timelineRef}>
-              {options.map((option) => {
-                const slotStart = dateTimeFromParts(selectedDate, option);
-                const slotEnd = addMinutes(slotStart, 15);
-                const booking = dayBookings.find((item) =>
-                  rangeOverlaps(slotStart, slotEnd, item.start, item.end),
-                );
-                const block = dayBlocks.find((item) =>
-                  rangeOverlaps(slotStart, slotEnd, item.start, item.end),
-                );
-                const isSelected = rangeOverlaps(slotStart, slotEnd, start.toISOString(), end.toISOString());
-                const isSelectedStart = option === selectedTime;
-
+              {timelineSlots.map(({ option, booking, block, isSelected, isSelectedStart }) => {
                 return (
                   <button
                     className={`time-slot ${booking ? "busy" : ""} ${block ? "blocked" : ""} ${
@@ -1123,7 +1340,11 @@ export function BookingApp({
           <section className="panel">
             <div className="section-title spread">
               <span>Le mie prenotazioni</span>
-              <span className="count-pill">{activeMyBookingCount}</span>
+              {isMyBookingsLoading ? (
+                <span className="loading-pill">Aggiorno</span>
+              ) : (
+                <span className="count-pill">{activeMyBookingCount}</span>
+              )}
             </div>
             <div className="booking-list">
               {activeMyBookings.length ? (
@@ -1197,6 +1418,7 @@ export function BookingApp({
               <div className="section-title">
                 <Shield size={18} />
                 <span>Admin</span>
+                {isAdminLoading ? <span className="loading-pill">Aggiorno</span> : null}
               </div>
 
               <details>
@@ -1301,7 +1523,9 @@ export function BookingApp({
               </details>
 
               <details>
-                <summary>Scarichi responsabilita</summary>
+                <summary>
+                  Scarichi responsabilita {isAdminWaiversLoading ? <span className="loading-pill">Aggiorno</span> : null}
+                </summary>
                 <div className="admin-filter-row">
                   <label>
                     Stato email PDF
@@ -1339,7 +1563,11 @@ export function BookingApp({
                       placeholder="Nome o email"
                     />
                   </label>
-                  <span className="count-pill">{adminWaivers.length}</span>
+                  {isAdminWaiversLoading ? (
+                    <span className="loading-pill">Aggiorno</span>
+                  ) : (
+                    <span className="count-pill">{adminWaivers.length}</span>
+                  )}
                 </div>
                 <div className="booking-list">
                   {adminWaivers.length ? (
@@ -1395,7 +1623,8 @@ export function BookingApp({
                       {adminWaiverNextCursor ? (
                         <button
                           className="ghost-button full-width"
-                          onClick={() => loadAdminWaivers(adminWaiverNextCursor)}
+                          disabled={isAdminWaiversLoading}
+                          onClick={loadMoreAdminWaivers}
                           type="button"
                         >
                           Mostra altri
@@ -1409,7 +1638,7 @@ export function BookingApp({
               </details>
 
               <details>
-                <summary>Storico recente</summary>
+                <summary>Storico recente {isAuditLoading ? <span className="loading-pill">Aggiorno</span> : null}</summary>
                 <div className="audit-list">
                   {audit.map((item) => (
                     <div className="audit-row" key={item.id}>
