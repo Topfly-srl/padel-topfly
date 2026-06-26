@@ -84,11 +84,23 @@ jobs:
           sudo docker compose -f docker-compose.production.yml stop app || true
           sudo docker compose -f docker-compose.production.yml build app
 
-          sudo docker compose -f docker-compose.production.yml run --rm --no-deps app \
-            npx prisma migrate resolve --rolled-back 20260626090000_pending_signature_bookings
+          unresolved_failed_migration_count="$(
+            sudo docker compose -f docker-compose.production.yml exec -T postgres \
+              psql -U padel -d padel_topfly -Atc \
+              "SELECT count(*) FROM _prisma_migrations WHERE migration_name = '20260626090000_pending_signature_bookings' AND finished_at IS NULL AND rolled_back_at IS NULL;"
+          )"
 
-          sudo docker compose -f docker-compose.production.yml run --rm --no-deps app \
-            npx prisma migrate deploy
+          if [ "${unresolved_failed_migration_count}" != "0" ]; then
+            sudo docker compose -f docker-compose.production.yml run -T --rm --no-deps app \
+              npx prisma migrate resolve --rolled-back 20260626090000_pending_signature_bookings \
+              < /dev/null
+          else
+            echo "No unresolved failed pending-signature migration found; continuing."
+          fi
+
+          sudo docker compose -f docker-compose.production.yml run -T --rm --no-deps app \
+            npx prisma migrate deploy \
+            < /dev/null
 
           sudo docker compose -f docker-compose.production.yml up -d --no-deps app
           sudo docker compose -f docker-compose.production.yml restart caddy
