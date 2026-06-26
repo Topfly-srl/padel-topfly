@@ -2,6 +2,12 @@ name: Recover Pending Signature Migration
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_build:
+        description: "Skip app image build and use the image already present on the server"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,6 +59,7 @@ jobs:
         env:
           LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
           LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+          RECOVERY_SKIP_BUILD: ${{ inputs.skip_build }}
         run: |
           set -euo pipefail
 
@@ -81,13 +88,18 @@ jobs:
           git pull --ff-only origin main
           echo "Remote commit: $(git rev-parse --short HEAD)"
 
-          sudo docker compose -f docker-compose.production.yml stop app || true
-          sudo docker compose -f docker-compose.production.yml build app
+          sudo docker compose -f docker-compose.production.yml stop app < /dev/null || true
+          if [ "${RECOVERY_SKIP_BUILD}" = "true" ]; then
+            echo "Skipping app image build; using the image already present on the server."
+          else
+            sudo docker compose -f docker-compose.production.yml build app < /dev/null
+          fi
 
           unresolved_failed_migration_count="$(
             sudo docker compose -f docker-compose.production.yml exec -T postgres \
               psql -U padel -d padel_topfly -Atc \
-              "SELECT count(*) FROM _prisma_migrations WHERE migration_name = '20260626090000_pending_signature_bookings' AND finished_at IS NULL AND rolled_back_at IS NULL;"
+              "SELECT count(*) FROM _prisma_migrations WHERE migration_name = '20260626090000_pending_signature_bookings' AND finished_at IS NULL AND rolled_back_at IS NULL;" \
+              < /dev/null
           )"
 
           if [ "${unresolved_failed_migration_count}" != "0" ]; then
@@ -102,8 +114,8 @@ jobs:
             npx prisma migrate deploy \
             < /dev/null
 
-          sudo docker compose -f docker-compose.production.yml up -d --no-deps app
-          sudo docker compose -f docker-compose.production.yml restart caddy
+          sudo docker compose -f docker-compose.production.yml up -d --no-deps app < /dev/null
+          sudo docker compose -f docker-compose.production.yml restart caddy < /dev/null
 
           for attempt in $(seq 1 24); do
             if curl --fail --silent --show-error \
