@@ -1,0 +1,115 @@
+name: Recover Pending Signature Migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  recover:
+    name: Resolve failed migration and restart app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Validate configuration
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in LIGHTSAIL_HOST LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: ${name}"
+              missing=1
+            fi
+          done
+
+          exit "${missing}"
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${LIGHTSAIL_SSH_PRIVATE_KEY}" > ~/.ssh/lightsail_deploy_key
+          printf '%s\n' "${LIGHTSAIL_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/lightsail_deploy_key ~/.ssh/known_hosts
+
+      - name: Resolve and deploy
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/padel-topfly
+          echo "Remote host: $(hostname)"
+
+          BACKUP_DIR="/var/backups/padel-topfly"
+          sudo install -d -m 750 -o "$(whoami)" -g "$(id -gn)" "${BACKUP_DIR}"
+
+          if sudo docker compose -f docker-compose.production.yml ps --services --filter "status=running" | grep -qx postgres; then
+            sudo docker compose -f docker-compose.production.yml exec -T postgres \
+              pg_dump -U padel -d padel_topfly \
+              > "${BACKUP_DIR}/padel_topfly_recover_pending_signatures_$(date +%Y%m%d-%H%M%S).sql" < /dev/null
+          else
+            echo "::error::Postgres is not running; aborting recovery."
+            exit 1
+          fi
+
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          echo "Remote commit: $(git rev-parse --short HEAD)"
+
+          sudo docker compose -f docker-compose.production.yml stop app || true
+          sudo docker compose -f docker-compose.production.yml build app
+
+          sudo docker compose -f docker-compose.production.yml run --rm --no-deps app \
+            npx prisma migrate resolve --rolled-back 20260626090000_pending_signature_bookings
+
+          sudo docker compose -f docker-compose.production.yml run --rm --no-deps app \
+            npx prisma migrate deploy
+
+          sudo docker compose -f docker-compose.production.yml up -d --no-deps app
+          sudo docker compose -f docker-compose.production.yml restart caddy
+
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error \
+              --resolve padel.topflysolutions.com:443:127.0.0.1 \
+              https://padel.topflysolutions.com > /dev/null; then
+              echo "Production health check passed on attempt ${attempt}."
+              break
+            fi
+
+            if [ "${attempt}" = "24" ]; then
+              echo "::error::Production health check failed after recovery."
+              sudo docker compose -f docker-compose.production.yml ps
+              sudo docker compose -f docker-compose.production.yml logs app --tail=160
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          sudo docker compose -f docker-compose.production.yml ps
+          REMOTE
