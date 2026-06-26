@@ -356,17 +356,22 @@ describe("Microsoft Graph sync", () => {
       signedAt: now,
       pdfBytes: new Uint8Array([37, 80, 68, 70]),
       filename: "scarico.pdf",
+      signerCopyEmail: "mario@topfly.it",
     });
 
-    const sendMailCall = calls.find((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
+    const sendMailCalls = calls.filter((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
     expect(result).toEqual({ status: "SENT" });
-    expect(sendMailCall).toBeDefined();
+    expect(sendMailCalls).toHaveLength(2);
 
-    const payload = JSON.parse(sendMailCall!.body!);
+    const payload = JSON.parse(sendMailCalls[0].body!);
     expect(payload.message.toRecipients[0].emailAddress.address).toBe("padel@topflysolutions.com");
     expect(payload.message.attachments[0].name).toBe("scarico.pdf");
     expect(payload.message.attachments[0].contentType).toBe("application/pdf");
     expect(payload.message.attachments[0].contentBytes).toBe("JVBERg==");
+
+    const signerPayload = JSON.parse(sendMailCalls[1].body!);
+    expect(signerPayload.message.toRecipients[0].emailAddress.address).toBe("mario@topfly.it");
+    expect(signerPayload.message.attachments[0].name).toBe("scarico.pdf");
   });
 
   it("invia conferma ospite con allegato calendario e link rinuncia", async () => {
@@ -422,6 +427,8 @@ describe("Microsoft Graph sync", () => {
       signerEmail: "laura@example.com",
       signedAt: now,
       cancelUrl: "https://padel.topflysolutions.com/waiver/cancel/waiver_1?token=abc",
+      pdfBytes: new Uint8Array([37, 80, 68, 70]),
+      filename: "scarico-laura.pdf",
     });
 
     const sendMailCall = calls.find((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
@@ -433,8 +440,13 @@ describe("Microsoft Graph sync", () => {
     expect(payload.message.toRecipients[0].emailAddress.address).toBe("laura@example.com");
     expect(payload.message.body.content).toContain("Rinuncia al posto");
     expect(payload.message.body.content).toContain("/waiver/cancel/waiver_1");
+    expect(payload.message.body.content).toContain("PDF firmato");
+    expect(payload.message.body.content).not.toContain("sara' confermata solo quando");
     expect(payload.message.attachments[0].name).toBe("padel-topfly.ics");
     expect(payload.message.attachments[0].contentType).toBe("text/calendar");
+    expect(payload.message.attachments[1].name).toBe("scarico-laura.pdf");
+    expect(payload.message.attachments[1].contentType).toBe("application/pdf");
+    expect(payload.message.attachments[1].contentBytes).toBe("JVBERg==");
   });
 
   it("invia al referente la mail di prenotazione provvisoria con link firma ospiti", async () => {

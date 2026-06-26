@@ -13,7 +13,7 @@ const updateBookingSchema = z.object({
   start: z.string().optional(),
   end: z.string().optional(),
   status: z.enum(["PENDING_SIGNATURES", "CONFIRMED", "CANCELED"]).optional(),
-  playerCount: z.number().int().min(2).max(4).optional(),
+  playerCount: z.number().int().min(1).max(4).optional(),
   manageToken: manageTokenSchema.optional(),
 });
 

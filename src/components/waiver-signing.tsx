@@ -296,11 +296,8 @@ export function WaiverSigning({
 
             {hasSigned ? (
               <div className="guest-success-card">
-                <strong>Firma registrata.</strong>
-                <p>
-                  Il PDF firmato e&apos; stato inviato alla Direzione. La prenotazione sara&apos; confermata
-                  quando tutte le firme richieste saranno raccolte.
-                </p>
+                <strong>Firma registrata, il PDF firmato e&apos; stato inviato alla Direzione.</strong>
+                <p>Se non puoi essere presente, puoi rinunciare dal link presente nella mail che hai ricevuto.</p>
               </div>
             ) : waiver.booking.remainingSignatures <= 0 ? (
               <div className="notice success">

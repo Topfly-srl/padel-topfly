@@ -51,9 +51,11 @@ import {
 } from "@/lib/waiver-service";
 import {
   cancelOutlookEventForPendingBooking,
+  markBookingConfirmedIfComplete,
   processSignatureDeadlines,
   sendPendingSignatureNotice,
   signatureDeadlineAt,
+  syncConfirmedBooking,
 } from "@/lib/signature-workflow";
 import type {
   AuditItem,
@@ -565,8 +567,8 @@ export async function createBooking(input: PublicBookingInput) {
   const manageToken = createManageToken();
   const manageTokenHash = hashManageToken(manageToken);
   const tokenExpiresAt = manageTokenExpiresAt(input.end);
-  const guestWaiverToken = createGuestWaiverToken();
-  const guestWaiverData = guestWaiverTokenData(guestWaiverToken, input.end);
+  const guestWaiverToken = identity.playerCount > 1 ? createGuestWaiverToken() : undefined;
+  const guestWaiverData = guestWaiverToken ? guestWaiverTokenData(guestWaiverToken, input.end) : {};
   const createdAt = new Date();
   const deadlineAt = signatureDeadlineAt(input.start, createdAt);
 
@@ -624,23 +626,38 @@ export async function createBooking(input: PublicBookingInput) {
           },
         });
 
-        return { booking: created, organizerWaiverId: organizerWaiver.id };
+        const confirmation = await markBookingConfirmedIfComplete(tx, created, organizerWaiver.signerEmail);
+
+        return {
+          booking: confirmation.confirmed ? confirmation.booking : created,
+          organizerWaiverId: organizerWaiver.id,
+          confirmedBooking: confirmation.confirmed ? confirmation.booking : null,
+        };
       },
       { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
     ),
   );
 
   // Email e Microsoft Graph sono step lenti: li eseguiamo dopo la risposta.
-  // La prenotazione resta provvisoria finche' tutte le firme non sono raccolte.
   runAfterResponse(async () => {
     await sendWaiverSignatureEmail(result.organizerWaiverId);
+
+    if (result.confirmedBooking) {
+      await syncConfirmedBooking({
+        booking: result.confirmedBooking,
+        baseUrl: input.baseUrl,
+        guestWaiverToken,
+      });
+    }
   });
-  sendPendingSignatureNotice({
-    booking: result.booking,
-    manageUrl: buildManageUrl(input.baseUrl, result.booking.id, manageToken),
-    guestWaiverUrl: buildGuestWaiverUrl(input.baseUrl, result.booking.id, guestWaiverToken),
-    signedCount: 1,
-  });
+  if (result.booking.status === "PENDING_SIGNATURES") {
+    sendPendingSignatureNotice({
+      booking: result.booking,
+      manageUrl: buildManageUrl(input.baseUrl, result.booking.id, manageToken),
+      guestWaiverUrl: buildGuestWaiverUrl(input.baseUrl, result.booking.id, guestWaiverToken),
+      signedCount: 1,
+    });
+  }
 
   const refreshed = await getBookingWithWaivers(result.booking.id);
   return serializeManagedBooking(refreshed ?? result.booking, manageToken, input.baseUrl, guestWaiverToken);
@@ -656,7 +673,14 @@ export async function updateBooking(
   }
 
   await processSignatureDeadlines({ baseUrl: access.baseUrl });
-  const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      waiverSignatures: {
+        select: { bookingRevision: true, emailStatus: true, status: true },
+      },
+    },
+  });
 
   if (!booking) {
     throw new AppError("Prenotazione non trovata.", 404);
@@ -672,13 +696,25 @@ export async function updateBooking(
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
   const nextPlayerCount = input.playerCount === undefined ? booking.playerCount : validatePlayerCount(input.playerCount);
-  const slotOrPlayerCountChanged =
+  const timeChanged =
     nextStart.getTime() !== booking.start.getTime() ||
-    nextEnd.getTime() !== booking.end.getTime() ||
-    nextPlayerCount !== booking.playerCount;
-  const nextStatus = input.status ?? (slotOrPlayerCountChanged ? "PENDING_SIGNATURES" : booking.status);
+    nextEnd.getTime() !== booking.end.getTime();
+  const playerCountChanged = nextPlayerCount !== booking.playerCount;
+  const slotOrPlayerCountChanged = timeChanged || playerCountChanged;
+  const currentWaiverSummary = summarizeWaiverSignatures(booking);
+  const canConfirmSinglePlayerWithCurrentSignature =
+    !timeChanged &&
+    nextPlayerCount === 1 &&
+    currentWaiverSummary.signedCount >= 1 &&
+    input.status === undefined;
+  const nextStatus = input.status ??
+    (slotOrPlayerCountChanged
+      ? canConfirmSinglePlayerWithCurrentSignature
+        ? "CONFIRMED"
+        : "PENDING_SIGNATURES"
+      : booking.status);
   const requiresFreshWaivers =
-    slotOrPlayerCountChanged && nextStatus !== "CANCELED";
+    slotOrPlayerCountChanged && nextStatus !== "CANCELED" && !canConfirmSinglePlayerWithCurrentSignature;
   const isCancellation = booking.status !== "CANCELED" && nextStatus === "CANCELED";
   const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
   const guestSignersToNotify =
@@ -717,6 +753,12 @@ export async function updateBooking(
                   signatureConfirmedAt: null,
                   autoCanceledAt: null,
                 }
+              : canConfirmSinglePlayerWithCurrentSignature
+                ? {
+                    signatureReminderSentAt: null,
+                    signatureConfirmedAt: booking.signatureConfirmedAt ?? new Date(),
+                    autoCanceledAt: null,
+                  }
               : {}),
             outlookSyncStatus:
               nextStatus === "CONFIRMED"

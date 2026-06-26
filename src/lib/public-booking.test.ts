@@ -188,6 +188,25 @@ describe("public booking flow", () => {
     expect(updated.waiverSignedCount).toBe(0);
   });
 
+  it("conferma una prenotazione modificata a un giocatore se ha gia' una firma attiva", async () => {
+    const booking = await createDemoBooking({
+      ...futureSlot(1, 14),
+      organizerName: "Paolo Neri",
+      organizerEmail: "paolo@example.com",
+    });
+
+    const updated = await demoUpdateBooking(
+      { manageToken: booking.manageToken },
+      booking.id,
+      { playerCount: 1 },
+    );
+
+    expect(updated.status).toBe("CONFIRMED");
+    expect(updated.playerCount).toBe(1);
+    expect(updated.waiverSignedCount).toBe(1);
+    expect(updated.signatureConfirmedAt).toBeTruthy();
+  });
+
   it("rifiuta modifiche con token errato", async () => {
     const booking = await createDemoBooking({
       ...futureSlot(1, 15),

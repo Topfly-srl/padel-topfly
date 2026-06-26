@@ -90,6 +90,14 @@ const blocks: DemoBlock[] = [];
 const audit: AuditItem[] = [];
 const waiverSignatures: DemoWaiverSignature[] = [];
 
+function validateDemoPlayerCount(value: number) {
+  if (!Number.isInteger(value) || value < 1 || value > 4) {
+    throw new AppError("Inserisci un numero giocatori tra 1 e 4.", 422);
+  }
+
+  return value;
+}
+
 function id(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -369,11 +377,12 @@ export async function demoListBookings(user: CurrentUser) {
 
 export async function demoCreateBooking(input: DemoCreateInput) {
   const identity = normalizePublicInput(input);
+  const playerCount = validateDemoPlayerCount(input.playerCount ?? 4);
   assertDemoBookingAllowed(identity.organizerEmail, input.start, input.end);
 
   const now = new Date();
   const manageToken = createManageToken();
-  const guestWaiverToken = createManageToken();
+  const guestWaiverToken = playerCount > 1 ? createManageToken() : undefined;
   const booking: DemoBooking = {
     id: id("booking"),
     start: input.start,
@@ -383,14 +392,14 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     organizerName: identity.organizerName,
     manageTokenHash: hashManageToken(manageToken),
     manageTokenExpiresAt: manageTokenExpiresAt(input.end),
-    playerCount: input.playerCount ?? 4,
+    playerCount,
     waiverRevision: 1,
     signatureDeadlineAt: signatureDeadlineAt(input.start, now),
     signatureReminderSentAt: null,
     signatureConfirmedAt: null,
     autoCanceledAt: null,
-    guestWaiverTokenHash: hashManageToken(guestWaiverToken),
-    guestWaiverTokenExpiresAt: manageTokenExpiresAt(input.end),
+    guestWaiverTokenHash: guestWaiverToken ? hashManageToken(guestWaiverToken) : null,
+    guestWaiverTokenExpiresAt: guestWaiverToken ? manageTokenExpiresAt(input.end) : null,
     createdAt: now,
     updatedAt: now,
   };
@@ -411,6 +420,12 @@ export async function demoCreateBooking(input: DemoCreateInput) {
   });
   addAudit(identity.organizerEmail, "BOOKING_CREATED", "Booking", booking.id);
   addAudit(identity.organizerEmail, "WAIVER_SIGNED", "WaiverSignature", booking.id);
+  if (demoWaiverSummary(booking).signedCount >= booking.playerCount) {
+    booking.status = "CONFIRMED";
+    booking.signatureConfirmedAt = now;
+    booking.updatedAt = now;
+    addAudit(identity.organizerEmail, "BOOKING_SIGNATURES_COMPLETED", "Booking", booking.id);
+  }
   return managedBookingToApi(booking, manageToken, input.baseUrl, guestWaiverToken);
 }
 
@@ -433,12 +448,27 @@ export async function demoUpdateBooking(
 
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
-  const nextPlayerCount = input.playerCount ?? booking.playerCount;
-  const requiresFreshWaivers =
+  const nextPlayerCount = input.playerCount === undefined
+    ? booking.playerCount
+    : validateDemoPlayerCount(input.playerCount);
+  const timeChanged =
     nextStart.getTime() !== booking.start.getTime() ||
-    nextEnd.getTime() !== booking.end.getTime() ||
-    nextPlayerCount !== booking.playerCount;
-  const nextStatus = input.status ?? (requiresFreshWaivers ? "PENDING_SIGNATURES" : booking.status);
+    nextEnd.getTime() !== booking.end.getTime();
+  const playerCountChanged = nextPlayerCount !== booking.playerCount;
+  const slotOrPlayerCountChanged = timeChanged || playerCountChanged;
+  const canConfirmSinglePlayerWithCurrentSignature =
+    !timeChanged &&
+    nextPlayerCount === 1 &&
+    demoWaiverSummary(booking).signedCount >= 1 &&
+    input.status === undefined;
+  const nextStatus = input.status ??
+    (slotOrPlayerCountChanged
+      ? canConfirmSinglePlayerWithCurrentSignature
+        ? "CONFIRMED"
+        : "PENDING_SIGNATURES"
+      : booking.status);
+  const requiresFreshWaivers =
+    slotOrPlayerCountChanged && nextStatus !== "CANCELED" && !canConfirmSinglePlayerWithCurrentSignature;
   const guestWaiverToken = requiresFreshWaivers ? createManageToken() : undefined;
 
   if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
@@ -457,6 +487,10 @@ export async function demoUpdateBooking(
     booking.signatureDeadlineAt = signatureDeadlineAt(nextStart);
     booking.signatureReminderSentAt = null;
     booking.signatureConfirmedAt = null;
+    booking.autoCanceledAt = null;
+  } else if (canConfirmSinglePlayerWithCurrentSignature) {
+    booking.signatureReminderSentAt = null;
+    booking.signatureConfirmedAt = booking.signatureConfirmedAt ?? new Date();
     booking.autoCanceledAt = null;
   }
   booking.updatedAt = new Date();

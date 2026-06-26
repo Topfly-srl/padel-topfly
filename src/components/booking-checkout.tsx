@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarDays, Check, Clock3, FileText, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -75,14 +75,22 @@ function localSummaryDay(date: Date) {
   }).format(date);
 }
 
-function localDateTime(date: Date) {
-  return new Intl.DateTimeFormat("it-IT", {
-    weekday: "short",
+function localDeadlineDateTime(date: Date) {
+  const day = new Intl.DateTimeFormat("it-IT", {
+    weekday: "long",
     day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
+    month: "long",
   }).format(date);
+
+  return `${day} alle ${localTime(date)}`;
+}
+
+function playerCountLabel(count: number) {
+  return `${count} ${count === 1 ? "giocatore" : "giocatori"}`;
+}
+
+function missingSignatureTitle(count: number) {
+  return count === 1 ? "Manca 1 firma" : `Mancano ${count} firme`;
 }
 
 function normalizeName(value: string) {
@@ -183,7 +191,7 @@ export function BookingCheckout({
   const canContinueBooking =
     normalizedOrganizerName.length > 1 &&
     isValidEmail(normalizedOrganizerEmail) &&
-    playerCount >= 2 &&
+    playerCount >= 1 &&
     playerCount <= 4;
   const canSubmit =
     canContinueBooking &&
@@ -208,6 +216,9 @@ export function BookingCheckout({
   const missingCopy = canSubmit
     ? "Tutto pronto: puoi confermare la prenotazione."
     : "Completa i campi mancanti per continuare.";
+  const pendingMissingSignatures = createdBooking
+    ? Math.max(0, createdBooking.playerCount - createdBooking.waiverSignedCount)
+    : 0;
 
   useEffect(() => {
     if (!submitAttempted || canSubmit) return;
@@ -308,13 +319,14 @@ export function BookingCheckout({
     }
 
     setCreatedBooking(json.booking);
-    setNotice({
-      type: json.booking.status === "PENDING_SIGNATURES" ? "warning" : "success",
-      text:
-        json.booking.status === "PENDING_SIGNATURES"
-          ? "Prenotazione provvisoria: sara' confermata solo quando tutte le firme saranno raccolte."
-          : "Prenotazione confermata.",
-    });
+    setNotice(
+      json.booking.status === "PENDING_SIGNATURES"
+        ? null
+        : {
+            type: "success",
+            text: "Prenotazione confermata.",
+          },
+    );
   }
 
   return (
@@ -327,7 +339,13 @@ export function BookingCheckout({
           <Image src={appPath("/topfly-logo.png")} alt="TOPFLY GPS solutions" width={678} height={147} priority />
           <div>
             <p className="muted-label">Padel aziendale</p>
-            <h1>{createdBooking ? "Prenotazione provvisoria" : "Prenota e firma"}</h1>
+            <h1>
+              {createdBooking
+                ? createdBooking.status === "PENDING_SIGNATURES"
+                  ? "Prenotazione provvisoria"
+                  : "Prenotazione confermata"
+                : "Prenota e firma"}
+            </h1>
           </div>
         </div>
       </header>
@@ -347,7 +365,7 @@ export function BookingCheckout({
               </span>
               <span>
                 <Users size={15} />
-                {playerCount} giocatori
+                {playerCountLabel(playerCount)}
               </span>
               <span>{duration} min</span>
             </div>
@@ -392,69 +410,75 @@ export function BookingCheckout({
 
         {createdBooking ? (
           <div className="checkout-success-flow">
-            <div className="checkout-success-head">
-              <span
-                className={`summary-state-icon ${
-                  createdBooking.status === "PENDING_SIGNATURES" ? "warning" : "success"
-                }`}
-                aria-hidden="true"
-              >
-                {createdBooking.status === "PENDING_SIGNATURES" ? <Clock3 size={18} /> : <Check size={18} />}
-              </span>
-              <div>
-                <h2>
-                  {createdBooking.status === "PENDING_SIGNATURES"
-                    ? "Prenotazione provvisoria"
-                    : "Prenotazione confermata"}
-                </h2>
-                <p>
-                  {localTime(start)} - {localTime(end)} · Firme scarico{" "}
-                  {createdBooking.waiverSignedCount}/{createdBooking.playerCount}
-                </p>
-              </div>
-            </div>
-
-            <div className="checkout-status-row">
-              <span>
-                <FileText size={16} />
-                {createdBooking.waiverEmailStatus === "SENT"
-                  ? "PDF inviato alla Direzione"
-                  : "PDF salvato in archivio"}
-              </span>
-              <span>
-                <Users size={16} />
-                {createdBooking.waiverSignedCount}/{createdBooking.playerCount} firme
-              </span>
-            </div>
-
-            {createdBooking.status === "PENDING_SIGNATURES" ? (
-              <div className="notice warning">
-                <Clock3 size={16} />
-                <div>
-                  <strong>Prenotazione non ancora confermata.</strong>
-                  <span>
-                    Mancano {Math.max(0, createdBooking.playerCount - createdBooking.waiverSignedCount)} firma/e.
-                    {createdBooking.signatureDeadlineAt
-                      ? ` Scadenza: ${localDateTime(new Date(createdBooking.signatureDeadlineAt))}.`
-                      : " Completa le firme prima dell'orario di gioco."}
+            {createdBooking.status === "PENDING_SIGNATURES" ? null : (
+              <>
+                <div className="checkout-success-head">
+                  <span className="summary-state-icon success" aria-hidden="true">
+                    <Check size={18} />
                   </span>
-                </div>
-              </div>
-            ) : null}
-
-            {createdBooking.guestWaiverUrl ? (
-              <section className="checkout-guest-share">
-                <div className="checkout-section-title plain">
                   <div>
-                    <strong>Invia subito il link agli ospiti</strong>
+                    <h2>Prenotazione confermata</h2>
+                    <p>{localTime(start)} - {localTime(end)}</p>
                   </div>
                 </div>
-                <GuestLinkPanel
-                  copied={copiedGuestWaiverLink}
-                  link={createdBooking.guestWaiverUrl}
-                  onCopy={copyGuestWaiverLink}
-                />
-              </section>
+
+                <div className="checkout-status-row">
+                  <span>
+                    <FileText size={16} />
+                    {createdBooking.waiverEmailStatus === "SENT"
+                      ? "PDF inviato alla Direzione"
+                      : "PDF salvato in archivio"}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {createdBooking.status === "PENDING_SIGNATURES" ? (
+              <div className="pending-signature-panel">
+                <div className="pending-signature-status">
+                  <div className="pending-signature-copy">
+                    <span className="pending-signature-eyebrow">
+                      <Clock3 size={15} />
+                      Non confermata
+                    </span>
+                    <strong>{missingSignatureTitle(pendingMissingSignatures)}</strong>
+                    <p>La prenotazione non e&apos; ancora confermata.</p>
+                    <p className="pending-signature-deadline">
+                      {createdBooking.signatureDeadlineAt
+                        ? `Scadenza: ${localDeadlineDateTime(new Date(createdBooking.signatureDeadlineAt))}.`
+                        : "Scadenza: prima dell'orario di gioco."}
+                    </p>
+                  </div>
+                  <div className="pending-signature-cancel">
+                    <AlertTriangle size={17} />
+                    <strong>
+                      Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.
+                    </strong>
+                  </div>
+                </div>
+                <div className="pending-signature-action-block">
+                  {createdBooking.guestWaiverUrl ? (
+                    <div className="pending-signature-share">
+                      <strong>Condividi il link con gli ospiti</strong>
+                      <GuestLinkPanel
+                        copied={copiedGuestWaiverLink}
+                        copyLabel="Copia link"
+                        link={createdBooking.guestWaiverUrl}
+                        onCopy={copyGuestWaiverLink}
+                        openLabel="Apri firma ospiti"
+                        showLinkInput={false}
+                        tone="pending"
+                      />
+                    </div>
+                  ) : null}
+                  <small className="pending-signature-footnote">
+                    <FileText size={14} />
+                    {createdBooking.waiverEmailStatus === "SENT"
+                      ? "PDF inviato alla Direzione."
+                      : "PDF referente salvato."}
+                  </small>
+                </div>
+              </div>
             ) : null}
 
             <Link className="ghost-button full-width" href="/">
@@ -506,12 +530,13 @@ export function BookingCheckout({
                         setPlayerCount(Number(event.target.value));
                       }}
                     >
-                      {[2, 3, 4].map((count) => (
+                      {[1, 2, 3, 4].map((count) => (
                         <option key={count} value={count}>
-                          {count} giocatori
+                          {playerCountLabel(count)}
                         </option>
                       ))}
                     </select>
+                    <small>Puoi prenotare anche per allenarti in autonomia.</small>
                   </label>
                 </div>
                 <div className="checkout-step-actions">

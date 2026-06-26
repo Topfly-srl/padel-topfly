@@ -1259,6 +1259,13 @@ summary:focus-visible {
   margin-bottom: 0;
 }
 
+.guest-share-card.actions-only {
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
 .guest-share-card strong {
   display: block;
   color: var(--foreground);
@@ -1295,6 +1302,120 @@ summary:focus-visible {
 .guest-share-actions .ghost-button {
   min-height: 40px;
   background: #fff;
+}
+
+.guest-share-card.actions-only .guest-share-actions .primary-button,
+.guest-share-card.actions-only .guest-share-actions .ghost-button {
+  min-height: 42px;
+}
+
+.guest-share-card.actions-only .copy-state {
+  text-align: center;
+}
+
+.pending-signature-panel {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(217, 119, 6, 0.26);
+  border-left: 4px solid #d97706;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #3f2b07;
+  padding: 16px;
+}
+
+.pending-signature-status,
+.pending-signature-action-block {
+  display: grid;
+  gap: 12px;
+}
+
+.pending-signature-action-block {
+  border-top: 1px solid rgba(217, 119, 6, 0.18);
+  padding-top: 14px;
+}
+
+.pending-signature-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.pending-signature-eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(217, 119, 6, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  color: #8a5a00;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 9px;
+  text-transform: uppercase;
+}
+
+.pending-signature-copy strong {
+  color: var(--foreground);
+  font-size: 1.24rem;
+  font-weight: 750;
+  line-height: 1.18;
+}
+
+.pending-signature-copy p {
+  color: #6f4b08;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.pending-signature-deadline {
+  color: #553807;
+  font-weight: 650;
+}
+
+.pending-signature-cancel {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid rgba(180, 35, 42, 0.28);
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #8a1f26;
+  padding: 11px;
+}
+
+.pending-signature-cancel svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.pending-signature-cancel strong {
+  font-size: 0.88rem;
+  font-weight: 650;
+  line-height: 1.38;
+}
+
+.pending-signature-share {
+  display: grid;
+  gap: 8px;
+}
+
+.pending-signature-share > strong {
+  color: #684000;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.pending-signature-footnote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8a6a2f;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .booking-form {
@@ -2147,6 +2268,14 @@ summary:focus-visible {
 }
 
 @media (max-width: 420px) {
+  .pending-signature-panel {
+    padding: 12px;
+  }
+
+  .pending-signature-panel .guest-share-actions {
+    grid-template-columns: 1fr;
+  }
+
   .timeline {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

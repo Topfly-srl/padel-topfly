@@ -133,8 +133,8 @@ const minSignatureWidth = 16;
 const minSignatureHeight = 6;
 
 export function validatePlayerCount(value: number) {
-  if (!Number.isInteger(value) || value < 2 || value > 4) {
-    throw new AppError("Inserisci un numero giocatori tra 2 e 4.", 422);
+  if (!Number.isInteger(value) || value < 1 || value > 4) {
+    throw new AppError("Inserisci un numero giocatori tra 1 e 4.", 422);
   }
 
   return value;
@@ -459,6 +459,7 @@ export async function sendWaiverSignatureEmail(signatureId: string) {
       signerName: signature.signerName,
       signedAt: signature.signedAt,
     }),
+    signerCopyEmail: signature.signerRole === "ORGANIZER" ? signature.signerEmail : undefined,
   });
 
   await prisma.waiverSignature.update({
@@ -493,6 +494,12 @@ export async function sendGuestWaiverEmail(signatureId: string, cancelUrl?: stri
     signerEmail: signature.signerEmail,
     signedAt: signature.signedAt,
     cancelUrl,
+    pdfBytes: signature.pdfBytes,
+    filename: waiverPdfFilename({
+      bookingId: signature.bookingId,
+      signerName: signature.signerName,
+      signedAt: signature.signedAt,
+    }),
   });
 
   await prisma.waiverSignature.update({

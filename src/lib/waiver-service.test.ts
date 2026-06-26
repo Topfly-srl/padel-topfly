@@ -92,11 +92,28 @@ describe("waiver service", () => {
     demoReset();
   });
 
-  it("valida player count solo tra 2 e 4", () => {
+  it("valida player count solo tra 1 e 4", () => {
+    expect(validatePlayerCount(1)).toBe(1);
     expect(validatePlayerCount(2)).toBe(2);
     expect(validatePlayerCount(4)).toBe(4);
-    expect(() => validatePlayerCount(1)).toThrow("numero giocatori");
+    expect(() => validatePlayerCount(0)).toThrow("numero giocatori");
     expect(() => validatePlayerCount(5)).toThrow("numero giocatori");
+  });
+
+  it("conferma subito una prenotazione da un giocatore", async () => {
+    const booking = await demoCreateBooking({
+      ...futureSlot(),
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@example.com",
+      playerCount: 1,
+      waiver: validWaiver,
+      baseUrl: "https://padel.example.com",
+    });
+
+    expect(booking.status).toBe("CONFIRMED");
+    expect(booking.waiverSignedCount).toBe(1);
+    expect(booking.signatureConfirmedAt).toBeTruthy();
+    expect(booking.guestWaiverUrl).toBeUndefined();
   });
 
   it("richiede consensi, maggior eta' e firma disegnata", () => {

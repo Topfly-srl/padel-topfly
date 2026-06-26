@@ -350,15 +350,19 @@ function waiverMailPayload(input: {
         },
       ],
       attachments: [
-        {
-          "@odata.type": "#microsoft.graph.fileAttachment",
-          name: input.filename,
-          contentType: "application/pdf",
-          contentBytes: Buffer.from(input.pdfBytes).toString("base64"),
-        },
+        waiverPdfAttachment(input),
       ],
     },
     saveToSentItems: true,
+  };
+}
+
+function waiverPdfAttachment(input: { pdfBytes: Uint8Array; filename: string }) {
+  return {
+    "@odata.type": "#microsoft.graph.fileAttachment",
+    name: input.filename,
+    contentType: "application/pdf",
+    contentBytes: Buffer.from(input.pdfBytes).toString("base64"),
   };
 }
 
@@ -456,6 +460,8 @@ function guestWaiverConfirmationPayload(input: {
   signerEmail: string;
   signedAt: Date;
   cancelUrl?: string;
+  pdfBytes?: Uint8Array;
+  filename?: string;
 }) {
   const dateLabel = escapeHtml(formatEventDate(input.booking.start));
   const startLabel = escapeHtml(formatEventTime(input.booking.start));
@@ -501,8 +507,7 @@ function guestWaiverConfirmationPayload(input: {
                 </tr>
               </table>
               <p style="margin: 16px 0 0; color: #4b5563;">
-                La prenotazione del campo sara' confermata solo quando tutte le firme richieste saranno raccolte.
-                In allegato trovi un file calendario per tenere traccia dell'orario.
+                In allegato trovi il PDF firmato e un file calendario per tenere traccia dell'orario.
               </p>
               ${
                 safeCancelUrl
@@ -530,7 +535,12 @@ function guestWaiverConfirmationPayload(input: {
           },
         },
       ],
-      attachments: [guestCalendarAttachment(input)],
+      attachments: [
+        guestCalendarAttachment(input),
+        ...(input.pdfBytes && input.filename
+          ? [waiverPdfAttachment({ pdfBytes: input.pdfBytes, filename: input.filename })]
+          : []),
+      ],
     },
     saveToSentItems: true,
   };
@@ -963,6 +973,7 @@ export async function sendWaiverEmail(input: {
   signedAt: Date;
   pdfBytes: Uint8Array;
   filename: string;
+  signerCopyEmail?: string;
 }): Promise<WaiverMailResult> {
   const disabled = graphDisabled();
   if (disabled) {
@@ -980,6 +991,30 @@ export async function sendWaiverEmail(input: {
       ),
     });
 
+    const signerCopyEmail = input.signerCopyEmail?.trim();
+    if (
+      signerCopyEmail &&
+      signerCopyEmail.toLowerCase() !== appConfig.waiver.recipientEmail.toLowerCase()
+    ) {
+      try {
+        await graphFetch(mailboxPath("/sendMail"), {
+          method: "POST",
+          body: JSON.stringify(
+            waiverMailPayload({
+              ...input,
+              recipientEmail: signerCopyEmail,
+            }),
+          ),
+        });
+      } catch (error) {
+        console.error({
+          message: "Signer waiver PDF copy failed",
+          signerEmail: signerCopyEmail,
+          error: error instanceof Error ? error.message : "Graph sendMail failed",
+        });
+      }
+    }
+
     return { status: "SENT" };
   } catch (error) {
     return {
@@ -995,6 +1030,8 @@ export async function sendGuestWaiverConfirmationEmail(input: {
   signerEmail: string;
   signedAt: Date;
   cancelUrl?: string;
+  pdfBytes?: Uint8Array;
+  filename?: string;
 }): Promise<WaiverMailResult> {
   const disabled = graphDisabled();
   if (disabled) {

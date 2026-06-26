@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   CalendarDays,
   Check,
   Clock3,
@@ -144,6 +145,24 @@ function localDateTime(date: Date) {
   }).format(date);
 }
 
+function localDeadlineDateTime(date: Date) {
+  const day = new Intl.DateTimeFormat("it-IT", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  }).format(date);
+
+  return `${day} alle ${localTime(date)}`;
+}
+
+function playerCountLabel(count: number) {
+  return `${count} ${count === 1 ? "giocatore" : "giocatori"}`;
+}
+
+function missingSignatureTitle(count: number) {
+  return count === 1 ? "Manca 1 firma" : `Mancano ${count} firme`;
+}
+
 function localDay(date: Date) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "short",
@@ -241,7 +260,7 @@ function deadlineCopy(value: string | null) {
 
 function bookingSuccessText(status: string, bookingStatus?: string) {
   if (bookingStatus === "PENDING_SIGNATURES") {
-    return "Prenotazione provvisoria creata. Sara' confermata solo quando tutte le firme saranno raccolte.";
+    return "Prenotazione provvisoria creata. Se non arrivano tutte le firme entro la scadenza verra' annullata.";
   }
   if (status === "SYNCED") return "Fatto. Prenotazione confermata con invito Outlook.";
   if (status === "FAILED") return "Prenotazione confermata, ma l'invito Outlook non e' stato inviato.";
@@ -425,7 +444,7 @@ export function BookingApp({
   const isExternalEmail = isExternalEmailForDomain(normalizedOrganizerEmail, allowedDomain);
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
   const isWaiverFormValid =
-    playerCount >= 2 &&
+    playerCount >= 1 &&
     playerCount <= 4 &&
     Boolean(birthDateIso) &&
     waiverForm.birthPlace.trim().length > 1 &&
@@ -441,7 +460,7 @@ export function BookingApp({
   const isBookingDetailsValid =
     organizerName.trim().length > 1 &&
     isValidEmail(normalizedOrganizerEmail) &&
-    playerCount >= 2 &&
+    playerCount >= 1 &&
     playerCount <= 4;
   const startMs = start.getTime();
   const endMs = end.getTime();
@@ -506,6 +525,9 @@ export function BookingApp({
   const selectedOwnGuestWaiverLink = selectedOwnBooking
     ? selectedOwnBooking.guestWaiverUrl ?? guestWaiverLinks[selectedOwnBooking.id]
     : null;
+  const selectedOwnMissingSignatures = selectedOwnBooking
+    ? Math.max(0, selectedOwnBooking.playerCount - selectedOwnBooking.waiverSignedCount)
+    : 0;
   const selectedOwnWaiverDelivery = selectedOwnBooking
     ? waiverDeliveryCopy(selectedOwnBooking.waiverEmailStatus)
     : null;
@@ -981,12 +1003,14 @@ export function BookingApp({
       setOrganizerEmail("");
       setPlayerCount(4);
     }
-    setNotice({
-      type: json.booking.status === "PENDING_SIGNATURES" || json.booking.outlookSyncStatus === "FAILED"
-        ? "warning"
-        : "success",
-      text: bookingSuccessText(json.booking.outlookSyncStatus, json.booking.status),
-    });
+    setNotice(
+      json.booking.status === "PENDING_SIGNATURES"
+        ? null
+        : {
+            type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
+            text: bookingSuccessText(json.booking.outlookSyncStatus, json.booking.status),
+          },
+    );
     await refresh(nextTokens);
   }
 
@@ -1268,29 +1292,73 @@ export function BookingApp({
                     )}
                   </span>
                   <div>
-                    <h2>{bookingStatusLabel(selectedOwnBooking.status)}</h2>
+                    <h2>
+                      {selectedOwnBooking.status === "PENDING_SIGNATURES"
+                        ? "Prenotazione selezionata"
+                        : bookingStatusLabel(selectedOwnBooking.status)}
+                    </h2>
                     <p>
                       {localSummaryDay(start)} · {localTime(start)} - {localTime(end)}
                     </p>
-                    {selectedOwnSyncText ? (
+                    {selectedOwnBooking.status !== "PENDING_SIGNATURES" && selectedOwnSyncText ? (
                       <small className={selectedOwnSyncFailed ? "sync-warning-text" : undefined}>
                         {selectedOwnSyncFailed
                           ? `${selectedOwnSyncText}. La prenotazione resta valida.`
                           : selectedOwnSyncText}
                       </small>
                     ) : null}
-                    <small>
-                      Firme scarico: {selectedOwnBooking.waiverSignedCount}/{selectedOwnBooking.playerCount}
-                    </small>
-                    {selectedOwnBooking.status === "PENDING_SIGNATURES" ? (
-                      <small>{deadlineCopy(selectedOwnBooking.signatureDeadlineAt)}</small>
+                    {selectedOwnBooking.status !== "PENDING_SIGNATURES" ? (
+                      <small>
+                        Firme scarico: {selectedOwnBooking.waiverSignedCount}/{selectedOwnBooking.playerCount}
+                      </small>
                     ) : null}
                   </div>
                 </div>
                 {selectedOwnBooking.status === "PENDING_SIGNATURES" ? (
-                  <div className="notice warning">
-                    Mancano {Math.max(0, selectedOwnBooking.playerCount - selectedOwnBooking.waiverSignedCount)} firma/e:
-                    senza tutte le firme la prenotazione verra&apos; annullata automaticamente.
+                  <div className="pending-signature-panel">
+                    <div className="pending-signature-status">
+                      <div className="pending-signature-copy">
+                        <span className="pending-signature-eyebrow">
+                          <Clock3 size={15} />
+                          Non confermata
+                        </span>
+                        <strong>{missingSignatureTitle(selectedOwnMissingSignatures)}</strong>
+                        <p>La prenotazione non e&apos; ancora confermata.</p>
+                        <p className="pending-signature-deadline">
+                          {selectedOwnBooking.signatureDeadlineAt
+                            ? `Scadenza: ${localDeadlineDateTime(new Date(selectedOwnBooking.signatureDeadlineAt))}.`
+                            : "Scadenza: prima dell'orario di gioco."}
+                        </p>
+                      </div>
+                      <div className="pending-signature-cancel">
+                        <AlertTriangle size={17} />
+                        <strong>
+                          Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="pending-signature-action-block">
+                      {selectedOwnGuestWaiverLink ? (
+                        <div className="pending-signature-share">
+                          <strong>Condividi il link con gli ospiti</strong>
+                          <GuestLinkPanel
+                            copied={copiedGuestWaiverLink === getGuestShareLink(selectedOwnGuestWaiverLink)}
+                            copyLabel="Copia link"
+                            link={selectedOwnGuestWaiverLink}
+                            onCopy={copyGuestWaiverLink}
+                            openLabel="Apri firma ospiti"
+                            showLinkInput={false}
+                            tone="pending"
+                          />
+                        </div>
+                      ) : null}
+                      {selectedOwnWaiverDelivery ? (
+                        <small className="pending-signature-footnote">
+                          <FileText size={14} />
+                          {selectedOwnWaiverDelivery.title}
+                        </small>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
                 {notice ? (
@@ -1302,7 +1370,7 @@ export function BookingApp({
                     {notice.text}
                   </div>
                 ) : null}
-                {selectedOwnWaiverDelivery ? (
+                {selectedOwnWaiverDelivery && selectedOwnBooking.status !== "PENDING_SIGNATURES" ? (
                   <div className={`official-pdf-panel ${selectedOwnWaiverDelivery.tone}`}>
                     <FileText size={17} />
                     <div>
@@ -1311,7 +1379,7 @@ export function BookingApp({
                     </div>
                   </div>
                 ) : null}
-                {selectedOwnGuestWaiverLink ? (
+                {selectedOwnGuestWaiverLink && selectedOwnBooking.status !== "PENDING_SIGNATURES" ? (
                   <GuestLinkPanel
                     copied={copiedGuestWaiverLink === getGuestShareLink(selectedOwnGuestWaiverLink)}
                     link={selectedOwnGuestWaiverLink}
@@ -1375,7 +1443,7 @@ export function BookingApp({
                 </button>
                 {editingBookingId ? null : (
                   <p className="summary-action-note">
-                    La conferma arriva solo dopo tutte le firme. Scarico inviato alla Direzione.
+                    Puoi prenotare anche per allenarti in autonomia. Se ci sono ospiti, senza tutte le firme la prenotazione viene annullata.
                   </p>
                 )}
               </>
@@ -1836,12 +1904,13 @@ export function BookingApp({
                         setPlayerCount(Number(event.target.value));
                       }}
                     >
-                      {[2, 3, 4].map((count) => (
+                      {[1, 2, 3, 4].map((count) => (
                         <option key={count} value={count}>
-                          {count} giocatori
+                          {playerCountLabel(count)}
                         </option>
                       ))}
                     </select>
+                    <small>Puoi prenotare anche per allenarti in autonomia.</small>
                   </label>
                 </div>
               ) : (
