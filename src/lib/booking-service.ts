@@ -49,6 +49,12 @@ import {
   type WaiverEvidence,
   type WaiverInput,
 } from "@/lib/waiver-service";
+import {
+  cancelOutlookEventForPendingBooking,
+  processSignatureDeadlines,
+  sendPendingSignatureNotice,
+  signatureDeadlineAt,
+} from "@/lib/signature-workflow";
 import type {
   AuditItem,
   AvailabilityBlock,
@@ -102,6 +108,9 @@ function serializeBooking(booking: BookingWithWaiverSignatures): AvailabilityBoo
     playerCount: booking.playerCount,
     waiverSignedCount: waiverSummary.signedCount,
     waiverEmailStatus: waiverSummary.emailStatus,
+    signatureDeadlineAt: booking.signatureDeadlineAt?.toISOString() ?? null,
+    signatureConfirmedAt: booking.signatureConfirmedAt?.toISOString() ?? null,
+    autoCanceledAt: booking.autoCanceledAt?.toISOString() ?? null,
   };
 }
 
@@ -370,18 +379,28 @@ async function validateNoConflicts(
     ignoreBookingId?: string;
   },
 ) {
+  const now = new Date();
+  const activeBookingWhere: Prisma.BookingWhereInput = {
+    OR: [
+      { status: "CONFIRMED" },
+      {
+        status: "PENDING_SIGNATURES",
+        OR: [{ signatureDeadlineAt: null }, { signatureDeadlineAt: { gt: now } }],
+      },
+    ],
+  };
   const [futureBookingCount, overlappingBookings, overlappingBlocks] = await Promise.all([
     tx.booking.count({
       where: {
+        AND: [activeBookingWhere],
         organizerEmail: input.organizerEmail,
-        status: "CONFIRMED",
         end: { gte: new Date() },
         id: input.ignoreBookingId ? { not: input.ignoreBookingId } : undefined,
       },
     }),
     tx.booking.findMany({
       where: {
-        status: "CONFIRMED",
+        AND: [activeBookingWhere],
         id: input.ignoreBookingId ? { not: input.ignoreBookingId } : undefined,
         start: { lt: input.end },
         end: { gt: input.start },
@@ -436,15 +455,23 @@ export async function getAvailability(dateValue: string | null) {
     return demoGetAvailability(dateValue);
   }
 
+  await processSignatureDeadlines();
   const date = assertDateParam(dateValue);
   const bounds = zonedDayBounds(date);
+  const now = new Date();
 
   const [bookings, blocks] = await Promise.all([
     prisma.booking.findMany({
       where: {
-        status: "CONFIRMED",
         start: { lt: bounds.end },
         end: { gt: bounds.start },
+        OR: [
+          { status: "CONFIRMED" },
+          {
+            status: "PENDING_SIGNATURES",
+            OR: [{ signatureDeadlineAt: null }, { signatureDeadlineAt: { gt: now } }],
+          },
+        ],
       },
       include: {
         waiverSignatures: {
@@ -478,6 +505,7 @@ export async function lookupBookings(tokens: string[], baseUrl?: string) {
     return demoLookupBookings(tokens, baseUrl);
   }
 
+  await processSignatureDeadlines({ baseUrl });
   const cleanTokens = [...new Set(tokens.map((token) => token.trim()).filter(Boolean))].slice(0, 30);
   const tokenByHash = new Map(cleanTokens.map((token) => [hashManageToken(token), token]));
   const hashes = [...tokenByHash.keys()];
@@ -532,12 +560,15 @@ export async function createBooking(input: PublicBookingInput) {
     return demoCreateBooking(input);
   }
 
+  await processSignatureDeadlines({ baseUrl: input.baseUrl });
   const identity = normalizePublicBookingInput(input);
   const manageToken = createManageToken();
   const manageTokenHash = hashManageToken(manageToken);
   const tokenExpiresAt = manageTokenExpiresAt(input.end);
   const guestWaiverToken = createGuestWaiverToken();
   const guestWaiverData = guestWaiverTokenData(guestWaiverToken, input.end);
+  const createdAt = new Date();
+  const deadlineAt = signatureDeadlineAt(input.start, createdAt);
 
   const result = await retryPrismaTransaction(() =>
     prisma.$transaction(
@@ -552,13 +583,15 @@ export async function createBooking(input: PublicBookingInput) {
           data: {
             start: input.start,
             end: input.end,
+            status: "PENDING_SIGNATURES",
             organizerName: identity.organizerName,
             organizerEmail: identity.organizerEmail,
             playerCount: identity.playerCount,
             manageTokenHash,
             manageTokenExpiresAt: tokenExpiresAt,
+            signatureDeadlineAt: deadlineAt,
             ...guestWaiverData,
-            outlookSyncStatus: "PENDING",
+            outlookSyncStatus: "SKIPPED",
           },
         });
 
@@ -597,13 +630,16 @@ export async function createBooking(input: PublicBookingInput) {
     ),
   );
 
-  // Email e sync Outlook (Microsoft Graph) sono gli step lenti: li eseguiamo dopo la risposta.
-  // La firma organizer e' gia' committata, quindi il refetch sotto riporta waiverSignedCount=1.
+  // Email e Microsoft Graph sono step lenti: li eseguiamo dopo la risposta.
+  // La prenotazione resta provvisoria finche' tutte le firme non sono raccolte.
   runAfterResponse(async () => {
-    await Promise.all([
-      sendWaiverSignatureEmail(result.organizerWaiverId),
-      syncBooking(result.booking, "create", manageToken, input.baseUrl, guestWaiverToken),
-    ]);
+    await sendWaiverSignatureEmail(result.organizerWaiverId);
+  });
+  sendPendingSignatureNotice({
+    booking: result.booking,
+    manageUrl: buildManageUrl(input.baseUrl, result.booking.id, manageToken),
+    guestWaiverUrl: buildGuestWaiverUrl(input.baseUrl, result.booking.id, guestWaiverToken),
+    signedCount: 1,
   });
 
   const refreshed = await getBookingWithWaivers(result.booking.id);
@@ -613,12 +649,13 @@ export async function createBooking(input: PublicBookingInput) {
 export async function updateBooking(
   access: BookingAccess,
   bookingId: string,
-  input: { start?: Date; end?: Date; status?: BookingStatus },
+  input: { start?: Date; end?: Date; status?: BookingStatus; playerCount?: number },
 ) {
   if (!appConfig.databaseConfigured) {
     return demoUpdateBooking(access, bookingId, input);
   }
 
+  await processSignatureDeadlines({ baseUrl: access.baseUrl });
   const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
 
   if (!booking) {
@@ -632,14 +669,16 @@ export async function updateBooking(
     throw new AppError("Usa il comando cancella per annullare la prenotazione.", 403);
   }
 
-  const nextStatus = input.status ?? booking.status;
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
+  const nextPlayerCount = input.playerCount === undefined ? booking.playerCount : validatePlayerCount(input.playerCount);
+  const slotOrPlayerCountChanged =
+    nextStart.getTime() !== booking.start.getTime() ||
+    nextEnd.getTime() !== booking.end.getTime() ||
+    nextPlayerCount !== booking.playerCount;
+  const nextStatus = input.status ?? (slotOrPlayerCountChanged ? "PENDING_SIGNATURES" : booking.status);
   const requiresFreshWaivers =
-    nextStatus === "CONFIRMED" &&
-    (booking.status !== "CONFIRMED" ||
-      nextStart.getTime() !== booking.start.getTime() ||
-      nextEnd.getTime() !== booking.end.getTime());
+    slotOrPlayerCountChanged && nextStatus !== "CANCELED";
   const isCancellation = booking.status !== "CANCELED" && nextStatus === "CANCELED";
   const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
   const guestSignersToNotify =
@@ -648,7 +687,7 @@ export async function updateBooking(
   const updated = await retryPrismaTransaction(() =>
     prisma.$transaction(
       async (tx) => {
-        if (nextStatus === "CONFIRMED") {
+        if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
           await validateNoConflicts(tx, {
             start: nextStart,
             end: nextEnd,
@@ -663,6 +702,7 @@ export async function updateBooking(
             start: nextStart,
             end: nextEnd,
             status: nextStatus,
+            playerCount: nextPlayerCount,
             manageTokenExpiresAt: manageTokenExpiresAt(nextEnd),
             ...(nextGuestWaiverToken
               ? {
@@ -670,7 +710,22 @@ export async function updateBooking(
                   ...guestWaiverTokenData(nextGuestWaiverToken, nextEnd),
                 }
               : {}),
-            outlookSyncStatus: nextStatus === "CONFIRMED" ? "PENDING" : booking.outlookSyncStatus,
+            ...(requiresFreshWaivers
+              ? {
+                  signatureDeadlineAt: signatureDeadlineAt(nextStart),
+                  signatureReminderSentAt: null,
+                  signatureConfirmedAt: null,
+                  autoCanceledAt: null,
+                }
+              : {}),
+            outlookSyncStatus:
+              nextStatus === "CONFIRMED"
+                ? "PENDING"
+                : requiresFreshWaivers
+                  ? booking.outlookEventId
+                    ? "PENDING"
+                    : "SKIPPED"
+                  : booking.outlookSyncStatus,
           },
         });
 
@@ -690,30 +745,48 @@ export async function updateBooking(
 
   // Sync Outlook e notifiche ospiti (Microsoft Graph) sono gli step lenti: dopo la risposta.
   runAfterResponse(async () => {
-    const synced =
-      updated.status === "CONFIRMED"
-        ? await syncBooking(
-            updated,
-            "update",
-            access.manageToken ?? undefined,
-            access.baseUrl,
-            nextGuestWaiverToken,
-          )
-        : await markOutlookDeleted(updated);
+    if (isCancellation) {
+      const synced = await markOutlookDeleted(updated);
+      if (guestSignersToNotify.length > 0) {
+        await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
+      }
+      return;
+    }
 
-    if (isCancellation && guestSignersToNotify.length > 0) {
-      await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
-    } else if (requiresFreshWaivers && guestSignersToNotify.length > 0) {
-      await notifyGuestSignersOfUpdate({
-        previousBooking: booking,
-        booking: synced,
-        guests: guestSignersToNotify,
-        guestWaiverUrl: buildGuestWaiverUrl(
-          access.baseUrl ?? appConfig.publicOrigin,
-          synced.id,
-          nextGuestWaiverToken,
-        ),
+    if (requiresFreshWaivers) {
+      const pending = await cancelOutlookEventForPendingBooking(updated);
+      sendPendingSignatureNotice({
+        booking: pending,
+        manageUrl: buildManageUrl(access.baseUrl, pending.id, access.manageToken ?? undefined),
+        guestWaiverUrl: buildGuestWaiverUrl(access.baseUrl ?? appConfig.publicOrigin, pending.id, nextGuestWaiverToken),
+        signedCount: 0,
       });
+
+      if (guestSignersToNotify.length > 0) {
+        await notifyGuestSignersOfUpdate({
+          previousBooking: booking,
+          booking: pending,
+          guests: guestSignersToNotify,
+          guestWaiverUrl: buildGuestWaiverUrl(
+            access.baseUrl ?? appConfig.publicOrigin,
+            pending.id,
+            nextGuestWaiverToken,
+          ),
+        });
+      }
+      return;
+    }
+
+    if (updated.status === "CONFIRMED") {
+      await syncBooking(
+        updated,
+        "update",
+        access.manageToken ?? undefined,
+        access.baseUrl,
+        nextGuestWaiverToken,
+      );
+    } else if (updated.status === "PENDING_SIGNATURES") {
+      await cancelOutlookEventForPendingBooking(updated);
     }
   });
 
@@ -731,6 +804,7 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
     return demoCancelBooking(access, bookingId);
   }
 
+  await processSignatureDeadlines({ baseUrl: access.baseUrl });
   const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
 
   if (!booking) {
@@ -791,6 +865,8 @@ export async function createAdminBlock(
     return demoCreateAdminBlock(currentUser, input);
   }
 
+  await processSignatureDeadlines();
+
   if (input.start >= input.end) {
     throw new AppError("Il blocco deve avere un orario di fine valido.", 422);
   }
@@ -806,18 +882,25 @@ export async function createAdminBlock(
   const block = await retryPrismaTransaction(() =>
     prisma.$transaction(
       async (tx) => {
+        const now = new Date();
         const overlappingBookings = await tx.booking.findMany({
           where: {
-            status: "CONFIRMED",
             start: { lt: input.end },
             end: { gt: input.start },
+            OR: [
+              { status: "CONFIRMED" },
+              {
+                status: "PENDING_SIGNATURES",
+                OR: [{ signatureDeadlineAt: null }, { signatureDeadlineAt: { gt: now } }],
+              },
+            ],
           },
           select: { id: true },
         });
 
         if (overlappingBookings.length > 0) {
           throw new AppError(
-            "Ci sono prenotazioni confermate in questa fascia. Cancellale o spostale prima.",
+            "Ci sono prenotazioni attive in questa fascia. Cancellale o spostale prima.",
             422,
           );
         }

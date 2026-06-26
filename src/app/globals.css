@@ -1025,6 +1025,12 @@ summary:focus-visible {
   background: var(--blue-soft);
 }
 
+.time-slot.pending-signatures {
+  border-color: rgba(180, 83, 9, 0.32);
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .time-slot.blocked,
 .blocked-item {
   border-color: rgba(184, 0, 17, 0.22);
@@ -1933,6 +1939,11 @@ summary:focus-visible {
 
 .booking-item.canceled {
   opacity: 0.56;
+}
+
+.booking-item.pending_signatures {
+  border-color: rgba(180, 83, 9, 0.28);
+  background: #fffbeb;
 }
 
 .item-actions {

@@ -1,6 +1,36 @@
 import type { Booking } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+function bookingFixture(overrides: Partial<Booking> = {}): Booking {
+  const now = new Date("2026-06-03T10:00:00.000Z");
+
+  return {
+    id: "booking_1",
+    start: new Date("2026-06-04T16:00:00.000Z"),
+    end: new Date("2026-06-04T17:00:00.000Z"),
+    status: "CONFIRMED",
+    organizerName: "Mario Rossi",
+    organizerEmail: "mario@topfly.it",
+    manageTokenHash: null,
+    manageTokenExpiresAt: null,
+    outlookEventId: null,
+    outlookSyncStatus: "PENDING",
+    outlookSyncError: null,
+    playerCount: 4,
+    waiverRevision: 1,
+    signatureDeadlineAt: null,
+    signatureReminderSentAt: null,
+    signatureConfirmedAt: null,
+    autoCanceledAt: null,
+    guestWaiverTokenHash: null,
+    guestWaiverTokenExpiresAt: null,
+    createdAt: now,
+    updatedAt: now,
+    organizerId: null,
+    ...overrides,
+  };
+}
+
 describe("Microsoft Graph sync", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -34,7 +64,7 @@ describe("Microsoft Graph sync", () => {
 
     const { updateOutlookEvent } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
+    const booking = bookingFixture({
       id: "booking_1",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -53,7 +83,7 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
+    });
     const manageUrl = "https://padel.topfly.it/manage/booking_1?token=abc";
 
     const result = await updateOutlookEvent(
@@ -104,7 +134,7 @@ describe("Microsoft Graph sync", () => {
     for (const minutes of [45, 75, 105]) {
       const start = new Date("2026-06-07T17:30:00.000Z");
       const end = new Date(start.getTime() + minutes * 60_000);
-      const booking: Booking = {
+      const booking = bookingFixture({
         id: `booking_${minutes}`,
         start,
         end,
@@ -123,7 +153,7 @@ describe("Microsoft Graph sync", () => {
         createdAt: now,
         updatedAt: now,
         organizerId: null,
-      };
+      });
 
       await expect(
         createOutlookEvent(
@@ -174,7 +204,7 @@ describe("Microsoft Graph sync", () => {
 
     const { deleteOutlookEvent } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
+    const booking = bookingFixture({
       id: "booking_1",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -193,7 +223,7 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
+    });
 
     const result = await deleteOutlookEvent(booking);
     const patchCall = calls.find(
@@ -241,7 +271,7 @@ describe("Microsoft Graph sync", () => {
 
     const { deleteOutlookEvent } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
+    const booking = bookingFixture({
       id: "booking_1",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -260,7 +290,7 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
+    });
 
     const result = await deleteOutlookEvent(booking);
     const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
@@ -298,7 +328,7 @@ describe("Microsoft Graph sync", () => {
 
     const { sendWaiverEmail } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
+    const booking = bookingFixture({
       id: "booking_1",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -317,7 +347,7 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
+    });
 
     const result = await sendWaiverEmail({
       booking,
@@ -365,7 +395,7 @@ describe("Microsoft Graph sync", () => {
 
     const { sendGuestWaiverConfirmationEmail } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
+    const booking = bookingFixture({
       id: "booking_guest",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -384,7 +414,7 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
+    });
 
     const result = await sendGuestWaiverConfirmationEmail({
       booking,
@@ -405,6 +435,55 @@ describe("Microsoft Graph sync", () => {
     expect(payload.message.body.content).toContain("/waiver/cancel/waiver_1");
     expect(payload.message.attachments[0].name).toBe("padel-topfly.ics");
     expect(payload.message.attachments[0].contentType).toBe("text/calendar");
+  });
+
+  it("invia al referente la mail di prenotazione provvisoria con link firma ospiti", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string; method?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString(), method: init?.method });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { sendOrganizerPendingSignatureEmail } = await import("@/lib/graph");
+    const booking = bookingFixture({
+      status: "PENDING_SIGNATURES",
+      signatureDeadlineAt: new Date("2026-06-04T12:00:00.000Z"),
+    });
+
+    const result = await sendOrganizerPendingSignatureEmail({
+      booking,
+      signedCount: 1,
+      manageUrl: "https://padel.topfly.it/manage/booking_1?token=manage",
+      guestWaiverUrl: "https://padel.topfly.it/waiver/booking_1?token=guest",
+    });
+
+    const sendMailCall = calls.find((call) => call.url.includes("/users/padel%40topfly.it/sendMail"));
+    expect(result).toEqual({ status: "SENT" });
+    expect(sendMailCall).toBeDefined();
+
+    const payload = JSON.parse(sendMailCall!.body!);
+    expect(payload.message.subject).toBe("Padel TOPFLY - Prenotazione in attesa firme");
+    expect(payload.message.toRecipients[0].emailAddress.address).toBe("mario@topfly.it");
+    expect(payload.message.body.content).toContain("Prenotazione provvisoria");
+    expect(payload.message.body.content).toContain("Link firma ospiti");
+    expect(payload.message.body.content).toContain("/waiver/booking_1?token=guest");
   });
 
   it("avvisa un ospite quando la prenotazione viene modificata e include il nuovo link firma", async () => {
@@ -433,7 +512,7 @@ describe("Microsoft Graph sync", () => {
 
     const { sendGuestBookingUpdatedEmail } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const previousBooking: Booking = {
+    const previousBooking = bookingFixture({
       id: "booking_guest",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -452,13 +531,13 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
-    const booking: Booking = {
+    });
+    const booking = bookingFixture({
       ...previousBooking,
       start: new Date("2026-06-04T18:00:00.000Z"),
       end: new Date("2026-06-04T19:00:00.000Z"),
       waiverRevision: 2,
-    };
+    });
 
     const result = await sendGuestBookingUpdatedEmail({
       previousBooking,
@@ -507,7 +586,7 @@ describe("Microsoft Graph sync", () => {
 
     const { sendGuestBookingCanceledEmail } = await import("@/lib/graph");
     const now = new Date("2026-06-03T10:00:00.000Z");
-    const booking: Booking = {
+    const booking = bookingFixture({
       id: "booking_guest",
       start: new Date("2026-06-04T16:00:00.000Z"),
       end: new Date("2026-06-04T17:00:00.000Z"),
@@ -526,7 +605,7 @@ describe("Microsoft Graph sync", () => {
       createdAt: now,
       updatedAt: now,
       organizerId: null,
-    };
+    });
 
     const result = await sendGuestBookingCanceledEmail({
       booking,

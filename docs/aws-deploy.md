@@ -384,16 +384,21 @@ Permessi Graph sull'app registration:
 
 `Mail.Send` serve solo per inviare i PDF degli scarichi responsabilita' alla mailbox
 condivisa configurata in `APP_WAIVER_RECIPIENT_EMAIL`. In produzione il valore atteso e'
-`padel@topflysolutions.com`, non una casella personale. Conferme, modifiche e cancellazioni
-del referente usano gli inviti/eventi Outlook; gli ospiti gia' firmatari ricevono invece
-una mail custom se la prenotazione viene modificata o cancellata.
+`padel@topflysolutions.com`, non una casella personale. Le prenotazioni nascono
+`PENDING_SIGNATURES`; la conferma del referente usa l'invito/evento Outlook solo quando
+tutte le firme attive arrivano a `playerCount/playerCount`. Gli ospiti gia' firmatari
+ricevono invece una mail custom se la prenotazione viene modificata o cancellata.
 
-La conferma prenotazione crea un evento Outlook con invito e reminder 1h.
+La conferma a firme complete crea un evento Outlook con invito e reminder 1h.
 La cancellazione del referente usa solo `event/cancel`, cosi' Gmail/Google Calendar non
 riceve un update duplicato prima del cancel. Gli ospiti gia' firmatari vengono avvisati via
 `sendMail`.
 La mail automatica con prefisso `Canceled:` e' generata da Outlook: l'app controlla solo
 il commento testuale, che deve restare breve e chiaro.
+
+Le pending incomplete vengono processate da `.github/workflows/signature-deadlines.yml`
+tramite `POST /api/internal/signature-deadlines` protetto da `APP_INTERNAL_CRON_SECRET`.
+L'app esegue anche pulizia opportunistica su disponibilita', lookup e firma ospiti.
 
 Hardening Microsoft 365 raccomandato:
 

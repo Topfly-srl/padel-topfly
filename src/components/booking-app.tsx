@@ -201,6 +201,11 @@ function errorText(error: unknown, fallback: string) {
 
 function syncLabel(status: string, bookingStatus?: string) {
   const isCanceled = bookingStatus === "CANCELED";
+  const isPendingSignatures = bookingStatus === "PENDING_SIGNATURES";
+
+  if (isPendingSignatures) {
+    return null;
+  }
 
   if (status === "SYNCED") {
     return isCanceled ? "Cancellazione Outlook inviata" : "Invito Outlook inviato";
@@ -214,7 +219,30 @@ function syncLabel(status: string, bookingStatus?: string) {
   return null;
 }
 
-function bookingSuccessText(status: string) {
+function isActiveBooking(booking: Pick<AvailabilityBooking, "status">) {
+  return booking.status === "CONFIRMED" || booking.status === "PENDING_SIGNATURES";
+}
+
+function bookingStatusLabel(status: AvailabilityBooking["status"]) {
+  if (status === "PENDING_SIGNATURES") return "In attesa firme";
+  if (status === "CONFIRMED") return "Confermata";
+  return "Cancellata";
+}
+
+function bookingStatusTone(status: AvailabilityBooking["status"]) {
+  if (status === "PENDING_SIGNATURES") return "warning";
+  if (status === "CONFIRMED") return "success";
+  return "neutral";
+}
+
+function deadlineCopy(value: string | null) {
+  return value ? `Scadenza firme: ${localDateTime(new Date(value))}` : "Completa le firme prima di giocare.";
+}
+
+function bookingSuccessText(status: string, bookingStatus?: string) {
+  if (bookingStatus === "PENDING_SIGNATURES") {
+    return "Prenotazione provvisoria creata. Sara' confermata solo quando tutte le firme saranno raccolte.";
+  }
   if (status === "SYNCED") return "Fatto. Prenotazione confermata con invito Outlook.";
   if (status === "FAILED") return "Prenotazione confermata, ma l'invito Outlook non e' stato inviato.";
   return "Fatto. Prenotazione confermata.";
@@ -385,7 +413,7 @@ export function BookingApp({
   const dayBookings = useMemo(() => currentAvailability?.bookings ?? [], [currentAvailability?.bookings]);
   const dayBlocks = useMemo(() => currentAvailability?.blocks ?? [], [currentAvailability?.blocks]);
   const activeMyBookings = useMemo(
-    () => myBookings.filter((booking) => booking.status === "CONFIRMED"),
+    () => myBookings.filter(isActiveBooking),
     [myBookings],
   );
   const activeMyBookingCount = useMemo(
@@ -464,7 +492,7 @@ export function BookingApp({
     () =>
       myBookings.find(
         (booking) =>
-          booking.status === "CONFIRMED" &&
+          isActiveBooking(booking) &&
           rangeMatches(start, end, booking.start, booking.end),
       ) ?? null,
     [end, myBookings, start],
@@ -954,8 +982,10 @@ export function BookingApp({
       setPlayerCount(4);
     }
     setNotice({
-      type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
-      text: bookingSuccessText(json.booking.outlookSyncStatus),
+      type: json.booking.status === "PENDING_SIGNATURES" || json.booking.outlookSyncStatus === "FAILED"
+        ? "warning"
+        : "success",
+      text: bookingSuccessText(json.booking.outlookSyncStatus, json.booking.status),
     });
     await refresh(nextTokens);
   }
@@ -1191,7 +1221,9 @@ export function BookingApp({
               {timelineSlots.map(({ option, booking, block, isSelected, isSelectedStart }) => {
                 return (
                   <button
-                    className={`time-slot ${booking ? "busy" : ""} ${block ? "blocked" : ""} ${
+                    className={`time-slot ${booking ? "busy" : ""} ${
+                      booking?.status === "PENDING_SIGNATURES" ? "pending-signatures" : ""
+                    } ${block ? "blocked" : ""} ${
                       isSelectedStart ? "selected-start" : isSelected ? "selected-range" : ""
                     }`}
                     data-selected={isSelected ? "true" : undefined}
@@ -1200,10 +1232,14 @@ export function BookingApp({
                     onClick={() => setSelectedTime(option)}
                     aria-pressed={isSelectedStart}
                     type="button"
-                    title={booking ? `Prenotato da ${booking.organizerName}` : block?.reason}
+                    title={booking ? `${bookingStatusLabel(booking.status)} - ${booking.organizerName}` : block?.reason}
                   >
                     <span>{option}</span>
-                    {booking ? <small>{booking.organizerName}</small> : null}
+                    {booking ? (
+                      <small>
+                        {booking.status === "PENDING_SIGNATURES" ? "Attesa firme" : booking.organizerName}
+                      </small>
+                    ) : null}
                     {block ? <small>{block.reason}</small> : null}
                   </button>
                 );
@@ -1218,11 +1254,21 @@ export function BookingApp({
               <div className="confirmed-summary">
                 <p className="muted-label">Riepilogo</p>
                 <div className={`summary-state ${selectedOwnSyncFailed ? "sync-warning" : ""}`}>
-                  <span className={`summary-state-icon ${selectedOwnSyncFailed ? "warning" : "success"}`}>
-                    {selectedOwnSyncFailed ? <MailWarning size={17} /> : <Check size={17} />}
+                  <span
+                    className={`summary-state-icon ${
+                      selectedOwnBooking.status === "PENDING_SIGNATURES" || selectedOwnSyncFailed
+                        ? "warning"
+                        : "success"
+                    }`}
+                  >
+                    {selectedOwnBooking.status === "PENDING_SIGNATURES" || selectedOwnSyncFailed ? (
+                      <MailWarning size={17} />
+                    ) : (
+                      <Check size={17} />
+                    )}
                   </span>
                   <div>
-                    <h2>Prenotazione confermata</h2>
+                    <h2>{bookingStatusLabel(selectedOwnBooking.status)}</h2>
                     <p>
                       {localSummaryDay(start)} · {localTime(start)} - {localTime(end)}
                     </p>
@@ -1236,8 +1282,17 @@ export function BookingApp({
                     <small>
                       Firme scarico: {selectedOwnBooking.waiverSignedCount}/{selectedOwnBooking.playerCount}
                     </small>
+                    {selectedOwnBooking.status === "PENDING_SIGNATURES" ? (
+                      <small>{deadlineCopy(selectedOwnBooking.signatureDeadlineAt)}</small>
+                    ) : null}
                   </div>
                 </div>
+                {selectedOwnBooking.status === "PENDING_SIGNATURES" ? (
+                  <div className="notice warning">
+                    Mancano {Math.max(0, selectedOwnBooking.playerCount - selectedOwnBooking.waiverSignedCount)} firma/e:
+                    senza tutte le firme la prenotazione verra&apos; annullata automaticamente.
+                  </div>
+                ) : null}
                 {notice ? (
                   <div
                     aria-live={notice.type === "error" ? "assertive" : "polite"}
@@ -1320,7 +1375,7 @@ export function BookingApp({
                 </button>
                 {editingBookingId ? null : (
                   <p className="summary-action-note">
-                    Ricevi conferma via email. Scarico inviato all&apos;Amministrazione.
+                    La conferma arriva solo dopo tutte le firme. Scarico inviato alla Direzione.
                   </p>
                 )}
               </>
@@ -1364,7 +1419,9 @@ export function BookingApp({
                           {localTime(new Date(booking.end))}
                         </strong>
                         <small>
-                          {booking.status === "CONFIRMED" ? "Confermata" : "Cancellata"}
+                          <span className={`status-badge ${bookingStatusTone(booking.status)}`}>
+                            {bookingStatusLabel(booking.status)}
+                          </span>
                           {syncLabel(booking.outlookSyncStatus, booking.status)
                             ? ` · ${syncLabel(booking.outlookSyncStatus, booking.status)}`
                             : ""}
@@ -1372,6 +1429,9 @@ export function BookingApp({
                         <small>
                           Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
                         </small>
+                        {booking.status === "PENDING_SIGNATURES" ? (
+                          <small>{deadlineCopy(booking.signatureDeadlineAt)}</small>
+                        ) : null}
                       </div>
                       <div className="item-actions">
                         {guestLink ? (
@@ -1493,9 +1553,19 @@ export function BookingApp({
                           {localTime(new Date(booking.start))} - {localTime(new Date(booking.end))}
                         </span>
                         <small>
+                          <span className={`status-badge ${bookingStatusTone(booking.status)}`}>
+                            {bookingStatusLabel(booking.status)}
+                          </span>{" "}
                           Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
                           {booking.waiverEmailStatus === "FAILED" ? " · email PDF da reinviare" : ""}
                         </small>
+                        {booking.status === "PENDING_SIGNATURES" ? (
+                          <small className="sync-warning-text">
+                            Non usare il campo · {deadlineCopy(booking.signatureDeadlineAt)}
+                          </small>
+                        ) : (
+                          <small className="copy-state success">Campo utilizzabile</small>
+                        )}
                       </div>
                       <div className="item-actions">
                         <button
@@ -1807,7 +1877,7 @@ export function BookingApp({
                 <>
                   <small className={`form-submit-hint ${isBookingFormValid ? "success" : ""}`}>
                     {isBookingFormValid
-                      ? "Tutto pronto: puoi firmare e prenotare."
+                      ? "Tutto pronto: puoi creare la prenotazione provvisoria."
                       : `Completa: ${missingBookingFields.slice(0, 3).join(", ")}${
                           missingBookingFields.length > 3 ? "..." : ""
                         }.`}
@@ -1818,7 +1888,7 @@ export function BookingApp({
                     </button>
                     <button className="primary-button" onClick={saveBooking} type="button">
                       <Check size={18} />
-                      Firma e conferma
+                      Firma e crea
                     </button>
                   </div>
                 </>

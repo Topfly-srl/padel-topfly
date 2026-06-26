@@ -350,16 +350,21 @@ o gestire gli scarichi ricevuti.
 
 Conferme:
 
-- creano evento Outlook nel calendario `padel@topflysolutions.com`;
-- invitano l'email inserita nel form;
+- la prenotazione nasce `PENDING_SIGNATURES` e blocca temporaneamente lo slot;
+- l'evento Outlook nel calendario `padel@topflysolutions.com` viene creato solo quando le
+  firme attive arrivano a `playerCount/playerCount`;
+- l'invito viene inviato all'email inserita nel form solo a firme complete;
 - includono reminder Outlook 1 ora prima;
-- includono link di gestione;
-- includono link firma ospiti, quando disponibile.
+- la mail provvisoria al referente include link di gestione, link firma ospiti e scadenza firme;
+- se mancano firme, il referente riceve un reminder prima della scadenza e una mail di
+  annullamento se la pending scade incompleta.
 
 Scarichi responsabilita':
 
 - il referente firma durante la prenotazione;
 - dopo la prenotazione il referente vede il link ospiti completo e puo' copiarlo o aprirlo;
+- senza tutte le firme lo stato resta `PENDING_SIGNATURES` e il campo non va considerato
+  utilizzabile;
 - gli ospiti firmano da `/waiver/[bookingId]?token=...`;
 - gli ospiti ricevono una mail di conferma con allegato calendario `.ics` e link personale
   per rinunciare al posto;
@@ -368,11 +373,23 @@ Scarichi responsabilita':
 - se il referente cancella la prenotazione, gli ospiti gia' firmatari ricevono una mail di
   cancellazione con allegato calendario `.ics`;
 - se un ospite rinuncia, la firma resta nello storico ma non conta piu' nel limite giocatori;
+- se una rinuncia porta una prenotazione confermata sotto `playerCount/playerCount`, la
+  prenotazione torna `PENDING_SIGNATURES` e l'evento Outlook viene cancellato/invalidato;
 - quando le firme attive arrivano a `playerCount/playerCount`, il link ospiti non permette
   nuove firme;
 - ogni firma genera un PDF archiviato in Postgres;
 - l'app invia il PDF alla mailbox condivisa Padel tramite Graph `sendMail`;
 - se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`.
+
+Scadenze firme:
+
+- deadline standard: prima tra 24 ore dalla creazione e 4 ore prima dell'inizio;
+- prenotazioni last minute: prima tra 30 minuti dalla creazione e l'inizio;
+- workflow schedulato: `.github/workflows/signature-deadlines.yml`, ogni 10 minuti;
+- endpoint interno: `POST /api/internal/signature-deadlines`;
+- secret richiesto: `APP_INTERNAL_CRON_SECRET`, salvato anche nei GitHub Actions secrets;
+- se il workflow non gira, l'app fa comunque pulizia opportunistica su calendario, lookup e
+  firma ospiti.
 
 Privacy e retention:
 

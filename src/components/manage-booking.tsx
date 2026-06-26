@@ -9,7 +9,7 @@ import { bookingDurationOptions } from "@/lib/booking-constants";
 import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/types";
 
 type Notice = {
-  type: "success" | "error" | "info";
+  type: "success" | "error" | "info" | "warning";
   text: string;
 };
 
@@ -76,6 +76,20 @@ function cancellationSuccessText(status: string) {
   return "Prenotazione cancellata.";
 }
 
+function isActiveBooking(booking: Pick<MyBooking, "status">) {
+  return booking.status === "CONFIRMED" || booking.status === "PENDING_SIGNATURES";
+}
+
+function bookingStatusLabel(status: MyBooking["status"]) {
+  if (status === "PENDING_SIGNATURES") return "Prenotazione in attesa firme";
+  if (status === "CONFIRMED") return "Prenotazione confermata";
+  return "Prenotazione cancellata";
+}
+
+function deadlineCopy(value: string | null) {
+  return value ? `Scadenza firme: ${localDateTime(new Date(value))}` : "Completa le firme prima di giocare.";
+}
+
 function rememberToken(token: string) {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(tokenStorageKey) ?? "[]") as unknown;
@@ -114,7 +128,7 @@ export function ManageBooking({
   );
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
   const selectionConflict = useMemo(() => {
-    if (!availability || !booking || booking.status !== "CONFIRMED") return null;
+    if (!availability || !booking || !isActiveBooking(booking)) return null;
 
     const conflictingBooking = availability.bookings.find(
       (item) => item.id !== booking.id && rangeOverlaps(start, end, item.start, item.end),
@@ -159,7 +173,7 @@ export function ManageBooking({
   }, [bookingId, manageToken]);
 
   useEffect(() => {
-    if (!booking || booking.status !== "CONFIRMED") return;
+    if (!booking || !isActiveBooking(booking)) return;
 
     let canceled = false;
 
@@ -204,7 +218,13 @@ export function ManageBooking({
 
       const json = (await response.json()) as { booking: MyBooking };
       setBooking(json.booking);
-      setNotice({ type: "success", text: "Prenotazione aggiornata." });
+      setNotice({
+        type: json.booking.status === "PENDING_SIGNATURES" ? "warning" : "success",
+        text:
+          json.booking.status === "PENDING_SIGNATURES"
+            ? "Prenotazione aggiornata e rimessa in attesa firme."
+            : "Prenotazione aggiornata.",
+      });
     } finally {
       setIsSaving(false);
     }
@@ -258,14 +278,26 @@ export function ManageBooking({
         <p className="eyebrow">Gestione prenotazione</p>
         {booking ? (
           <>
-            <h1>{booking.status === "CONFIRMED" ? "Modifica il tuo slot" : "Prenotazione cancellata"}</h1>
+            <h1>{isActiveBooking(booking) ? "Gestisci il tuo slot" : "Prenotazione cancellata"}</h1>
             <div className="manage-current">
-              <span>Prenotazione attuale</span>
+              <span>{bookingStatusLabel(booking.status)}</span>
               <strong>{localDateTime(new Date(booking.start))}</strong>
               <small>{localDateTime(new Date(booking.end))}</small>
+              <small>
+                Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
+              </small>
+              {booking.status === "PENDING_SIGNATURES" ? (
+                <small>{deadlineCopy(booking.signatureDeadlineAt)}</small>
+              ) : null}
             </div>
 
-            {booking.status === "CONFIRMED" ? (
+            {booking.status === "PENDING_SIGNATURES" ? (
+              <div className="notice warning">
+                La prenotazione non e&apos; ancora confermata. Se mancano firme alla scadenza, verra&apos; annullata automaticamente.
+              </div>
+            ) : null}
+
+            {isActiveBooking(booking) ? (
               <>
                 <div className="selector-row compact">
                   <label>

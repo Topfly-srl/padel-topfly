@@ -29,6 +29,13 @@ import {
 import { prisma } from "@/lib/prisma";
 import { generateWaiverPdf, waiverPdfFilename, waiverRegulationPath } from "@/lib/waiver-pdf";
 import { appConfig } from "@/lib/config";
+import {
+  cancelOutlookEventForPendingBooking,
+  markBookingConfirmedIfComplete,
+  processSignatureDeadlines,
+  signatureDeadlineAt,
+  syncConfirmedBooking,
+} from "@/lib/signature-workflow";
 
 export type WaiverInput = {
   signerName: string;
@@ -59,6 +66,8 @@ export type WaiverContext = {
     waiverRevision: number;
     waiverSignedCount: number;
     remainingSignatures: number;
+    status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
+    signatureDeadlineAt: string | null;
     documentVersion: string;
     regulationUrl: string;
   };
@@ -103,7 +112,7 @@ export type GuestWaiverCancelContext = {
     playerCount: number;
     waiverSignedCount: number;
     remainingSignatures: number;
-    status: "CONFIRMED" | "CANCELED";
+    status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
   };
 };
 
@@ -512,7 +521,7 @@ function assertGuestWaiverAccess(
     throw new AppError("Link firma ospiti non valido o scaduto.", 403);
   }
 
-  if (booking.status !== "CONFIRMED") {
+  if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
     throw new AppError("La prenotazione non e' piu' attiva.", 409);
   }
 }
@@ -569,6 +578,7 @@ export async function getWaiverContext(bookingId: string, token: string | null):
     return demoGetWaiverContext(bookingId, token);
   }
 
+  await processSignatureDeadlines();
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     include: {
@@ -596,6 +606,8 @@ export async function getWaiverContext(bookingId: string, token: string | null):
       waiverRevision: booking.waiverRevision,
       waiverSignedCount: summary.signedCount,
       remainingSignatures: summary.remainingCount,
+      status: booking.status,
+      signatureDeadlineAt: booking.signatureDeadlineAt?.toISOString() ?? null,
       documentVersion: appConfig.waiver.documentVersion,
       regulationUrl: waiverRegulationPath,
     },
@@ -613,8 +625,9 @@ export async function signGuestWaiver(
     return demoSignGuestWaiver(bookingId, token, input, evidence);
   }
 
+  await processSignatureDeadlines({ baseUrl });
   const cancelToken = createManageToken();
-  const signature = await prisma.$transaction(
+  const result = await prisma.$transaction(
     async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
@@ -671,7 +684,12 @@ export async function signGuestWaiver(
         },
       });
 
-      return saved;
+      const confirmation = await markBookingConfirmedIfComplete(tx, booking, saved.signerEmail);
+
+      return {
+        signature: saved,
+        confirmedBooking: confirmation.confirmed ? confirmation.booking : null,
+      };
     },
     { isolationLevel: "Serializable" },
   );
@@ -680,12 +698,20 @@ export async function signGuestWaiver(
   // quindi getWaiverContext sotto riflette gia' il nuovo conteggio.
   runAfterResponse(async () => {
     await Promise.all([
-      sendWaiverSignatureEmail(signature.id),
+      sendWaiverSignatureEmail(result.signature.id),
       sendGuestWaiverEmail(
-        signature.id,
-        buildGuestWaiverCancelUrl(baseUrl ?? appConfig.publicOrigin, signature.id, cancelToken),
+        result.signature.id,
+        buildGuestWaiverCancelUrl(baseUrl ?? appConfig.publicOrigin, result.signature.id, cancelToken),
       ),
     ]);
+
+    if (result.confirmedBooking) {
+      await syncConfirmedBooking({
+        booking: result.confirmedBooking,
+        baseUrl,
+        guestWaiverToken: token ?? undefined,
+      });
+    }
   });
   return getWaiverContext(bookingId, token);
 }
@@ -698,6 +724,7 @@ export async function getGuestWaiverCancelContext(
     return demoGetGuestWaiverCancelContext(signatureId, token);
   }
 
+  await processSignatureDeadlines();
   const signature = await prisma.waiverSignature.findUnique({
     where: { id: signatureId },
     include: {
@@ -724,7 +751,8 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
     return demoCancelGuestWaiverSignature(signatureId, token);
   }
 
-  const canceled = await prisma.$transaction(
+  await processSignatureDeadlines();
+  const result = await prisma.$transaction(
     async (tx) => {
       const signature = await tx.waiverSignature.findUnique({
         where: { id: signatureId },
@@ -746,10 +774,10 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
       assertGuestCancelAccess(signature, token);
 
       if (signature.status === "CANCELED") {
-        return signature;
+        return { canceled: signature, revertedBooking: null };
       }
 
-      if (signature.booking.status !== "CONFIRMED") {
+      if (signature.booking.status !== "CONFIRMED" && signature.booking.status !== "PENDING_SIGNATURES") {
         throw new AppError("La prenotazione non e' piu' attiva.", 409);
       }
 
@@ -788,12 +816,55 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
         },
       });
 
-      return saved;
+      const signedCount = saved.booking.waiverSignatures.filter(
+        (item) =>
+          item.bookingRevision === saved.booking.waiverRevision &&
+          item.status === "ACTIVE",
+      ).length;
+
+      if (saved.booking.status !== "CONFIRMED" || signedCount >= saved.booking.playerCount) {
+        return { canceled: saved, revertedBooking: null };
+      }
+
+      const revertedBooking = await tx.booking.update({
+        where: { id: saved.booking.id },
+        data: {
+          status: "PENDING_SIGNATURES",
+          signatureDeadlineAt: signatureDeadlineAt(saved.booking.start),
+          signatureReminderSentAt: null,
+          signatureConfirmedAt: null,
+          outlookSyncStatus: saved.booking.outlookEventId ? "PENDING" : "SKIPPED",
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorEmail: saved.signerEmail,
+          action: "BOOKING_SIGNATURES_INCOMPLETE",
+          entityType: "Booking",
+          entityId: saved.booking.id,
+          before: {
+            status: "CONFIRMED",
+            waiverSignedCount: signedCount + 1,
+          },
+          after: {
+            status: "PENDING_SIGNATURES",
+            waiverSignedCount: signedCount,
+            signatureDeadlineAt: revertedBooking.signatureDeadlineAt?.toISOString() ?? null,
+          },
+        },
+      });
+
+      return { canceled: saved, revertedBooking };
     },
     { isolationLevel: "Serializable" },
   );
 
-  return serializeGuestCancelContext(canceled);
+  if (result.revertedBooking) {
+    runAfterResponse(() => cancelOutlookEventForPendingBooking(result.revertedBooking!));
+  }
+
+  return getGuestWaiverCancelContext(signatureId, token);
 }
 
 export async function retryWaiverEmail(signatureId: string, actor: Pick<User, "id" | "email">) {

@@ -12,7 +12,8 @@ const manageTokenSchema = z.string().trim().min(1).max(200);
 const updateBookingSchema = z.object({
   start: z.string().optional(),
   end: z.string().optional(),
-  status: z.enum(["CONFIRMED", "CANCELED"]).optional(),
+  status: z.enum(["PENDING_SIGNATURES", "CONFIRMED", "CANCELED"]).optional(),
+  playerCount: z.number().int().min(2).max(4).optional(),
   manageToken: manageTokenSchema.optional(),
 });
 
@@ -46,6 +47,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         start: body.start ? toDateOrThrow(body.start, "Inizio") : undefined,
         end: body.end ? toDateOrThrow(body.end, "Fine") : undefined,
         status: body.status,
+        playerCount: body.playerCount,
       },
     );
 

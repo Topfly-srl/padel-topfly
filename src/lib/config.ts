@@ -24,6 +24,7 @@ const envSchema = z.object({
   MS_GRAPH_MAILBOX: z.string().optional(),
   APP_WAIVER_RECIPIENT_EMAIL: z.string().email().default("padel@topflysolutions.com"),
   APP_WAIVER_DOCUMENT_VERSION: z.string().default("padel-waiver-v1"),
+  APP_INTERNAL_CRON_SECRET: z.string().optional(),
   DATABASE_URL: z.string().optional(),
 });
 
@@ -104,6 +105,7 @@ export const appConfig = {
     recipientEmail: env.APP_WAIVER_RECIPIENT_EMAIL.trim().toLowerCase(),
     documentVersion: env.APP_WAIVER_DOCUMENT_VERSION.trim(),
   },
+  internalCronSecret: env.APP_INTERNAL_CRON_SECRET?.trim(),
 };
 
 export function isAllowedCompanyEmail(email: string) {

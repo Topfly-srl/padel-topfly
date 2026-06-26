@@ -22,6 +22,8 @@ type WaiverContext = {
     waiverRevision: number;
     waiverSignedCount: number;
     remainingSignatures: number;
+    status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
+    signatureDeadlineAt: string | null;
     documentVersion: string;
     regulationUrl: string;
   };
@@ -61,6 +63,10 @@ function localTime(date: Date) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function deadlineCopy(value: string | null) {
+  return value ? `Scadenza firme: ${localDateTime(new Date(value))}` : "Completa le firme prima dell'orario di gioco.";
 }
 
 async function readApiError(response: Response) {
@@ -279,6 +285,9 @@ export function WaiverSigning({
                   {localDateTime(bookingStart)} - {localTime(bookingEnd)}
                 </p>
                 <small>Referente: {waiver.booking.organizerName}</small>
+                {waiver.booking.status === "PENDING_SIGNATURES" ? (
+                  <small>{deadlineCopy(waiver.booking.signatureDeadlineAt)}</small>
+                ) : null}
               </div>
               <span className="count-pill">
                 {waiver.booking.waiverSignedCount}/{waiver.booking.playerCount} firme
@@ -289,8 +298,8 @@ export function WaiverSigning({
               <div className="guest-success-card">
                 <strong>Firma registrata.</strong>
                 <p>
-                  Il PDF firmato è stato inviato alla Direzione. Riceverai una mail con riepilogo,
-                  evento calendario e link per rinunciare al posto se non puoi esserci.
+                  Il PDF firmato e&apos; stato inviato alla Direzione. La prenotazione sara&apos; confermata
+                  quando tutte le firme richieste saranno raccolte.
                 </p>
               </div>
             ) : waiver.booking.remainingSignatures <= 0 ? (

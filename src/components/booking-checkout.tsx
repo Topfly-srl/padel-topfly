@@ -27,11 +27,13 @@ type CreatedBooking = {
   id: string;
   start: string;
   end: string;
+  status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
   organizerName: string;
   playerCount: number;
   waiverSignedCount: number;
   outlookSyncStatus: "PENDING" | "SYNCED" | "FAILED" | "SKIPPED";
   waiverEmailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED" | null;
+  signatureDeadlineAt: string | null;
   manageToken?: string;
   guestWaiverUrl?: string;
 };
@@ -70,6 +72,16 @@ function localSummaryDay(date: Date) {
     weekday: "long",
     day: "2-digit",
     month: "long",
+  }).format(date);
+}
+
+function localDateTime(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(date);
 }
 
@@ -297,10 +309,10 @@ export function BookingCheckout({
 
     setCreatedBooking(json.booking);
     setNotice({
-      type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
+      type: json.booking.status === "PENDING_SIGNATURES" ? "warning" : "success",
       text:
-        json.booking.outlookSyncStatus === "FAILED"
-          ? "Prenotazione confermata. L'invito Outlook non e' stato inviato."
+        json.booking.status === "PENDING_SIGNATURES"
+          ? "Prenotazione provvisoria: sara' confermata solo quando tutte le firme saranno raccolte."
           : "Prenotazione confermata.",
     });
   }
@@ -315,7 +327,7 @@ export function BookingCheckout({
           <Image src={appPath("/topfly-logo.png")} alt="TOPFLY GPS solutions" width={678} height={147} priority />
           <div>
             <p className="muted-label">Padel aziendale</p>
-            <h1>{createdBooking ? "Prenotazione confermata" : "Prenota e firma"}</h1>
+            <h1>{createdBooking ? "Prenotazione provvisoria" : "Prenota e firma"}</h1>
           </div>
         </div>
       </header>
@@ -381,11 +393,20 @@ export function BookingCheckout({
         {createdBooking ? (
           <div className="checkout-success-flow">
             <div className="checkout-success-head">
-              <span className="summary-state-icon success" aria-hidden="true">
-                <Check size={18} />
+              <span
+                className={`summary-state-icon ${
+                  createdBooking.status === "PENDING_SIGNATURES" ? "warning" : "success"
+                }`}
+                aria-hidden="true"
+              >
+                {createdBooking.status === "PENDING_SIGNATURES" ? <Clock3 size={18} /> : <Check size={18} />}
               </span>
               <div>
-                <h2>Prenotazione confermata</h2>
+                <h2>
+                  {createdBooking.status === "PENDING_SIGNATURES"
+                    ? "Prenotazione provvisoria"
+                    : "Prenotazione confermata"}
+                </h2>
                 <p>
                   {localTime(start)} - {localTime(end)} · Firme scarico{" "}
                   {createdBooking.waiverSignedCount}/{createdBooking.playerCount}
@@ -406,11 +427,26 @@ export function BookingCheckout({
               </span>
             </div>
 
+            {createdBooking.status === "PENDING_SIGNATURES" ? (
+              <div className="notice warning">
+                <Clock3 size={16} />
+                <div>
+                  <strong>Prenotazione non ancora confermata.</strong>
+                  <span>
+                    Mancano {Math.max(0, createdBooking.playerCount - createdBooking.waiverSignedCount)} firma/e.
+                    {createdBooking.signatureDeadlineAt
+                      ? ` Scadenza: ${localDateTime(new Date(createdBooking.signatureDeadlineAt))}.`
+                      : " Completa le firme prima dell'orario di gioco."}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
             {createdBooking.guestWaiverUrl ? (
               <section className="checkout-guest-share">
                 <div className="checkout-section-title plain">
                   <div>
-                    <strong>Invia il link agli ospiti</strong>
+                    <strong>Invia subito il link agli ospiti</strong>
                   </div>
                 </div>
                 <GuestLinkPanel
@@ -523,7 +559,7 @@ export function BookingCheckout({
                     type="button"
                   >
                     <Check size={18} />
-                    {isSubmitting ? "Confermo..." : "Firma e conferma prenotazione"}
+                    {isSubmitting ? "Creo..." : "Firma e crea prenotazione provvisoria"}
                   </button>
                 </div>
               </section>

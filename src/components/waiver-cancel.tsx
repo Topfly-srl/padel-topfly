@@ -21,7 +21,7 @@ type CancelContext = {
     playerCount: number;
     waiverSignedCount: number;
     remainingSignatures: number;
-    status: "CONFIRMED" | "CANCELED";
+    status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
   };
 };
 
@@ -175,10 +175,10 @@ export function WaiverCancel({
               </span>
             </div>
 
-            {cancelContext.booking.status !== "CONFIRMED" ? (
+            {cancelContext.booking.status === "CANCELED" ? (
               <div className="notice warning">
                 <XCircle size={17} />
-                <span>Questa prenotazione non è più attiva.</span>
+                <span>Questa prenotazione non e&apos; piu&apos; attiva.</span>
               </div>
             ) : isCanceled ? (
               <div className="notice success">

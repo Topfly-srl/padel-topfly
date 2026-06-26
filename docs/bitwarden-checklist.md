@@ -48,6 +48,7 @@ Da salvare:
 - `MS_GRAPH_CLIENT_ID`;
 - `MS_GRAPH_CLIENT_SECRET`;
 - `MS_GRAPH_MAILBOX`;
+- `APP_INTERNAL_CRON_SECRET`;
 - data scadenza dei client secret Microsoft.
 
 Questa e' la nota piu' importante per disaster recovery. Deve restare aggiornata ogni
@@ -64,7 +65,9 @@ Da salvare:
 - host: `18.194.7.194`;
 - known hosts usato in `LIGHTSAIL_KNOWN_HOSTS`;
 - repository variable: `PRODUCTION_AUTO_DEPLOY=true`;
+- repository secret: `APP_INTERNAL_CRON_SECRET`;
 - workflow: `.github/workflows/deploy-production.yml`;
+- workflow: `.github/workflows/signature-deadlines.yml`;
 - nota: chiave dedicata solo al deploy GitHub Actions.
 
 Questa chiave serve per deploy automatico. Se viene compromessa, rimuoverla da

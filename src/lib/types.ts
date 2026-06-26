@@ -17,6 +17,9 @@ export type AvailabilityBooking = {
   playerCount: number;
   waiverSignedCount: number;
   waiverEmailStatus: WaiverEmailStatus | null;
+  signatureDeadlineAt: string | null;
+  signatureConfirmedAt: string | null;
+  autoCanceledAt: string | null;
 };
 
 export type AvailabilityBlock = {

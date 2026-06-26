@@ -13,6 +13,7 @@ enum UserRole {
 }
 
 enum BookingStatus {
+  PENDING_SIGNATURES
   CONFIRMED
   CANCELED
 }
@@ -59,7 +60,7 @@ model Booking {
   id                String            @id @default(cuid())
   start             DateTime
   end               DateTime
-  status            BookingStatus     @default(CONFIRMED)
+  status            BookingStatus     @default(PENDING_SIGNATURES)
   organizerName     String
   organizerEmail    String
   manageTokenHash   String?
@@ -69,6 +70,10 @@ model Booking {
   outlookSyncError  String?
   playerCount       Int               @default(4)
   waiverRevision    Int               @default(1)
+  signatureDeadlineAt DateTime?
+  signatureReminderSentAt DateTime?
+  signatureConfirmedAt DateTime?
+  autoCanceledAt    DateTime?
   guestWaiverTokenHash String?
   guestWaiverTokenExpiresAt DateTime?
   createdAt         DateTime          @default(now())
@@ -81,6 +86,8 @@ model Booking {
   @@index([organizerEmail, status, end])
   @@index([manageTokenHash])
   @@index([guestWaiverTokenHash])
+  @@index([status, signatureDeadlineAt])
+  @@index([status, signatureReminderSentAt])
 }
 
 model WaiverSignature {

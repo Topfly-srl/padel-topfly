@@ -16,6 +16,7 @@ import {
   normalizePersonName,
 } from "@/lib/manage-token";
 import { assertDateParam, zonedDayBounds } from "@/lib/time";
+import { signatureDeadlineAt } from "@/lib/signature-workflow";
 import type {
   AuditItem,
   AvailabilityBlock,
@@ -29,13 +30,17 @@ type DemoBooking = {
   id: string;
   start: Date;
   end: Date;
-  status: "CONFIRMED" | "CANCELED";
+  status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
   organizerEmail: string;
   organizerName: string;
   manageTokenHash: string | null;
   manageTokenExpiresAt: Date | null;
   playerCount: number;
   waiverRevision: number;
+  signatureDeadlineAt: Date | null;
+  signatureReminderSentAt: Date | null;
+  signatureConfirmedAt: Date | null;
+  autoCanceledAt: Date | null;
   guestWaiverTokenHash: string | null;
   guestWaiverTokenExpiresAt: Date | null;
   createdAt: Date;
@@ -127,6 +132,48 @@ function demoWaiverSummary(booking: DemoBooking) {
   };
 }
 
+function isDemoActiveBooking(booking: DemoBooking, now = new Date()) {
+  return (
+    booking.status === "CONFIRMED" ||
+    (booking.status === "PENDING_SIGNATURES" &&
+      (!booking.signatureDeadlineAt || booking.signatureDeadlineAt > now))
+  );
+}
+
+function demoProcessDeadlines(now = new Date()) {
+  const reminderUpperBound = new Date(now.getTime() + 60 * 60_000);
+
+  for (const booking of bookings) {
+    if (booking.status !== "PENDING_SIGNATURES") continue;
+    const summary = demoWaiverSummary(booking);
+
+    if (summary.signedCount >= booking.playerCount) {
+      booking.status = "CONFIRMED";
+      booking.signatureConfirmedAt = now;
+      booking.updatedAt = now;
+      continue;
+    }
+
+    if (booking.signatureDeadlineAt && booking.signatureDeadlineAt <= now) {
+      booking.status = "CANCELED";
+      booking.autoCanceledAt = now;
+      booking.updatedAt = now;
+      addAudit("system", "BOOKING_AUTO_CANCELED_SIGNATURES", "Booking", booking.id);
+      continue;
+    }
+
+    if (
+      !booking.signatureReminderSentAt &&
+      booking.signatureDeadlineAt &&
+      booking.signatureDeadlineAt <= reminderUpperBound
+    ) {
+      booking.signatureReminderSentAt = now;
+      booking.updatedAt = now;
+      addAudit("system", "BOOKING_SIGNATURE_REMINDER_SENT", "Booking", booking.id);
+    }
+  }
+}
+
 function addAudit(actorEmail: string, action: string, entityType: string, entityId?: string) {
   audit.unshift({
     id: id("audit"),
@@ -151,6 +198,9 @@ function bookingToApi(booking: DemoBooking): AvailabilityBooking {
     playerCount: booking.playerCount,
     waiverSignedCount: waiverSummary.signedCount,
     waiverEmailStatus: waiverSummary.emailStatus,
+    signatureDeadlineAt: booking.signatureDeadlineAt?.toISOString() ?? null,
+    signatureConfirmedAt: booking.signatureConfirmedAt?.toISOString() ?? null,
+    autoCanceledAt: booking.autoCanceledAt?.toISOString() ?? null,
   };
 }
 
@@ -214,10 +264,11 @@ function assertDemoBookingAllowed(
   end: Date,
   ignoreBookingId?: string,
 ) {
+  demoProcessDeadlines();
   const futureBookingCount = bookings.filter(
     (booking) =>
       booking.organizerEmail === organizerEmail &&
-      booking.status === "CONFIRMED" &&
+      isDemoActiveBooking(booking) &&
       booking.end >= new Date() &&
       booking.id !== ignoreBookingId,
   ).length;
@@ -231,7 +282,7 @@ function assertDemoBookingAllowed(
   if (
     bookings.some(
       (booking) =>
-        booking.status === "CONFIRMED" &&
+        isDemoActiveBooking(booking) &&
         booking.id !== ignoreBookingId &&
         rangesOverlap(start, end, booking.start, booking.end),
     )
@@ -261,6 +312,7 @@ function assertDemoAccess(booking: DemoBooking, access: DemoAccess) {
 }
 
 export async function demoGetAvailability(dateValue: string | null) {
+  demoProcessDeadlines();
   const date = assertDateParam(dateValue);
   const bounds = zonedDayBounds(date);
 
@@ -273,7 +325,7 @@ export async function demoGetAvailability(dateValue: string | null) {
     bookings: bookings
       .filter(
         (booking) =>
-          booking.status === "CONFIRMED" &&
+          isDemoActiveBooking(booking) &&
           rangesOverlap(bounds.start, bounds.end, booking.start, booking.end),
       )
       .map(bookingToApi),
@@ -284,6 +336,7 @@ export async function demoGetAvailability(dateValue: string | null) {
 }
 
 export async function demoLookupBookings(tokens: string[], baseUrl?: string) {
+  demoProcessDeadlines();
   const cleanTokens = [...new Set(tokens.map((token) => token.trim()).filter(Boolean))].slice(0, 30);
   const tokenByHash = new Map(cleanTokens.map((token) => [hashManageToken(token), token]));
   const now = new Date();
@@ -325,13 +378,17 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     id: id("booking"),
     start: input.start,
     end: input.end,
-    status: "CONFIRMED",
+    status: "PENDING_SIGNATURES",
     organizerEmail: identity.organizerEmail,
     organizerName: identity.organizerName,
     manageTokenHash: hashManageToken(manageToken),
     manageTokenExpiresAt: manageTokenExpiresAt(input.end),
     playerCount: input.playerCount ?? 4,
     waiverRevision: 1,
+    signatureDeadlineAt: signatureDeadlineAt(input.start, now),
+    signatureReminderSentAt: null,
+    signatureConfirmedAt: null,
+    autoCanceledAt: null,
     guestWaiverTokenHash: hashManageToken(guestWaiverToken),
     guestWaiverTokenExpiresAt: manageTokenExpiresAt(input.end),
     createdAt: now,
@@ -360,8 +417,9 @@ export async function demoCreateBooking(input: DemoCreateInput) {
 export async function demoUpdateBooking(
   access: DemoAccess,
   bookingId: string,
-  input: { start?: Date; end?: Date; status?: "CONFIRMED" | "CANCELED" },
+  input: { start?: Date; end?: Date; status?: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED"; playerCount?: number },
 ) {
+  demoProcessDeadlines();
   const booking = bookings.find((item) => item.id === bookingId);
 
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
@@ -375,26 +433,31 @@ export async function demoUpdateBooking(
 
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
-  const nextStatus = input.status ?? booking.status;
+  const nextPlayerCount = input.playerCount ?? booking.playerCount;
   const requiresFreshWaivers =
-    nextStatus === "CONFIRMED" &&
-    (booking.status !== "CONFIRMED" ||
-      nextStart.getTime() !== booking.start.getTime() ||
-      nextEnd.getTime() !== booking.end.getTime());
+    nextStart.getTime() !== booking.start.getTime() ||
+    nextEnd.getTime() !== booking.end.getTime() ||
+    nextPlayerCount !== booking.playerCount;
+  const nextStatus = input.status ?? (requiresFreshWaivers ? "PENDING_SIGNATURES" : booking.status);
   const guestWaiverToken = requiresFreshWaivers ? createManageToken() : undefined;
 
-  if (nextStatus === "CONFIRMED") {
+  if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
     assertDemoBookingAllowed(booking.organizerEmail, nextStart, nextEnd, booking.id);
   }
 
   booking.start = nextStart;
   booking.end = nextEnd;
   booking.status = nextStatus;
+  booking.playerCount = nextPlayerCount;
   booking.manageTokenExpiresAt = manageTokenExpiresAt(nextEnd);
   if (guestWaiverToken) {
     booking.waiverRevision += 1;
     booking.guestWaiverTokenHash = hashManageToken(guestWaiverToken);
     booking.guestWaiverTokenExpiresAt = manageTokenExpiresAt(nextEnd);
+    booking.signatureDeadlineAt = signatureDeadlineAt(nextStart);
+    booking.signatureReminderSentAt = null;
+    booking.signatureConfirmedAt = null;
+    booking.autoCanceledAt = null;
   }
   booking.updatedAt = new Date();
   addAudit(
@@ -408,6 +471,7 @@ export async function demoUpdateBooking(
 }
 
 export async function demoCancelBooking(access: DemoAccess, bookingId: string) {
+  demoProcessDeadlines();
   const booking = bookings.find((item) => item.id === bookingId);
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
 
@@ -427,6 +491,8 @@ export async function demoCreateAdminBlock(
   user: CurrentUser,
   input: { start: Date; end: Date; reason: string },
 ) {
+  demoProcessDeadlines();
+
   if (input.start >= input.end) {
     throw new AppError("Il blocco deve avere un orario di fine valido.", 422);
   }
@@ -437,11 +503,11 @@ export async function demoCreateAdminBlock(
   if (
     bookings.some(
       (booking) =>
-        booking.status === "CONFIRMED" &&
+        isDemoActiveBooking(booking) &&
         rangesOverlap(input.start, input.end, booking.start, booking.end),
     )
   ) {
-    throw new AppError("Ci sono prenotazioni confermate in questa fascia.", 422);
+    throw new AppError("Ci sono prenotazioni attive in questa fascia.", 422);
   }
 
   const block: DemoBlock = {
@@ -482,12 +548,13 @@ function assertDemoGuestWaiverAccess(booking: DemoBooking, token: string | null 
     throw new AppError("Link firma ospiti non valido o scaduto.", 403);
   }
 
-  if (booking.status !== "CONFIRMED") {
+  if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
     throw new AppError("La prenotazione non e' piu' attiva.", 409);
   }
 }
 
 export async function demoGetWaiverContext(bookingId: string, token: string | null) {
+  demoProcessDeadlines();
   const booking = bookings.find((item) => item.id === bookingId);
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
 
@@ -504,6 +571,8 @@ export async function demoGetWaiverContext(bookingId: string, token: string | nu
       waiverRevision: booking.waiverRevision,
       waiverSignedCount: summary.signedCount,
       remainingSignatures: summary.remainingCount,
+      status: booking.status,
+      signatureDeadlineAt: booking.signatureDeadlineAt?.toISOString() ?? null,
       documentVersion: appConfig.waiver.documentVersion,
       regulationUrl: "/legal/regolamento-padel-topfly-v1.pdf",
     },
@@ -518,6 +587,7 @@ export async function demoSignGuestWaiver(
 ) {
   void _evidence;
 
+  demoProcessDeadlines();
   const booking = bookings.find((item) => item.id === bookingId);
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
 
@@ -555,6 +625,12 @@ export async function demoSignGuestWaiver(
     canceledAt: null,
     signedAt: new Date(),
   });
+  if (demoWaiverSummary(booking).signedCount >= booking.playerCount) {
+    booking.status = "CONFIRMED";
+    booking.signatureConfirmedAt = new Date();
+    booking.updatedAt = new Date();
+    addAudit(signerEmail, "BOOKING_SIGNATURES_COMPLETED", "Booking", booking.id);
+  }
   addAudit(signerEmail, "WAIVER_SIGNED", "WaiverSignature", booking.id);
 
   return demoGetWaiverContext(bookingId, token);
@@ -609,13 +685,14 @@ export async function demoGetGuestWaiverCancelContext(signatureId: string, token
 }
 
 export async function demoCancelGuestWaiverSignature(signatureId: string, token: string | null) {
+  demoProcessDeadlines();
   const signature = waiverSignatures.find((item) => item.id === signatureId);
   if (!signature) throw new AppError("Firma waiver non trovata.", 404);
 
   assertDemoGuestCancelAccess(signature, token);
   const booking = bookings.find((item) => item.id === signature.bookingId);
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
-  if (booking.status !== "CONFIRMED") {
+  if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
     throw new AppError("La prenotazione non e' piu' attiva.", 409);
   }
 
@@ -623,6 +700,15 @@ export async function demoCancelGuestWaiverSignature(signatureId: string, token:
     signature.status = "CANCELED";
     signature.canceledAt = new Date();
     addAudit(signature.signerEmail, "WAIVER_SIGNATURE_CANCELED", "WaiverSignature", signature.id);
+  }
+
+  if (booking.status === "CONFIRMED" && demoWaiverSummary(booking).signedCount < booking.playerCount) {
+    booking.status = "PENDING_SIGNATURES";
+    booking.signatureDeadlineAt = signatureDeadlineAt(booking.start);
+    booking.signatureReminderSentAt = null;
+    booking.signatureConfirmedAt = null;
+    booking.updatedAt = new Date();
+    addAudit(signature.signerEmail, "BOOKING_SIGNATURES_INCOMPLETE", "Booking", booking.id);
   }
 
   return demoCancelContext(signature);

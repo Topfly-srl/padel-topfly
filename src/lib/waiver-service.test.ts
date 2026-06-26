@@ -157,6 +157,7 @@ describe("waiver service", () => {
     const before = await demoGetWaiverContext(booking.id, token);
     expect(before.booking.waiverSignedCount).toBe(1);
     expect(before.booking.remainingSignatures).toBe(1);
+    expect(before.booking.status).toBe("PENDING_SIGNATURES");
 
     await demoSignGuestWaiver(
       booking.id,
@@ -173,6 +174,7 @@ describe("waiver service", () => {
     const after = await demoGetWaiverContext(booking.id, token);
     expect(after.booking.waiverSignedCount).toBe(2);
     expect(after.booking.remainingSignatures).toBe(0);
+    expect(after.booking.status).toBe("CONFIRMED");
 
     await expect(
       demoSignGuestWaiver(

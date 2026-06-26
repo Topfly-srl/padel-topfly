@@ -26,13 +26,17 @@ URL produzione:
 - Prenotazione pubblica senza login utente.
 - Form obbligatorio con nome/cognome ed email.
 - Scarico responsabilita' digitale obbligatorio per il referente al momento della prenotazione.
+- Le nuove prenotazioni restano `PENDING_SIGNATURES` finche' le firme attive non arrivano a
+  `playerCount/playerCount`; solo allora diventano `CONFIRMED`.
 - Link firma ospiti separato, mostrato dopo la prenotazione e copiabile anche manualmente.
+- Prenotazioni pending incomplete: reminder al referente prima della scadenza e annullamento
+  automatico se mancano firme.
 - Firma col dito acquisita come firma elettronica semplice, con hash e audit tecnico.
 - PDF firmato archiviato in Postgres e inviato alla mailbox condivisa configurata in
   `APP_WAIVER_RECIPIENT_EMAIL`.
 - Email non aziendali ammesse, con warning non bloccante lato UI.
 - Nome del prenotante visibile sugli slot occupati, email mai esposta pubblicamente.
-- Link/token di gestione salvato localmente e incluso negli inviti Outlook.
+- Link/token di gestione salvato localmente e inviato nella mail provvisoria al referente.
 - Modifica/cancellazione delle proprie prenotazioni tramite token.
 - Area admin protetta da Microsoft 365 per blocchi, storico e override.
 - Area admin con conteggio firme, stato invio PDF e retry email per scarichi falliti.
@@ -272,12 +276,13 @@ Stato operativo da verificare manualmente in Microsoft 365:
 
 Funzioni attese:
 
-- creare evento Outlook per ogni prenotazione;
-- inviare invito all'email inserita nel form;
+- creare evento Outlook solo quando la prenotazione passa a `CONFIRMED`;
+- inviare invito all'email inserita nel form solo a firme complete;
 - includere reminder 1h;
-- includere link gestione nel corpo evento;
-- includere link firma ospiti nel corpo evento quando disponibile;
-- aggiornare evento quando cambia la prenotazione;
+- inviare al referente una mail provvisoria con link gestione, link firma ospiti e scadenza firme;
+- inviare reminder al referente quando la prenotazione pending si avvicina alla scadenza;
+- inviare annullamento automatico al referente quando una pending scade incompleta;
+- aggiornare/cancellare l'evento quando una prenotazione confermata cambia stato;
 - cancellare evento Outlook quando la prenotazione viene annullata;
 - inviare il PDF dello scarico responsabilita' firmato alla mailbox condivisa configurata.
 - inviare agli ospiti gia' firmatari una notifica se la prenotazione viene modificata o
@@ -312,10 +317,22 @@ Se una prenotazione resta con stato Outlook `FAILED`, controllare `outlookSyncEr
 Per non far attendere l'utente sulla latenza di Microsoft Graph, l'invio email e il sync
 Outlook vengono eseguiti **dopo** che la risposta e' stata inviata, tramite l'helper
 `src/lib/after-response.ts` (basato su `after()` di Next.js). La prenotazione e la firma
-vengono salvate in modo transazionale **prima** della risposta, quindi la conferma e' immediata
-e accurata; gli step accessori partono subito dopo, dietro le quinte, e registrano comunque il
+vengono salvate in modo transazionale **prima** della risposta, quindi stato e conteggi firme
+sono immediati e accurati; gli step accessori partono subito dopo, dietro le quinte, e registrano comunque il
 proprio esito (`emailStatus`, `outlookSyncStatus`) per visibilita' e retry dall'area admin.
 Affidabile sul runtime a container long-running in produzione (`next start`).
+
+### Scadenze firme
+
+Le prenotazioni pending bloccano lo slot finche' non scadono. La deadline firme e':
+
+- prima tra 24 ore dalla creazione e 4 ore prima dell'inizio;
+- per prenotazioni sotto le 4 ore dall'inizio: prima tra 30 minuti dalla creazione e l'inizio.
+
+Il job `.github/workflows/signature-deadlines.yml` chiama ogni 10 minuti
+`POST /api/internal/signature-deadlines` con `Authorization: Bearer <APP_INTERNAL_CRON_SECRET>`.
+Se il secret non e' configurato il workflow salta; l'app esegue comunque una pulizia
+opportunistica su disponibilita', lookup e firma ospiti.
 
 ## Documentazione Operativa
 

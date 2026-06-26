@@ -3,6 +3,7 @@ import {
   demoCancelBooking,
   demoCreateAdminBlock,
   demoCreateBooking,
+  demoGetAdminAudit,
   demoGetAvailability,
   demoLookupBookings,
   demoReset,
@@ -74,6 +75,8 @@ describe("public booking flow", () => {
     });
 
     expect(booking.organizerName).toBe("Mario Rossi");
+    expect(booking.status).toBe("PENDING_SIGNATURES");
+    expect(booking.signatureDeadlineAt).toBeTruthy();
     expect(booking.manageToken).toBeTruthy();
     expect(booking.manageUrl).toContain(`/manage/${booking.id}?token=`);
     expect("organizerEmail" in booking).toBe(false);
@@ -91,7 +94,47 @@ describe("public booking flow", () => {
 
     expect(availability.bookings).toHaveLength(1);
     expect(availability.bookings[0].organizerName).toBe("Mario Rossi");
+    expect(availability.bookings[0].status).toBe("PENDING_SIGNATURES");
     expect("organizerEmail" in availability.bookings[0]).toBe(false);
+  });
+
+  it("annulla automaticamente una pending incompleta dopo la deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-03T10:00:00.000Z"));
+    const slot = futureSlot(2, 12);
+    const booking = await createDemoBooking({
+      ...slot,
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@example.com",
+      playerCount: 4,
+    });
+
+    vi.setSystemTime(new Date(new Date(booking.signatureDeadlineAt!).getTime() + 60_000));
+    const availability = await demoGetAvailability(dateKey(slot.start));
+    const [found] = await demoLookupBookings([booking.manageToken!]);
+
+    expect(availability.bookings).toHaveLength(0);
+    expect(found.status).toBe("CANCELED");
+    expect(found.autoCanceledAt).toBeTruthy();
+  });
+
+  it("manda un solo reminder demo prima della deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-03T10:00:00.000Z"));
+    const slot = futureSlot(2, 12);
+    const booking = await createDemoBooking({
+      ...slot,
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@example.com",
+      playerCount: 4,
+    });
+
+    vi.setSystemTime(new Date(new Date(booking.signatureDeadlineAt!).getTime() - 30 * 60_000));
+    await demoGetAvailability(dateKey(slot.start));
+    await demoGetAvailability(dateKey(slot.start));
+
+    const reminders = (await demoGetAdminAudit()).filter((item) => item.action === "BOOKING_SIGNATURE_REMINDER_SENT");
+    expect(reminders).toHaveLength(1);
   });
 
   it("recupera solo le prenotazioni col token corretto", async () => {
@@ -141,6 +184,8 @@ describe("public booking flow", () => {
 
     expect(updated.start).toBe(next.start.toISOString());
     expect(updated.end).toBe(next.end.toISOString());
+    expect(updated.status).toBe("PENDING_SIGNATURES");
+    expect(updated.waiverSignedCount).toBe(0);
   });
 
   it("rifiuta modifiche con token errato", async () => {
