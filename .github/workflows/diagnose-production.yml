@@ -1,0 +1,74 @@
+name: Diagnose Production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  logs:
+    name: Collect production logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate configuration
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in LIGHTSAIL_HOST LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: ${name}"
+              missing=1
+            fi
+          done
+
+          exit "${missing}"
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${LIGHTSAIL_SSH_PRIVATE_KEY}" > ~/.ssh/lightsail_deploy_key
+          printf '%s\n' "${LIGHTSAIL_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/lightsail_deploy_key ~/.ssh/known_hosts
+
+      - name: Collect logs
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/padel-topfly
+          echo "Remote host: $(hostname)"
+          echo "Remote commit: $(git rev-parse --short HEAD)"
+          sudo docker compose -f docker-compose.production.yml ps
+          echo "::group::app logs"
+          sudo docker compose -f docker-compose.production.yml logs app --tail=200
+          echo "::endgroup::"
+          echo "::group::caddy logs"
+          sudo docker compose -f docker-compose.production.yml logs caddy --tail=80
+          echo "::endgroup::"
+          REMOTE
