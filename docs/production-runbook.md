@@ -12,8 +12,9 @@ URL:
 
 - **Locale**: modifiche nel working tree Codex/Mac. Non sono in produzione finche' non
   vengono committate e pushate su GitHub.
-- **GitHub**: modifiche presenti su `main`. Con `PRODUCTION_AUTO_DEPLOY=true`, il push su
-  `main` avvia il workflow `Deploy Production`.
+- **GitHub**: modifiche presenti su `main`. Il push avvia la CI del workflow
+  `Deploy Production`; con `PRODUCTION_AUTO_DEPLOY=false` il job deploy resta skipped e va
+  lanciato manualmente da GitHub Actions.
 - **Produzione**: considerare una modifica effettivamente attiva solo dopo workflow verde e
   smoke test su <https://padel.topflysolutions.com>.
 
@@ -60,7 +61,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 - Inviti Outlook automatici attivi.
 - Reminder Outlook 1h attivo.
 - Workflow GitHub Actions `Deploy Production` configurato, testato e attivo con CI prima del deploy.
-- Autodeploy attivo a ogni push su `main` tramite repository variable `PRODUCTION_AUTO_DEPLOY=true`.
+- Repository variable `PRODUCTION_AUTO_DEPLOY=false`: il push su `main` esegue CI, poi il deploy
+  Lightsail va lanciato manualmente se il job deploy risulta skipped.
 - Backup pre-deploy salvato fuori repo in `/var/backups/padel-topfly`.
 - Container `app` hardenizzato con utente non-root, `no-new-privileges` e capabilities rimosse.
 - API sensibili con `Cache-Control: no-store`.
@@ -134,12 +136,89 @@ Locale:
 npm run lint
 npm test
 npm run build
+DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
+npm audit --omit=dev
 git status --short
 ```
 
-Dopo commit/push su `main`, GitHub Actions deploya automaticamente su Lightsail tramite
-workflow `Deploy Production`, se la repository variable `PRODUCTION_AUTO_DEPLOY=true`
-resta attiva.
+Dopo commit/push su `main`, GitHub Actions esegue la CI del workflow `Deploy Production`.
+Se `PRODUCTION_AUTO_DEPLOY=true`, parte anche il deploy Lightsail; con il valore corrente
+`PRODUCTION_AUTO_DEPLOY=false`, il deploy Lightsail va lanciato manualmente con
+`Run workflow` o `gh workflow run "Deploy Production" --ref main`.
+
+### Procedura Standard: Manda Tutto Online
+
+Questa e' la procedura da seguire quando l'utente chiede di "mandare online", "mandare in
+produzione", "pubblicare", "fare deploy" o simili.
+
+1. Verificare il working tree:
+
+   ```bash
+   git status --short --branch
+   ```
+
+2. Eseguire tutti i check locali:
+
+   ```bash
+   npm run lint
+   npm test
+   npm run build
+   DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
+   npm audit --omit=dev
+   ```
+
+3. Fare commit e push su `main`.
+
+4. Controllare la run `Deploy Production`:
+
+   ```bash
+   gh run list --workflow "Deploy Production" --limit 5
+   ```
+
+   Se il push ha eseguito solo CI o il job deploy e' skipped per
+   `PRODUCTION_AUTO_DEPLOY` spento, lanciare manualmente:
+
+   ```bash
+   gh workflow run "Deploy Production" --ref main
+   gh run watch <run-id> --exit-status
+   ```
+
+5. A deploy verde, verificare produzione:
+
+   ```bash
+   curl --fail --silent --show-error --head https://padel.topflysolutions.com
+   curl --fail --silent --show-error \
+     "https://padel.topflysolutions.com/api/availability?date=$(date -u +%F)"
+   ```
+
+6. Verificare il cron firme:
+
+   ```bash
+   gh workflow run "Signature Deadlines" --ref main
+   gh run watch <run-id> --exit-status
+   gh run view <run-id> --log
+   ```
+
+   Il log deve contenere una risposta tipo `{"ok":true,"reminded":0,"canceled":0}` e non
+   `APP_INTERNAL_CRON_SECRET is not configured`.
+
+7. Verificare che l'endpoint interno sia protetto e configurato:
+
+   ```bash
+   curl --silent --show-error --dump-header - --output - \
+     --request POST https://padel.topflysolutions.com/api/internal/signature-deadlines
+   ```
+
+   Risultato atteso senza token: `401 Non autorizzato`. Se risponde
+   `503 Cron interno non configurato`, il secret non e' arrivato in `.env.production` o il
+   container non e' stato ricreato dopo la modifica.
+
+8. Chiudere il lavoro solo dopo aver riportato: commit, URL run deploy, URL run cron,
+   check locali, health check produzione e stato del working tree.
+
+Nota: una run schedulata di `Signature Deadlines` puo' fallire con `503` se parte mentre
+`Deploy Production` sta ricreando i container. In quel caso non basta ignorarla: dopo il
+deploy verde rilanciare manualmente `Signature Deadlines` e confermare che passi.
 
 ### Setup Una Tantum Autodeploy
 
@@ -283,7 +362,8 @@ Da salvare in Bitwarden:
 - Mailbox Graph: `padel@topflysolutions.com`.
 - GitHub Actions deploy key dedicata.
 - GitHub Actions known hosts.
-- Repository variable `PRODUCTION_AUTO_DEPLOY=true`.
+- Repository variable `PRODUCTION_AUTO_DEPLOY=false` oppure `true`, in base alla policy deploy
+  scelta; quando e' `false`, usare `Run workflow` per `Deploy Production`.
 
 Da non salvare in Git:
 
@@ -389,6 +469,7 @@ Scadenze firme:
 - endpoint interno: `POST /api/internal/signature-deadlines`;
 - secret richiesto: `APP_INTERNAL_CRON_SECRET`, salvato nei GitHub Actions secrets e
   sincronizzato in `.env.production` dal workflow `Deploy Production`;
+- dopo ogni deploy, rilanciare manualmente `Signature Deadlines` e verificare `{"ok":true,...}`;
 - se il workflow non gira, l'app fa comunque pulizia opportunistica su calendario, lookup e
   firma ospiti.
 

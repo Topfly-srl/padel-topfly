@@ -18,7 +18,8 @@ URL produzione:
 - Login utenti: nessun login, prenotazione pubblica con nome/cognome + email.
 - Login admin: Microsoft Entra ID attivo su `/admin`.
 - Outlook/Graph: attivo in produzione con mailbox `padel@topflysolutions.com`.
-- Deploy: GitHub Actions autodeploy attivo su push `main`.
+- Deploy: GitHub Actions `Deploy Production`; con `PRODUCTION_AUTO_DEPLOY=false` il push su
+  `main` esegue CI e il deploy va lanciato manualmente da Actions.
 - Security audit: [`docs/security-audit.md`](docs/security-audit.md).
 
 ## Funzionalita'
@@ -121,8 +122,9 @@ Deploy consigliato:
 
 - push su `main`;
 - GitHub Actions workflow `Deploy Production`;
-- autodeploy attivo con repository variable `PRODUCTION_AUTO_DEPLOY=true` e secrets SSH
-  Lightsail configurati.
+- secrets SSH Lightsail configurati;
+- al momento `PRODUCTION_AUTO_DEPLOY=false`, quindi dopo il push va controllata la run e,
+  se il job deploy e' skipped, va lanciato manualmente `Deploy Production`.
 
 Il workflow esegue prima CI (`lint`, test, build, Prisma validate e audit npm), forza le
 JavaScript Actions sul runtime Node 24, crea un backup Postgres fuori dal repo in
@@ -132,6 +134,36 @@ e su un'API pubblica con `Cache-Control: no-store`.
 
 La produzione usa hardening Docker per il container `app`: utente non-root,
 `no-new-privileges` e capabilities Linux rimosse.
+
+### Checklist "Manda Tutto Online"
+
+Quando si vuole pubblicare sul sito ufficiale, la procedura completa e':
+
+```bash
+npm run lint
+npm test
+npm run build
+DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
+npm audit --omit=dev
+git status --short --branch
+```
+
+Poi:
+
+1. commit descrittivo;
+2. push su `main`;
+3. controllare la run `Deploy Production` su GitHub Actions;
+4. se il job deploy e' skipped per `PRODUCTION_AUTO_DEPLOY` spento, lanciare
+   `gh workflow run "Deploy Production" --ref main`;
+5. attendere la run fino a conclusione verde;
+6. verificare <https://padel.topflysolutions.com> e `/api/availability`;
+7. lanciare manualmente `Signature Deadlines` e verificare che risponda
+   `{"ok":true,...}`;
+8. verificare che l'endpoint cron senza token risponda `401 Non autorizzato`.
+
+Una run schedulata di `Signature Deadlines` puo' fallire con `503` mentre il deploy sta
+ricreando i container. Dopo un deploy verde va sempre rilanciata una run manuale del workflow:
+se passa, il cron e il secret sono allineati.
 
 Setup dettagliato: [`docs/production-runbook.md`](docs/production-runbook.md).
 

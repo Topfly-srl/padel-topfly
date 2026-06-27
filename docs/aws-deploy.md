@@ -190,14 +190,36 @@ Attenzione:
 Il metodo consigliato e attualmente attivo e' il workflow GitHub Actions
 `Deploy Production`.
 
-Quando i repository secrets SSH sono configurati e la repository variable
-`PRODUCTION_AUTO_DEPLOY=true` e' presente, ogni push su `main` aggiorna automaticamente
-Lightsail dopo CI (`lint`, test, build, Prisma validate e audit npm).
+Quando i repository secrets SSH sono configurati, il workflow puo' aggiornare Lightsail dopo
+CI (`lint`, test, build, Prisma validate e audit npm). Se la repository variable
+`PRODUCTION_AUTO_DEPLOY=true` e' presente, il deploy parte automaticamente a ogni push su
+`main`; se e' `false`, il push esegue solo CI e bisogna lanciare manualmente `Deploy Production`.
 
-Nel repo TOPFLY questi valori sono gia' configurati e il workflow e' stato testato con
-esito positivo. La procedura completa per ruotare la chiave SSH dedicata, configurare di
-nuovo secrets/variable e usare il fallback manuale e' in
+Nel repo TOPFLY i secrets SSH sono configurati e il workflow e' stato testato con esito
+positivo; al momento `PRODUCTION_AUTO_DEPLOY=false`, quindi il deploy produzione va avviato
+manuale da GitHub Actions dopo il push. La procedura completa per ruotare la chiave SSH
+dedicata, configurare di nuovo secrets/variable e usare il fallback manuale e' in
 [`docs/production-runbook.md`](production-runbook.md).
+
+### Checklist Rapida Di Pubblicazione
+
+Quando si deve mandare una modifica online:
+
+1. eseguire in locale `npm run lint`, `npm test`, `npm run build`,
+   `DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate`
+   e `npm audit --omit=dev`;
+2. fare commit e push su `main`;
+3. controllare `Deploy Production`; se il deploy e' skipped, eseguire
+   `gh workflow run "Deploy Production" --ref main`;
+4. attendere la run verde con `gh run watch <run-id> --exit-status`;
+5. verificare `https://padel.topflysolutions.com` e `/api/availability`;
+6. lanciare `gh workflow run "Signature Deadlines" --ref main` e confermare dal log
+   `{"ok":true,...}`;
+7. controllare che `POST /api/internal/signature-deadlines` senza token risponda `401`.
+
+Una run schedulata di `Signature Deadlines` puo' fallire con `503` se parte durante il
+recreate dei container. Dopo il deploy verde, una run manuale verde dello stesso workflow
+conferma che cron e secret sono ok.
 
 ## Deploy Manuale
 
@@ -369,7 +391,7 @@ Salvare in Bitwarden una nota "Padel TOPFLY - Produzione" con:
 - mailbox `padel@topflysolutions.com`;
 - deploy key GitHub Actions dedicata;
 - known hosts GitHub Actions;
-- repository variable `PRODUCTION_AUTO_DEPLOY=true`;
+- repository variable `PRODUCTION_AUTO_DEPLOY` e valore corrente;
 - ultima data di backup DB manuale.
 
 Non salvare segreti in Git e non incollarli in chat.
@@ -400,6 +422,7 @@ Le pending incomplete vengono processate da `.github/workflows/signature-deadlin
 tramite `POST /api/internal/signature-deadlines` protetto da `APP_INTERNAL_CRON_SECRET`.
 Il secret deve essere presente nei GitHub Actions secrets; `Deploy Production` lo sincronizza in
 `.env.production` sul server prima del recreate dei container.
+Verificare il workflow manualmente dopo ogni deploy importante.
 L'app esegue anche pulizia opportunistica su disponibilita', lookup e firma ospiti.
 
 Hardening Microsoft 365 raccomandato:

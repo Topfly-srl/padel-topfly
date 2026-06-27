@@ -68,12 +68,45 @@ Per modifiche UI, verifica anche browser mobile/desktop quando possibile.
 ## Deploy
 
 - Il deploy automatico parte su push `main` se `PRODUCTION_AUTO_DEPLOY=true`.
+- Stato corrente: `PRODUCTION_AUTO_DEPLOY=false`, quindi il push su `main` esegue CI e il
+  deploy Lightsail va lanciato manualmente se il job deploy risulta skipped.
 - La workflow esegue prima CI completa, crea un dump Postgres in
   `/var/backups/padel-topfly` quando Postgres e' disponibile, fa `git pull --ff-only origin
   main`, rebuilda Docker Compose e controlla <https://padel.topflysolutions.com>.
 - Prima di pushare su `main`, assicurati che i check locali rilevanti siano verdi.
 - Se il workflow fallisce, leggere log GitHub Actions prima di suggerire comandi sul server.
 - Fallback manuale documentato in `docs/production-runbook.md`.
+
+### Comandi Utente Per Mandare Online
+
+Se l'utente dice frasi come "manda tutto online", "manda tutto in produzione", "pubblica",
+"deploya", "vai live", "metti sul sito ufficiale" o equivalenti, trattalo come conferma
+esplicita a completare l'intera procedura di produzione. Non fermarti al commit o al push.
+
+Sequenza richiesta:
+
+1. controlla `git status --short --branch` e assicurati di non includere modifiche non volute;
+2. esegui i check locali standard:
+   `npm run lint`, `npm test`, `npm run build`,
+   `DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate`,
+   `npm audit --omit=dev`;
+3. fai commit descrittivo e push su `main`;
+4. controlla `Deploy Production` su GitHub Actions; se il push non esegue il deploy perche'
+   `PRODUCTION_AUTO_DEPLOY` e' spento o il job deploy e' skipped, lancia manualmente
+   `gh workflow run "Deploy Production" --ref main`;
+5. attendi la run con `gh run watch <run-id> --exit-status`;
+6. verifica produzione con `curl -I https://padel.topflysolutions.com` e
+   `/api/availability`;
+7. lancia e verifica `Signature Deadlines` con
+   `gh workflow run "Signature Deadlines" --ref main`, poi controlla che il log contenga
+   una risposta tipo `{"ok":true,...}` e non `APP_INTERNAL_CRON_SECRET is not configured`;
+8. verifica che `POST /api/internal/signature-deadlines` senza token risponda `401` e non
+   `503 Cron interno non configurato`;
+9. chiudi con un riepilogo: commit, run deploy, run cron, check eseguiti, URL produzione.
+
+Una run schedulata di `Signature Deadlines` puo' fallire con `503` durante un deploy mentre
+i container vengono ricreati. Non considerarlo un problema se, dopo il deploy verde, una run
+manuale dello stesso workflow passa e restituisce `{"ok":true,...}`.
 
 ## Microsoft Graph E Email
 
