@@ -387,7 +387,8 @@ Scadenze firme:
 - prenotazioni last minute: prima tra 30 minuti dalla creazione e l'inizio;
 - workflow schedulato: `.github/workflows/signature-deadlines.yml`, ogni 10 minuti;
 - endpoint interno: `POST /api/internal/signature-deadlines`;
-- secret richiesto: `APP_INTERNAL_CRON_SECRET`, salvato anche nei GitHub Actions secrets;
+- secret richiesto: `APP_INTERNAL_CRON_SECRET`, salvato nei GitHub Actions secrets e
+  sincronizzato in `.env.production` dal workflow `Deploy Production`;
 - se il workflow non gira, l'app fa comunque pulizia opportunistica su calendario, lookup e
   firma ospiti.
 

@@ -195,6 +195,7 @@ APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com
 APP_ALLOWED_DOMAIN=topflysolutions.com
 APP_ADMIN_EMAILS=antony.buffone@topflysolutions.com
 APP_TIME_ZONE=Europe/Rome
+APP_INTERNAL_CRON_SECRET=...
 
 AUTH_DEV_MODE=false
 AUTH_TRUST_HOST=true
@@ -212,6 +213,7 @@ Segreti da conservare in Bitwarden, mai in chat o Git:
 - `DATABASE_URL`
 - `MICROSOFT_ENTRA_ID_SECRET`
 - `MS_GRAPH_CLIENT_SECRET`
+- `APP_INTERNAL_CRON_SECRET`
 - tenant/client ID Microsoft Entra e Graph
 
 Checklist completa: [`docs/bitwarden-checklist.md`](docs/bitwarden-checklist.md).
@@ -331,8 +333,10 @@ Le prenotazioni pending bloccano lo slot finche' non scadono. La deadline firme 
 
 Il job `.github/workflows/signature-deadlines.yml` chiama ogni 10 minuti
 `POST /api/internal/signature-deadlines` con `Authorization: Bearer <APP_INTERNAL_CRON_SECRET>`.
-Se il secret non e' configurato il workflow salta; l'app esegue comunque una pulizia
-opportunistica su disponibilita', lookup e firma ospiti.
+Il valore deve esistere sia nei GitHub Actions secrets sia in `.env.production`; il workflow
+`Deploy Production` lo sincronizza su `.env.production` durante il deploy. Se il secret non e'
+configurato il workflow scadenze salta; l'app esegue comunque una pulizia opportunistica su
+disponibilita', lookup e firma ospiti.
 
 ## Documentazione Operativa
 

@@ -398,6 +398,8 @@ il commento testuale, che deve restare breve e chiaro.
 
 Le pending incomplete vengono processate da `.github/workflows/signature-deadlines.yml`
 tramite `POST /api/internal/signature-deadlines` protetto da `APP_INTERNAL_CRON_SECRET`.
+Il secret deve essere presente nei GitHub Actions secrets; `Deploy Production` lo sincronizza in
+`.env.production` sul server prima del recreate dei container.
 L'app esegue anche pulizia opportunistica su disponibilita', lookup e firma ospiti.
 
 Hardening Microsoft 365 raccomandato:

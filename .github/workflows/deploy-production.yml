@@ -69,11 +69,12 @@ jobs:
           LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
           LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
           LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+          APP_INTERNAL_CRON_SECRET: ${{ secrets.APP_INTERNAL_CRON_SECRET }}
         run: |
           set -euo pipefail
 
           missing=0
-          for name in LIGHTSAIL_HOST LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_KNOWN_HOSTS; do
+          for name in LIGHTSAIL_HOST LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_KNOWN_HOSTS APP_INTERNAL_CRON_SECRET; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing GitHub Actions secret: ${name}"
               missing=1
@@ -101,12 +102,15 @@ jobs:
         env:
           LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
           LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+          APP_INTERNAL_CRON_SECRET: ${{ secrets.APP_INTERNAL_CRON_SECRET }}
         run: |
           set -euo pipefail
 
           SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+          CRON_SECRET_FOR_SSH="$(printf '%q' "${APP_INTERNAL_CRON_SECRET}")"
 
-          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" \
+            "APP_INTERNAL_CRON_SECRET=${CRON_SECRET_FOR_SSH} bash -s" <<'REMOTE'
           set -euo pipefail
 
           cd /opt/padel-topfly
@@ -144,6 +148,7 @@ jobs:
             set_env_key APP_ENV production
             set_env_key APP_PUBLIC_ORIGIN https://padel.topflysolutions.com
             set_env_key APP_WAIVER_RECIPIENT_EMAIL padel@topflysolutions.com
+            set_env_key APP_INTERNAL_CRON_SECRET "${APP_INTERNAL_CRON_SECRET}"
           fi
 
           sudo docker compose -f docker-compose.production.yml up -d --build --remove-orphans
