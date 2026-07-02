@@ -24,6 +24,11 @@ import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
 import { isExternalEmailForDomain, isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
+import {
+  findOverlappingTimelineItem,
+  rangeOverlapsMs,
+  type TimelineRange,
+} from "@/lib/timeline-slots";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
   AuditItem,
@@ -79,12 +84,6 @@ type AdminWaiverItem = {
   bookingStart: string;
   bookingEnd: string;
   playerCount: number;
-};
-
-type TimelineRange<T> = {
-  item: T;
-  startMs: number;
-  endMs: number;
 };
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
@@ -203,10 +202,6 @@ function dateTimeFromParts(day: string, time: string) {
 
 function rangeMatches(start: Date, end: Date, itemStart: string, itemEnd: string) {
   return start.getTime() === new Date(itemStart).getTime() && end.getTime() === new Date(itemEnd).getTime();
-}
-
-function rangeOverlapsMs(startMs: number, endMs: number, itemStartMs: number, itemEndMs: number) {
-  return startMs < itemEndMs && endMs > itemStartMs;
 }
 
 async function readApiError(response: Response) {
@@ -488,12 +483,13 @@ export function BookingApp({
         const slotStart = dateTimeFromParts(selectedDate, option);
         const slotStartMs = slotStart.getTime();
         const slotEndMs = slotStartMs + 15 * 60_000;
-        const booking = bookingRanges.find((range) =>
-          rangeOverlapsMs(slotStartMs, slotEndMs, range.startMs, range.endMs),
-        )?.item;
-        const block = blockRanges.find((range) =>
-          rangeOverlapsMs(slotStartMs, slotEndMs, range.startMs, range.endMs),
-        )?.item;
+        const booking = findOverlappingTimelineItem(
+          bookingRanges,
+          slotStartMs,
+          slotEndMs,
+          editingBookingId,
+        );
+        const block = findOverlappingTimelineItem(blockRanges, slotStartMs, slotEndMs);
         const isSelected = rangeOverlapsMs(slotStartMs, slotEndMs, startMs, endMs);
 
         return {
@@ -504,7 +500,7 @@ export function BookingApp({
           isSelectedStart: option === selectedTime,
         };
       }),
-    [blockRanges, bookingRanges, endMs, options, selectedDate, selectedTime, startMs],
+    [blockRanges, bookingRanges, editingBookingId, endMs, options, selectedDate, selectedTime, startMs],
   );
 
   const selectedOwnBooking = useMemo(
@@ -558,16 +554,10 @@ export function BookingApp({
   ]);
 
   const selectionConflict = useMemo(() => {
-    const booking = bookingRanges.find(
-      (range) =>
-        range.item.id !== ignoredBookingId &&
-        rangeOverlapsMs(startMs, endMs, range.startMs, range.endMs),
-    )?.item;
+    const booking = findOverlappingTimelineItem(bookingRanges, startMs, endMs, ignoredBookingId);
     if (booking) return `Occupato da ${booking.organizerName}`;
 
-    const block = blockRanges.find((range) =>
-      rangeOverlapsMs(startMs, endMs, range.startMs, range.endMs),
-    )?.item;
+    const block = findOverlappingTimelineItem(blockRanges, startMs, endMs);
     if (block) return `Bloccato: ${block.reason}`;
 
     return null;
