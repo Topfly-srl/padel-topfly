@@ -294,6 +294,14 @@ congelare i deploy da `main`.
 8. esegue health check su <https://padel.topflysolutions.com> e su
    `/api/availability`, verificando anche `Cache-Control: no-store`.
 
+Le migrazioni Prisma NON girano nel workflow: le applica `docker/entrypoint.sh` con
+`npx prisma migrate deploy` all'avvio del container, quindi la ricostruzione al passo 6
+porta in produzione ogni migrazione ancora da applicare. Questo deploy include
+`20260715093942_signature_window_started_at`, che aggiunge la colonna nullable
+`Booking.signatureWindowStartedAt` (inizio della finestra firme, usato dal sollecito dopo una
+rinuncia): e' additiva e retrocompatibile, i record esistenti restano a `NULL` e ricadono su
+`createdAt`.
+
 Il workflow imposta `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` per anticipare la
 migrazione GitHub Actions da Node 20 a Node 24.
 
@@ -449,10 +457,15 @@ Scarichi responsabilita':
 - gli ospiti ricevono una mail di conferma con allegato calendario `.ics` e link personale
   per rinunciare al posto;
 - se il referente modifica la prenotazione, gli ospiti gia' firmatari ricevono una mail con
-  nuovo orario e nuovo link firma ospiti;
+  nuovo orario, nuovo link firma ospiti e la nuova scadenza entro cui rifirmare;
 - se il referente cancella la prenotazione, gli ospiti gia' firmatari ricevono una mail di
   cancellazione con allegato calendario `.ics`;
+- l'ospite vede il link "rinuncia al posto" solo finche' la rinuncia e' davvero possibile (flag
+  `canCancel`: firma attiva e partita non ancora iniziata), cosi' l'interfaccia non promette
+  un'azione che il server rifiuterebbe con 409;
 - se un ospite rinuncia, la firma resta nello storico ma non conta piu' nel limite giocatori;
+- firma e rinuncia ospiti girano in transazione Serializable con retry automatico sui conflitti,
+  perche' il PDF viene generato fuori dalla transazione e piu' firme possono arrivare insieme;
 - se una rinuncia porta una prenotazione confermata sotto `playerCount/playerCount`, la
   prenotazione torna `PENDING_SIGNATURES` e l'evento Outlook viene cancellato/invalidato;
 - quando le firme attive arrivano a `playerCount/playerCount`, il link ospiti non permette
@@ -463,15 +476,48 @@ Scarichi responsabilita':
 
 Scadenze firme:
 
-- deadline standard: prima tra 24 ore dalla creazione e 4 ore prima dell'inizio;
+- deadline standard: prima tra meta' del tempo mancante (minimo 24 ore, massimo 4 giorni) dalla
+  creazione e 4 ore prima dell'inizio;
 - prenotazioni last minute: prima tra 30 minuti dalla creazione e l'inizio;
 - workflow schedulato: `.github/workflows/signature-deadlines.yml`, ogni 10 minuti;
 - endpoint interno: `POST /api/internal/signature-deadlines`;
 - secret richiesto: `APP_INTERNAL_CRON_SECRET`, salvato nei GitHub Actions secrets e
   sincronizzato in `.env.production` dal workflow `Deploy Production`;
+- il reminder al referente cade 6 ore prima della scadenza, o a meta' finestra se questa e' piu'
+  corta di 12 ore; la finestra parte da `signatureWindowStartedAt`, che si sposta ad adesso dopo
+  una rinuncia o una modifica che azzera le firme;
 - dopo ogni deploy, rilanciare manualmente `Signature Deadlines` e verificare `{"ok":true,...}`;
+- la run del workflow fallisce in modo visibile non solo sugli HTTP di errore, ma anche se il
+  corpo non riporta `ok:true`;
+- ogni run che sollecita o annulla almeno una pending scrive una riga di audit riassuntiva
+  (`SIGNATURE_DEADLINES_RUN`, con `reminded`/`canceled`); le run a vuoto non scrivono nulla;
 - se il workflow non gira, l'app fa comunque pulizia opportunistica su calendario, lookup e
-  firma ospiti.
+  firma ospiti, ma ingoia i propri errori per non far fallire la richiesta utente che la ospita.
+
+Diagnosi cron fermo:
+
+- segnale tipico: nella lista admin restano pending vecchie che invecchiano oltre la loro
+  scadenza senza essere annullate ne' sollecitate. Una prenotazione ancora `PENDING_SIGNATURES`
+  con `signatureDeadlineAt` passata da piu' cicli da 10 minuti indica un cron `Signature
+  Deadlines` fermo o in errore;
+- conferma: nell'audit non compaiono righe `SIGNATURE_DEADLINES_RUN` recenti, oppure la lista
+  run mostra esecuzioni mancanti o rosse:
+
+  ```bash
+  gh run list --workflow "Signature Deadlines" --limit 10
+  ```
+
+- rilancio manuale e verifica:
+
+  ```bash
+  gh workflow run "Signature Deadlines" --ref main
+  gh run watch <run-id> --exit-status
+  gh run view <run-id> --log
+  ```
+
+  Il log deve chiudersi con `{"ok":true,...}`. Una pending scaduta viene comunque chiusa alla
+  prima richiesta utente grazie alla pulizia opportunistica, ma non e' garanzia sufficiente se su
+  quel percorso non arriva traffico: il cron resta la via affidabile.
 
 Privacy e retention:
 
@@ -485,6 +531,11 @@ Cancellazioni:
 - cancellano l'evento Outlook tramite Graph `event/cancel`;
 - non fanno un update evento prima del cancel, per evitare doppie mail su Gmail/Google
   Calendar;
+- il commento del cancel e' differenziato: una cancellazione vera usa il testo di annullamento,
+  mentre una prenotazione confermata che perde una firma ritira l'evento con un commento "firme
+  mancanti", perche' la prenotazione resta valida e torna solo in attesa;
+- se ad annullare e' un admin diverso dal referente, l'organizzatore riceve una mail dedicata di
+  annullamento dall'amministrazione, senza esporre chi ha annullato;
 - gli ospiti gia' firmatari ricevono una mail custom separata, perche' non sono invitati
   diretti dell'evento Outlook principale.
 

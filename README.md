@@ -318,9 +318,13 @@ Funzioni attese:
 - inviare annullamento automatico al referente quando una pending scade incompleta;
 - aggiornare/cancellare l'evento quando una prenotazione confermata cambia stato;
 - cancellare evento Outlook quando la prenotazione viene annullata;
+- ritirare l'evento con un commento differenziato quando una prenotazione confermata perde una
+  firma e torna in attesa (motivo "firme mancanti", non una cancellazione definitiva);
 - inviare il PDF dello scarico responsabilita' firmato alla mailbox condivisa configurata.
 - inviare agli ospiti gia' firmatari una notifica se la prenotazione viene modificata o
-  cancellata.
+  cancellata; la mail di modifica include la nuova scadenza firme;
+- avvisare il referente con una mail dedicata quando ad annullare e' un admin diverso dal
+  referente, senza esporre chi ha annullato.
 
 Mailbox scarichi:
 
@@ -358,17 +362,40 @@ Affidabile sul runtime a container long-running in produzione (`next start`).
 
 ### Scadenze firme
 
-Le prenotazioni pending bloccano lo slot finche' non scadono. La deadline firme e':
+Le prenotazioni pending bloccano lo slot finche' non scadono. La finestra per raccogliere le
+firme e' meta' del tempo che manca all'inizio, con un minimo di 24 ore e un tetto di 4 giorni:
+chi prenota con largo anticipo non deve raccogliere le firme entro il giorno dopo, ma una
+pending mai firmata non tiene lo slot bloccato per una settimana. La deadline firme e':
 
-- prima tra 24 ore dalla creazione e 4 ore prima dell'inizio;
+- prima tra meta' del tempo mancante (minimo 24 ore, massimo 4 giorni) dalla creazione e 4 ore
+  prima dell'inizio;
 - per prenotazioni sotto le 4 ore dall'inizio: prima tra 30 minuti dalla creazione e l'inizio.
+
+Esempi: prenotazione per domani sera, 24 ore per firmare; prenotazione tra 5 giorni, circa
+58 ore; prenotazione tra 10 giorni o oltre, 4 giorni pieni e slot di nuovo libero con almeno
+altrettanto anticipo sulla partita.
+
+Il reminder al referente parte 6 ore prima della scadenza, o a meta' finestra quando questa e'
+piu' corta di 12 ore, cosi' anche le finestre brevi ricevono un avviso utile e non subito dopo
+la creazione. La finestra parte da `signatureWindowStartedAt`, non da `createdAt`: dopo una
+rinuncia o una modifica che azzera le firme l'inizio si sposta ad adesso, quindi la prenotazione
+non risulta col sollecito gia' scaduto. Il reminder e' unico: `signatureReminderSentAt` registra
+il singolo invio e l'audit ne riflette l'esito reale (`SENT`/`FAILED`), senza resettare il claim
+se la mail non parte.
 
 Il job `.github/workflows/signature-deadlines.yml` chiama ogni 10 minuti
 `POST /api/internal/signature-deadlines` con `Authorization: Bearer <APP_INTERNAL_CRON_SECRET>`.
 Il valore deve esistere sia nei GitHub Actions secrets sia in `.env.production`; il workflow
 `Deploy Production` lo sincronizza su `.env.production` durante il deploy. Se il secret non e'
 configurato il workflow scadenze salta; l'app esegue comunque una pulizia opportunistica su
-disponibilita', lookup e firma ospiti.
+disponibilita', lookup e firma ospiti. La pulizia opportunistica ingoia i propri errori per non
+far fallire la richiesta utente che la ospita; solo il cron chiama il processore direttamente e
+ne vede gli errori.
+
+La run del workflow fallisce in modo visibile non solo sugli HTTP di errore, ma anche se il
+corpo della risposta non riporta `ok:true`. Ogni run che sollecita o annulla almeno una pending
+scrive una riga di audit riassuntiva (`SIGNATURE_DEADLINES_RUN`, con `reminded`/`canceled`),
+cosi' l'admin ha una traccia datata dell'attivita'; le run a vuoto non scrivono nulla.
 
 ## Documentazione Operativa
 
