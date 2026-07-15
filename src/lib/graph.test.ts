@@ -19,6 +19,7 @@ function bookingFixture(overrides: Partial<Booking> = {}): Booking {
     playerCount: 4,
     waiverRevision: 1,
     signatureDeadlineAt: null,
+    signatureWindowStartedAt: null,
     signatureReminderSentAt: null,
     signatureConfirmedAt: null,
     autoCanceledAt: null,
@@ -301,6 +302,93 @@ describe("Microsoft Graph sync", () => {
     expect(cancelCall).toBeDefined();
   });
 
+  it("usa un testo di rimozione diverso quando l'evento torna in attesa di firme", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string; method?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString(), method: init?.method });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { deleteOutlookEvent } = await import("@/lib/graph");
+    const booking = bookingFixture({
+      status: "PENDING_SIGNATURES",
+      outlookEventId: "event_1",
+      outlookSyncStatus: "PENDING",
+    });
+
+    const result = await deleteOutlookEvent(booking, "pending");
+    const cancelCall = calls.find((call) => call.url.includes("/events/event_1/cancel"));
+
+    expect(result).toEqual({ status: "SYNCED", eventId: "event_1" });
+    expect(cancelCall).toBeDefined();
+    const comment = JSON.parse(cancelCall!.body!).comment;
+    expect(comment).toContain("servono di nuovo le firme");
+    expect(comment).toContain("la prenotazione resta valida");
+    expect(comment).not.toContain("è stata cancellata");
+    expect(comment).not.toContain("Il campo torna disponibile per gli altri colleghi.");
+  });
+
+  it("avvisa il referente quando l'amministrazione annulla la sua prenotazione", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString() });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { sendOrganizerAdminCanceledEmail } = await import("@/lib/graph");
+    const result = await sendOrganizerAdminCanceledEmail({
+      booking: bookingFixture({ status: "CANCELED" }),
+    });
+
+    const mailCall = calls.find((call) => call.url.includes("/sendMail"));
+    expect(result).toEqual({ status: "SENT" });
+    expect(mailCall).toBeDefined();
+
+    const payload = JSON.parse(mailCall!.body!);
+    const content = payload.message.body.content.replace(/\s+/g, " ");
+    expect(payload.message.subject).toBe(
+      "Padel TOPFLY - Prenotazione annullata dall'amministrazione",
+    );
+    expect(payload.message.toRecipients[0].emailAddress.address).toBe("mario@topfly.it");
+    expect(content).toContain("annullata dall'amministrazione");
+    // Non deve esporre l'identita' personale dell'admin.
+    expect(content).not.toContain("stefano");
+  });
+
   it("invia lo scarico responsabilita' alla mailbox configurata con PDF allegato", async () => {
     vi.resetModules();
     vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
@@ -441,7 +529,7 @@ describe("Microsoft Graph sync", () => {
     expect(payload.message.body.content).toContain("Rinuncia al posto");
     expect(payload.message.body.content).toContain("/waiver/cancel/waiver_1");
     expect(payload.message.body.content).toContain("PDF firmato");
-    expect(payload.message.body.content).not.toContain("sara' confermata solo quando");
+    expect(payload.message.body.content).not.toContain("sarà confermata solo quando");
     expect(payload.message.attachments[0].name).toBe("padel-topfly.ics");
     expect(payload.message.attachments[0].contentType).toBe("text/calendar");
     expect(payload.message.attachments[1].name).toBe("scarico-laura.pdf");
@@ -549,6 +637,7 @@ describe("Microsoft Graph sync", () => {
       start: new Date("2026-06-04T18:00:00.000Z"),
       end: new Date("2026-06-04T19:00:00.000Z"),
       waiverRevision: 2,
+      signatureDeadlineAt: new Date("2026-06-04T14:00:00.000Z"),
     });
 
     const result = await sendGuestBookingUpdatedEmail({
@@ -570,6 +659,60 @@ describe("Microsoft Graph sync", () => {
     expect(payload.message.body.content).toContain("18:00 - 19:00");
     expect(payload.message.body.content).toContain("Firma per il nuovo orario");
     expect(payload.message.body.content).toContain("/w/booking_guest/token123");
+    const updatedContent = payload.message.body.content.replace(/\s+/g, " ");
+    expect(updatedContent).toContain("16:00"); // scadenza firme 14:00 UTC resa in ora italiana
+    expect(updatedContent).toContain(
+      "Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.",
+    );
+  });
+
+  it("usa un fallback quando la modifica ospite non ha una scadenza firme impostata", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString() });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { sendGuestBookingUpdatedEmail } = await import("@/lib/graph");
+    const previousBooking = bookingFixture({ status: "CONFIRMED" });
+    const booking = bookingFixture({
+      ...previousBooking,
+      start: new Date("2026-06-04T18:00:00.000Z"),
+      end: new Date("2026-06-04T19:00:00.000Z"),
+      waiverRevision: 2,
+      signatureDeadlineAt: null,
+    });
+
+    await sendGuestBookingUpdatedEmail({
+      previousBooking,
+      booking,
+      signerName: "Laura Bianchi",
+      signerEmail: "laura@example.com",
+    });
+
+    const mailCall = calls.find((call) => call.url.includes("/sendMail"));
+    const content = JSON.parse(mailCall!.body!).message.body.content.replace(/\s+/g, " ");
+    expect(content).toContain("la scadenza indicata nell'app");
+    expect(content).toContain(
+      "Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.",
+    );
   });
 
   it("avvisa un ospite quando la prenotazione viene cancellata con allegato calendario cancel", async () => {
@@ -640,5 +783,56 @@ describe("Microsoft Graph sync", () => {
     expect(ics).toContain("METHOD:CANCEL");
     expect(ics).toContain("STATUS:CANCELLED");
     expect(ics).toContain("UID:booking_guest-laura@example.com@padel.topflysolutions.com");
+  });
+
+  it("avvisa il referente quando un ospite rinuncia, dicendo chi e' stato ed entro quando", async () => {
+    vi.resetModules();
+    vi.stubEnv("MS_GRAPH_TENANT_ID", "tenant");
+    vi.stubEnv("MS_GRAPH_CLIENT_ID", "client");
+    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "secret");
+    vi.stubEnv("MS_GRAPH_MAILBOX", "padel@topfly.it");
+
+    const calls: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input.toString();
+        calls.push({ url, body: init?.body?.toString() });
+
+        if (url.includes("login.microsoftonline.com")) {
+          return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), {
+            status: 200,
+          });
+        }
+
+        return new Response(null, { status: 202 });
+      }),
+    );
+
+    const { sendOrganizerGuestWithdrewEmail } = await import("@/lib/graph");
+    const result = await sendOrganizerGuestWithdrewEmail({
+      booking: bookingFixture({
+        status: "PENDING_SIGNATURES",
+        signatureDeadlineAt: new Date("2026-06-04T14:00:00.000Z"),
+      }),
+      signerName: "Luca Bianchi",
+      signedCount: 3,
+    });
+
+    const mailCall = calls.find((call) => call.url.includes("/sendMail"));
+    expect(result).toEqual({ status: "SENT" });
+    expect(mailCall).toBeDefined();
+
+    const payload = JSON.parse(mailCall!.body!);
+    // L'HTML e' indentato su piu' righe: normalizzo gli spazi per asserire sulle frasi.
+    const content = payload.message.body.content.replace(/\s+/g, " ");
+
+    expect(payload.message.subject).toBe("Padel TOPFLY - Luca Bianchi ha rinunciato al posto");
+    expect(payload.message.toRecipients[0].emailAddress.address).toBe("mario@topfly.it");
+    expect(content).toContain("Luca Bianchi ha rinunciato al posto");
+    expect(content).toContain("Manca 1 firma".toLowerCase());
+    expect(content).toContain("16:00"); // scadenza 14:00 UTC resa in ora italiana
+    expect(content).toContain("viene annullata automaticamente");
+    expect(content).toContain("Usa il link firma ospiti ricevuto nella mail");
   });
 });

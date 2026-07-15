@@ -148,6 +148,7 @@ function signatureProgressCopy(input: { signedCount: number; playerCount: number
   const missing = Math.max(0, input.playerCount - input.signedCount);
   return {
     missing,
+    missingLabel: missing === 1 ? "Manca 1 firma" : `Mancano ${missing} firme`,
     progress: `${input.signedCount}/${input.playerCount}`,
   };
 }
@@ -312,12 +313,12 @@ function waiverMailPayload(input: {
 
   return {
     message: {
-      subject: `Padel TOPFLY - Scarico responsabilita' ${signerName}`,
+      subject: `Padel TOPFLY - Scarico responsabilità ${signerName}`,
       body: {
         contentType: "HTML",
         content: `
           <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
-            <h2 style="margin: 0 0 12px;">Scarico responsabilita' Padel TOPFLY</h2>
+            <h2 style="margin: 0 0 12px;">Scarico responsabilità Padel TOPFLY</h2>
             <p style="margin: 0 0 12px;">
               In allegato il modulo firmato digitalmente per l'accesso al campo.
             </p>
@@ -385,7 +386,7 @@ function guestCalendarAttachment(input: {
   cancelUrl?: string;
 }) {
   const description = [
-    "Firma scarico responsabilita' registrata.",
+    "Firma scarico responsabilità registrata.",
     input.cancelUrl ? `Se non puoi partecipare, rinuncia al posto qui: ${input.cancelUrl}` : "",
   ]
     .filter(Boolean)
@@ -490,7 +491,7 @@ function guestWaiverConfirmationPayload(input: {
             <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
               <p style="margin: 0 0 16px; font-size: 16px;">
                 Ciao ${signerName},<br>
-                la tua firma per l'accesso al campo Padel TOPFLY e' stata registrata.
+                la tua firma per l'accesso al campo Padel TOPFLY è stata registrata.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
                 <tr>
@@ -561,6 +562,9 @@ function guestBookingUpdatedPayload(input: {
   const startLabel = escapeHtml(formatEventTime(input.booking.start));
   const endLabel = escapeHtml(formatEventTime(input.booking.end));
   const organizerName = escapeHtml(input.booking.organizerName);
+  const deadlineLabel = input.booking.signatureDeadlineAt
+    ? escapeHtml(formatEventDateTime(input.booking.signatureDeadlineAt))
+    : "la scadenza indicata nell'app";
   const safeGuestWaiverUrl = input.guestWaiverUrl ? escapeHtml(input.guestWaiverUrl) : null;
 
   return {
@@ -577,7 +581,7 @@ function guestBookingUpdatedPayload(input: {
             <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
               <p style="margin: 0 0 16px; font-size: 16px;">
                 Ciao ${signerName},<br>
-                la prenotazione Padel TOPFLY a cui avevi aderito e' stata modificata.
+                la prenotazione Padel TOPFLY a cui avevi aderito è stata modificata.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
                 <tr>
@@ -595,6 +599,10 @@ function guestBookingUpdatedPayload(input: {
               </table>
               <p style="margin: 16px 0 0; color: #4b5563;">
                 La firma precedente resta archiviata, ma per il nuovo orario serve firmare di nuovo.
+              </p>
+              <p style="margin: 12px 0 0; color: #4b5563;">
+                Firma <strong>entro ${deadlineLabel}</strong>. Se manca anche una sola firma alla scadenza,
+                la prenotazione viene annullata automaticamente.
               </p>
               ${
                 safeGuestWaiverUrl
@@ -656,7 +664,7 @@ function guestBookingCanceledPayload(input: {
             <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
               <p style="margin: 0 0 16px; font-size: 16px;">
                 Ciao ${signerName},<br>
-                la prenotazione Padel TOPFLY a cui avevi aderito e' stata cancellata.
+                la prenotazione Padel TOPFLY a cui avevi aderito è stata cancellata.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
                 <tr>
@@ -673,7 +681,7 @@ function guestBookingCanceledPayload(input: {
                 </tr>
               </table>
               <p style="margin: 16px 0 0; color: #4b5563;">
-                Non devi fare altro: il tuo posto non risulta piu' valido e il campo torna disponibile.
+                Non devi fare altro: il tuo posto non risulta più valido e il campo torna disponibile.
               </p>
             </div>
           </div>
@@ -727,7 +735,7 @@ function organizerPendingSignaturePayload(input: {
             <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
               <p style="margin: 0 0 16px; font-size: 16px;">
                 Ciao ${organizerName},<br>
-                la tua prenotazione e' stata presa in carico ma non e' ancora confermata.
+                la tua prenotazione è stata presa in carico ma non è ancora confermata.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
                 <tr>
@@ -748,7 +756,7 @@ function organizerPendingSignaturePayload(input: {
                 </tr>
               </table>
               <p style="margin: 16px 0 0; color: #4b5563;">
-                Mancano ${progress.missing} firma/e. Se non vengono raccolte entro la scadenza, la prenotazione verra' annullata automaticamente.
+                ${progress.missingLabel}. Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.
               </p>
               ${
                 safeGuestWaiverUrl
@@ -790,6 +798,74 @@ function organizerPendingSignaturePayload(input: {
   };
 }
 
+function organizerGuestWithdrewPayload(input: {
+  booking: Booking;
+  signerName: string;
+  signedCount: number;
+  guestWaiverUrl?: string;
+}) {
+  const organizerName = escapeHtml(input.booking.organizerName);
+  const guestName = escapeHtml(input.signerName);
+  const dateLabel = escapeHtml(formatEventDate(input.booking.start));
+  const startLabel = escapeHtml(formatEventTime(input.booking.start));
+  const deadlineLabel = input.booking.signatureDeadlineAt
+    ? escapeHtml(formatEventDateTime(input.booking.signatureDeadlineAt))
+    : "la scadenza indicata nell'app";
+  const safeGuestWaiverUrl = input.guestWaiverUrl ? escapeHtml(input.guestWaiverUrl) : null;
+  const progress = signatureProgressCopy({
+    signedCount: input.signedCount,
+    playerCount: input.booking.playerCount,
+  });
+
+  return {
+    message: {
+      subject: `Padel TOPFLY - ${input.signerName} ha rinunciato al posto`,
+      body: {
+        contentType: "HTML",
+        content: `
+          <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+            <h2 style="margin: 0 0 12px;">${guestName} ha rinunciato al posto</h2>
+            <p style="margin: 0 0 12px;">
+              Ciao ${organizerName}, ${guestName} non giocherà la partita del ${dateLabel} alle ${startLabel}.
+            </p>
+            <p style="margin: 0 0 12px;">
+              La prenotazione resta valida, ma torna in attesa di firme: ${progress.missingLabel.toLowerCase()}
+              su ${escapeHtml(String(input.booking.playerCount))} giocatori. Trova un sostituto e fagli firmare
+              lo scarico <strong>entro ${deadlineLabel}</strong>, altrimenti la prenotazione viene annullata
+              automaticamente.
+            </p>
+            ${
+              safeGuestWaiverUrl
+                ? `
+            <p style="margin: 22px 0 10px;">
+              <a href="${safeGuestWaiverUrl}" style="display: inline-block; background: #24262d; color: #ffffff; text-decoration: none; font-weight: 700; padding: 13px 18px; border-radius: 8px;">
+                Link firma ospiti
+              </a>
+            </p>
+            <p style="margin: 0; color: #6b7280; font-size: 13px;">
+              Link diretto: <a href="${safeGuestWaiverUrl}" style="color: #374151;">${safeGuestWaiverUrl}</a>
+            </p>`
+                : `
+            <p style="margin: 0; color: #6b7280; font-size: 13px;">
+              Usa il link firma ospiti ricevuto nella mail di prenotazione provvisoria.
+            </p>`
+            }
+          </div>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.booking.organizerEmail,
+            name: input.booking.organizerName,
+          },
+        },
+      ],
+    },
+    saveToSentItems: true,
+  };
+}
+
 function organizerSignatureReminderPayload(input: {
   booking: Booking;
   signedCount: number;
@@ -797,7 +873,7 @@ function organizerSignatureReminderPayload(input: {
   const organizerName = escapeHtml(input.booking.organizerName);
   const deadlineLabel = input.booking.signatureDeadlineAt
     ? escapeHtml(formatEventDateTime(input.booking.signatureDeadlineAt))
-    : "a breve";
+    : "la scadenza indicata nell'app";
   const progress = signatureProgressCopy({
     signedCount: input.signedCount,
     playerCount: input.booking.playerCount,
@@ -812,13 +888,15 @@ function organizerSignatureReminderPayload(input: {
           <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
             <h2 style="margin: 0 0 12px;">Mancano firme per il campo Padel TOPFLY</h2>
             <p style="margin: 0 0 12px;">
-              Ciao ${organizerName}, la prenotazione non e' ancora confermata.
+              Ciao ${organizerName},
             </p>
             <p style="margin: 0 0 12px;">
-              Firme raccolte: <strong>${escapeHtml(progress.progress)}</strong>. Mancano ${progress.missing} firma/e.
+              Firme raccolte: <strong>${escapeHtml(progress.progress)}</strong>.
             </p>
             <p style="margin: 0;">
-              Scadenza: <strong>${deadlineLabel}</strong>. Usa il link firma ospiti ricevuto nella mail di prenotazione provvisoria.
+              Scadenza: <strong>${deadlineLabel}</strong>. Se manca anche una sola firma alla scadenza,
+              la prenotazione viene annullata automaticamente. Usa il link firma ospiti ricevuto nella
+              mail di prenotazione provvisoria.
             </p>
           </div>
         `,
@@ -863,7 +941,7 @@ function organizerAutoCanceledPayload(input: {
             <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
               <p style="margin: 0 0 16px; font-size: 16px;">
                 Ciao ${organizerName},<br>
-                la prenotazione e' stata annullata automaticamente per firme mancanti.
+                la prenotazione è stata annullata automaticamente per firme mancanti.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
                 <tr>
@@ -899,12 +977,73 @@ function organizerAutoCanceledPayload(input: {
   };
 }
 
+function organizerAdminCanceledPayload(input: { booking: Booking }) {
+  const organizerName = escapeHtml(input.booking.organizerName);
+  const dateLabel = escapeHtml(formatEventDate(input.booking.start));
+  const startLabel = escapeHtml(formatEventTime(input.booking.start));
+  const endLabel = escapeHtml(formatEventTime(input.booking.end));
+
+  return {
+    message: {
+      subject: "Padel TOPFLY - Prenotazione annullata dall'amministrazione",
+      body: {
+        contentType: "HTML",
+        content: `
+          <div style="font-family: Arial, Helvetica, sans-serif; color: #24262d; line-height: 1.45; max-width: 560px;">
+            <div style="background: #4b5563; color: #ffffff; padding: 18px 20px; border-radius: 10px 10px 0 0;">
+              <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;">TOPFLY GPS Solutions</div>
+              <div style="font-size: 22px; font-weight: 700; margin-top: 6px;">Prenotazione annullata</div>
+            </div>
+            <div style="border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 10px 10px; padding: 20px; background: #ffffff;">
+              <p style="margin: 0 0 16px; font-size: 16px;">
+                Ciao ${organizerName},<br>
+                la prenotazione del ${dateLabel} alle ${startLabel} è stata annullata dall'amministrazione.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; background: #f8fafc; border-radius: 8px; overflow: hidden;">
+                <tr>
+                  <td style="padding: 14px 16px; color: #6b7280; font-size: 13px; width: 36%;">Giorno</td>
+                  <td style="padding: 14px 16px; font-weight: 700;">${dateLabel}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 0 16px 14px; color: #6b7280; font-size: 13px;">Orario</td>
+                  <td style="padding: 0 16px 14px; font-weight: 700;">${startLabel} - ${endLabel}</td>
+                </tr>
+              </table>
+              <p style="margin: 16px 0 0; color: #4b5563;">
+                Il campo torna disponibile per gli altri colleghi. Per una nuova prenotazione usa l'app.
+              </p>
+            </div>
+          </div>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: input.booking.organizerEmail,
+            name: input.booking.organizerName,
+          },
+        },
+      ],
+    },
+    saveToSentItems: true,
+  };
+}
+
 function cancelComment(organizer: OrganizerContact) {
   return [
     `Ciao ${organizer.name},`,
     "",
-    "la tua prenotazione del campo Padel TOPFLY e' stata cancellata.",
+    "la tua prenotazione del campo Padel TOPFLY è stata cancellata.",
     "Il campo torna disponibile per gli altri colleghi.",
+  ].join("\n");
+}
+
+function pendingSignaturesComment(organizer: OrganizerContact) {
+  return [
+    `Ciao ${organizer.name},`,
+    "",
+    "L'appuntamento viene rimosso perché servono di nuovo le firme: la prenotazione resta valida,",
+    "controlla l'email per i dettagli.",
   ].join("\n");
 }
 
@@ -1131,6 +1270,32 @@ export async function sendOrganizerPendingSignatureEmail(input: {
   }
 }
 
+export async function sendOrganizerGuestWithdrewEmail(input: {
+  booking: Booking;
+  signerName: string;
+  signedCount: number;
+  guestWaiverUrl?: string;
+}): Promise<WaiverMailResult> {
+  const disabled = graphDisabled();
+  if (disabled) {
+    return { status: "SKIPPED", error: disabled.error };
+  }
+
+  try {
+    await graphFetch(mailboxPath("/sendMail"), {
+      method: "POST",
+      body: JSON.stringify(organizerGuestWithdrewPayload(input)),
+    });
+
+    return { status: "SENT" };
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "Graph sendMail failed",
+    };
+  }
+}
+
 export async function sendOrganizerSignatureReminderEmail(input: {
   booking: Booking;
   signedCount: number;
@@ -1179,7 +1344,33 @@ export async function sendOrganizerAutoCanceledEmail(input: {
   }
 }
 
-export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncResult> {
+export async function sendOrganizerAdminCanceledEmail(input: {
+  booking: Booking;
+}): Promise<WaiverMailResult> {
+  const disabled = graphDisabled();
+  if (disabled) {
+    return { status: "SKIPPED", error: disabled.error };
+  }
+
+  try {
+    await graphFetch(mailboxPath("/sendMail"), {
+      method: "POST",
+      body: JSON.stringify(organizerAdminCanceledPayload(input)),
+    });
+
+    return { status: "SENT" };
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: error instanceof Error ? error.message : "Graph sendMail failed",
+    };
+  }
+}
+
+export async function deleteOutlookEvent(
+  booking: Booking,
+  variant: "canceled" | "pending" = "canceled",
+): Promise<GraphSyncResult> {
   if (!booking.outlookEventId) {
     return { status: "SKIPPED", error: "Nessun evento Outlook collegato." };
   }
@@ -1189,10 +1380,12 @@ export async function deleteOutlookEvent(booking: Booking): Promise<GraphSyncRes
 
   try {
     const organizer = { email: booking.organizerEmail, name: booking.organizerName };
+    const comment =
+      variant === "pending" ? pendingSignaturesComment(organizer) : cancelComment(organizer);
 
     await graphFetch(mailboxPath(`/events/${booking.outlookEventId}/cancel`), {
       method: "POST",
-      body: JSON.stringify({ comment: cancelComment(organizer) }),
+      body: JSON.stringify({ comment }),
     });
 
     return { status: "SYNCED", eventId: booking.outlookEventId };
