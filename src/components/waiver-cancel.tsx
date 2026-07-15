@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 import { appPath } from "@/lib/app-path";
 
 type CancelContext = {
+  canCancel: boolean;
   signature: {
     id: string;
     signerName: string;
@@ -178,14 +179,14 @@ export function WaiverCancel({
             {cancelContext.booking.status === "CANCELED" ? (
               <div className="notice warning">
                 <XCircle size={17} />
-                <span>Questa prenotazione non e&apos; piu&apos; attiva.</span>
+                <span>Questa prenotazione non è più attiva.</span>
               </div>
             ) : isCanceled ? (
               <div className="notice success">
                 <Check size={17} />
                 <span>Il posto risulta disponibile per un altro giocatore.</span>
               </div>
-            ) : (
+            ) : cancelContext.canCancel ? (
               <div className="guest-cancel-action">
                 <p>
                   Se confermi, la tua firma non conterà più nel limite giocatori e un altro ospite potrà
@@ -195,6 +196,11 @@ export function WaiverCancel({
                   <Undo2 size={18} />
                   Rinuncia al posto
                 </button>
+              </div>
+            ) : (
+              <div className="notice info">
+                <XCircle size={17} />
+                <span>La partita è già iniziata: non è più possibile rinunciare al posto.</span>
               </div>
             )}
           </>

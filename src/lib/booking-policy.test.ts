@@ -73,7 +73,7 @@ describe("booking policy", () => {
       futureBookingCount: bookingPolicy.maxFutureBookings,
     });
 
-    expect(errors).toContain("Hai gia' 2 prenotazioni future attive.");
+    expect(errors).toContain("Hai già 2 prenotazioni future attive.");
   });
 
   it("rileva sovrapposizioni tra fasce", () => {

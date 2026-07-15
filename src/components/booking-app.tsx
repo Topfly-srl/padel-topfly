@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  AlertTriangle,
   CalendarDays,
   Check,
   Clock3,
@@ -22,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { bookingDurationOptions } from "@/lib/booking-constants";
+import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
 import { isExternalEmailForDomain, isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import {
@@ -38,6 +38,7 @@ import type {
   MyBooking,
 } from "@/lib/types";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
+import { PendingSignaturePanel } from "@/components/pending-signature-panel";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -144,22 +145,8 @@ function localDateTime(date: Date) {
   }).format(date);
 }
 
-function localDeadlineDateTime(date: Date) {
-  const day = new Intl.DateTimeFormat("it-IT", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-  }).format(date);
-
-  return `${day} alle ${localTime(date)}`;
-}
-
 function playerCountLabel(count: number) {
   return `${count} ${count === 1 ? "giocatore" : "giocatori"}`;
-}
-
-function missingSignatureTitle(count: number) {
-  return count === 1 ? "Manca 1 firma" : `Mancano ${count} firme`;
 }
 
 function localDay(date: Date) {
@@ -237,28 +224,15 @@ function isActiveBooking(booking: Pick<AvailabilityBooking, "status">) {
   return booking.status === "CONFIRMED" || booking.status === "PENDING_SIGNATURES";
 }
 
-function bookingStatusLabel(status: AvailabilityBooking["status"]) {
-  if (status === "PENDING_SIGNATURES") return "In attesa firme";
-  if (status === "CONFIRMED") return "Confermata";
-  return "Cancellata";
-}
-
 function bookingStatusTone(status: AvailabilityBooking["status"]) {
   if (status === "PENDING_SIGNATURES") return "warning";
   if (status === "CONFIRMED") return "success";
   return "neutral";
 }
 
-function deadlineCopy(value: string | null) {
-  return value ? `Scadenza firme: ${localDateTime(new Date(value))}` : "Completa le firme prima di giocare.";
-}
-
-function bookingSuccessText(status: string, bookingStatus?: string) {
-  if (bookingStatus === "PENDING_SIGNATURES") {
-    return "Prenotazione provvisoria creata. Se non arrivano tutte le firme entro la scadenza verra' annullata.";
-  }
+function bookingSuccessText(status: string) {
   if (status === "SYNCED") return "Fatto. Prenotazione confermata con invito Outlook.";
-  if (status === "FAILED") return "Prenotazione confermata, ma l'invito Outlook non e' stato inviato.";
+  if (status === "FAILED") return "Prenotazione confermata, ma l'invito Outlook non è stato inviato.";
   return "Fatto. Prenotazione confermata.";
 }
 
@@ -295,7 +269,7 @@ function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
     return {
       tone: "success",
       title: "Modulo ufficiale inviato alla Direzione",
-      text: "Il PDF e' stato compilato, archiviato e inviato alla mailbox Padel.",
+      text: "Il PDF è stato compilato, archiviato e inviato alla mailbox Padel.",
     };
   }
 
@@ -303,7 +277,7 @@ function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
     return {
       tone: "warning",
       title: "PDF salvato, email da reinviare",
-      text: "La firma resta registrata. Il PDF si puo' scaricare o reinviare da admin.",
+      text: "La firma resta registrata. Il PDF si può scaricare o reinviare da admin.",
     };
   }
 
@@ -311,7 +285,7 @@ function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
     return {
       tone: "warning",
       title: "PDF salvato in archivio",
-      text: "L'invio email non e' configurato: il modulo resta disponibile nell'admin.",
+      text: "L'invio email non è configurato: il modulo resta disponibile nell'admin.",
     };
   }
 
@@ -998,7 +972,7 @@ export function BookingApp({
         ? null
         : {
             type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
-            text: bookingSuccessText(json.booking.outlookSyncStatus, json.booking.status),
+            text: bookingSuccessText(json.booking.outlookSyncStatus),
           },
     );
     await refresh(nextTokens);
@@ -1305,51 +1279,25 @@ export function BookingApp({
                   </div>
                 </div>
                 {selectedOwnBooking.status === "PENDING_SIGNATURES" ? (
-                  <div className="pending-signature-panel">
-                    <div className="pending-signature-status">
-                      <div className="pending-signature-copy">
-                        <span className="pending-signature-eyebrow">
-                          <Clock3 size={15} />
-                          Non confermata
-                        </span>
-                        <strong>{missingSignatureTitle(selectedOwnMissingSignatures)}</strong>
-                        <p>La prenotazione non e&apos; ancora confermata.</p>
-                        <p className="pending-signature-deadline">
-                          {selectedOwnBooking.signatureDeadlineAt
-                            ? `Scadenza: ${localDeadlineDateTime(new Date(selectedOwnBooking.signatureDeadlineAt))}.`
-                            : "Scadenza: prima dell'orario di gioco."}
-                        </p>
-                      </div>
-                      <div className="pending-signature-cancel">
-                        <AlertTriangle size={17} />
-                        <strong>
-                          Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.
-                        </strong>
-                      </div>
-                    </div>
-                    <div className="pending-signature-action-block">
-                      {selectedOwnGuestWaiverLink ? (
-                        <div className="pending-signature-share">
-                          <strong>Condividi il link con gli ospiti</strong>
-                          <GuestLinkPanel
-                            copied={copiedGuestWaiverLink === getGuestShareLink(selectedOwnGuestWaiverLink)}
-                            copyLabel="Copia link"
-                            link={selectedOwnGuestWaiverLink}
-                            onCopy={copyGuestWaiverLink}
-                            openLabel="Apri firma ospiti"
-                            showLinkInput={false}
-                            tone="pending"
-                          />
-                        </div>
-                      ) : null}
-                      {selectedOwnWaiverDelivery ? (
-                        <small className="pending-signature-footnote">
-                          <FileText size={14} />
-                          {selectedOwnWaiverDelivery.title}
-                        </small>
-                      ) : null}
-                    </div>
-                  </div>
+                  <PendingSignaturePanel
+                    missingSignatures={selectedOwnMissingSignatures}
+                    signatureDeadlineAt={selectedOwnBooking.signatureDeadlineAt}
+                    guestWaiverLink={selectedOwnGuestWaiverLink ?? null}
+                    linkCopied={
+                      selectedOwnGuestWaiverLink
+                        ? copiedGuestWaiverLink === getGuestShareLink(selectedOwnGuestWaiverLink)
+                        : false
+                    }
+                    onCopyLink={copyGuestWaiverLink}
+                    footnote={
+                      selectedOwnWaiverDelivery
+                        ? {
+                            success: selectedOwnWaiverDelivery.tone === "success",
+                            text: selectedOwnWaiverDelivery.title,
+                          }
+                        : null
+                    }
+                  />
                 ) : null}
                 {notice ? (
                   <div

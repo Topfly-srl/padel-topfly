@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, CalendarDays, Check, Clock3, FileText, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -8,7 +8,7 @@ import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
-import { GuestLinkPanel } from "@/components/guest-link-panel";
+import { PendingSignaturePanel } from "@/components/pending-signature-panel";
 import {
   WaiverFormSection,
   type WaiverField,
@@ -75,22 +75,8 @@ function localSummaryDay(date: Date) {
   }).format(date);
 }
 
-function localDeadlineDateTime(date: Date) {
-  const day = new Intl.DateTimeFormat("it-IT", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-  }).format(date);
-
-  return `${day} alle ${localTime(date)}`;
-}
-
 function playerCountLabel(count: number) {
   return `${count} ${count === 1 ? "giocatore" : "giocatori"}`;
-}
-
-function missingSignatureTitle(count: number) {
-  return count === 1 ? "Manca 1 firma" : `Mancano ${count} firme`;
 }
 
 function normalizeName(value: string) {
@@ -434,51 +420,20 @@ export function BookingCheckout({
             )}
 
             {createdBooking.status === "PENDING_SIGNATURES" ? (
-              <div className="pending-signature-panel">
-                <div className="pending-signature-status">
-                  <div className="pending-signature-copy">
-                    <span className="pending-signature-eyebrow">
-                      <Clock3 size={15} />
-                      Non confermata
-                    </span>
-                    <strong>{missingSignatureTitle(pendingMissingSignatures)}</strong>
-                    <p>La prenotazione non e&apos; ancora confermata.</p>
-                    <p className="pending-signature-deadline">
-                      {createdBooking.signatureDeadlineAt
-                        ? `Scadenza: ${localDeadlineDateTime(new Date(createdBooking.signatureDeadlineAt))}.`
-                        : "Scadenza: prima dell'orario di gioco."}
-                    </p>
-                  </div>
-                  <div className="pending-signature-cancel">
-                    <AlertTriangle size={17} />
-                    <strong>
-                      Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.
-                    </strong>
-                  </div>
-                </div>
-                <div className="pending-signature-action-block">
-                  {createdBooking.guestWaiverUrl ? (
-                    <div className="pending-signature-share">
-                      <strong>Condividi il link con gli ospiti</strong>
-                      <GuestLinkPanel
-                        copied={copiedGuestWaiverLink}
-                        copyLabel="Copia link"
-                        link={createdBooking.guestWaiverUrl}
-                        onCopy={copyGuestWaiverLink}
-                        openLabel="Apri firma ospiti"
-                        showLinkInput={false}
-                        tone="pending"
-                      />
-                    </div>
-                  ) : null}
-                  <small className="pending-signature-footnote">
-                    <FileText size={14} />
-                    {createdBooking.waiverEmailStatus === "SENT"
+              <PendingSignaturePanel
+                missingSignatures={pendingMissingSignatures}
+                signatureDeadlineAt={createdBooking.signatureDeadlineAt}
+                guestWaiverLink={createdBooking.guestWaiverUrl ?? null}
+                linkCopied={copiedGuestWaiverLink}
+                onCopyLink={copyGuestWaiverLink}
+                footnote={{
+                  success: createdBooking.waiverEmailStatus === "SENT",
+                  text:
+                    createdBooking.waiverEmailStatus === "SENT"
                       ? "PDF inviato alla Direzione."
-                      : "PDF referente salvato."}
-                  </small>
-                </div>
-              </div>
+                      : "PDF referente salvato.",
+                }}
+              />
             ) : null}
 
             <Link className="ghost-button full-width" href="/">

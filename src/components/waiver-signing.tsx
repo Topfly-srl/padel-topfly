@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
+import { deadlineCopy } from "@/lib/booking-copy";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import {
   WaiverFormSection,
@@ -65,10 +66,6 @@ function localTime(date: Date) {
   }).format(date);
 }
 
-function deadlineCopy(value: string | null) {
-  return value ? `Scadenza firme: ${localDateTime(new Date(value))}` : "Completa le firme prima dell'orario di gioco.";
-}
-
 async function readApiError(response: Response) {
   const json = (await response.json().catch(() => null)) as { error?: string } | null;
   return json?.error ?? "Richiesta non riuscita.";
@@ -78,8 +75,8 @@ function friendlyLoadError(message: string) {
   if (message.includes("non valido") || message.includes("scaduto")) {
     return "Link firma ospiti non valido o scaduto. Chiedi al referente della prenotazione di rimandarti il link corretto.";
   }
-  if (message.includes("non e' piu' attiva")) {
-    return "Questa prenotazione non e' piu' attiva. Non serve firmare questo scarico.";
+  if (message.includes("non è più attiva")) {
+    return "Questa prenotazione non è più attiva. Non serve firmare questo scarico.";
   }
   if (message.includes("Prenotazione non trovata")) {
     return "Prenotazione non trovata. Controlla di aver aperto il link completo ricevuto dal referente.";
@@ -296,7 +293,7 @@ export function WaiverSigning({
 
             {hasSigned ? (
               <div className="guest-success-card">
-                <strong>Firma registrata, il PDF firmato e&apos; stato inviato alla Direzione.</strong>
+                <strong>Firma registrata, il PDF firmato è stato inviato alla Direzione.</strong>
                 <p>Se non puoi essere presente, puoi rinunciare dal link presente nella mail che hai ricevuto.</p>
               </div>
             ) : waiver.booking.remainingSignatures <= 0 ? (

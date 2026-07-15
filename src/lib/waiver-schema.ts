@@ -4,7 +4,7 @@ import { isoDateOnlySchema } from "@/lib/date-only";
 export const signatureImageDataUrlSchema = z
   .string()
   .min(1, "Disegna la firma nel riquadro.")
-  .max(400_000, "La firma disegnata e' troppo pesante. Cancella e riprova.");
+  .max(400_000, "La firma disegnata è troppo pesante. Cancella e riprova.");
 
 export const waiverPayloadSchema = z.object({
   birthDate: isoDateOnlySchema,

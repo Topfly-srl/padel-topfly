@@ -63,7 +63,7 @@ export function routeError(error: unknown) {
     console.error({ message: "Unknown route error" });
   }
   return jsonResponse(
-    { error: "Qualcosa e' andato storto. Riprova tra poco." },
+    { error: "Qualcosa è andato storto. Riprova tra poco." },
     { status: 500 },
   );
 }

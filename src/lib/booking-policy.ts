@@ -91,7 +91,7 @@ export function validateBookingPolicy(input: BookingValidationInput) {
     typeof input.futureBookingCount === "number" &&
     input.futureBookingCount >= bookingPolicy.maxFutureBookings
   ) {
-    errors.push("Hai gia' 2 prenotazioni future attive.");
+    errors.push("Hai già 2 prenotazioni future attive.");
   }
 
   return errors;

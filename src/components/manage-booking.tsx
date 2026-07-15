@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { bookingDurationOptions } from "@/lib/booking-constants";
+import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
 import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/types";
 
 type Notice = {
@@ -78,16 +79,6 @@ function cancellationSuccessText(status: string) {
 
 function isActiveBooking(booking: Pick<MyBooking, "status">) {
   return booking.status === "CONFIRMED" || booking.status === "PENDING_SIGNATURES";
-}
-
-function bookingStatusLabel(status: MyBooking["status"]) {
-  if (status === "PENDING_SIGNATURES") return "Prenotazione in attesa firme";
-  if (status === "CONFIRMED") return "Prenotazione confermata";
-  return "Prenotazione cancellata";
-}
-
-function deadlineCopy(value: string | null) {
-  return value ? `Scadenza firme: ${localDateTime(new Date(value))}` : "Completa le firme prima di giocare.";
 }
 
 function rememberToken(token: string) {
@@ -293,7 +284,7 @@ export function ManageBooking({
 
             {booking.status === "PENDING_SIGNATURES" ? (
               <div className="notice warning">
-                La prenotazione non e&apos; ancora confermata. Se mancano firme alla scadenza, verra&apos; annullata automaticamente.
+                Se manca anche una sola firma alla scadenza, la prenotazione viene annullata automaticamente.
               </div>
             ) : null}
 
