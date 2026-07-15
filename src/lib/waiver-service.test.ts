@@ -227,7 +227,7 @@ describe("waiver service", () => {
     };
 
     await demoSignGuestWaiver(booking.id, token, guestWaiver, {});
-    await expect(demoSignGuestWaiver(booking.id, token, guestWaiver, {})).rejects.toThrow("gia' firmato");
+    await expect(demoSignGuestWaiver(booking.id, token, guestWaiver, {})).rejects.toThrow("già firmato");
   });
 
   it("non conta le firme ospite rinunciate nel totale firme", () => {
@@ -245,6 +245,22 @@ describe("waiver service", () => {
     expect(summary.signedCount).toBe(2);
     expect(summary.remainingCount).toBe(2);
     expect(summary.emailStatus).toBe("SENT");
+  });
+
+  it("computeGuestSeatCancelable riflette firma, inizio partita e stato prenotazione", async () => {
+    const { computeGuestSeatCancelable } = await import("@/lib/waiver-service");
+    const now = new Date("2026-06-03T10:00:00.000Z");
+    const future = new Date("2026-06-05T12:00:00.000Z");
+    const past = new Date("2026-06-01T12:00:00.000Z");
+
+    expect(computeGuestSeatCancelable("ACTIVE", { start: future, status: "CONFIRMED" }, now)).toBe(true);
+    expect(computeGuestSeatCancelable("ACTIVE", { start: future, status: "PENDING_SIGNATURES" }, now)).toBe(true);
+    // Partita gia' iniziata.
+    expect(computeGuestSeatCancelable("ACTIVE", { start: past, status: "CONFIRMED" }, now)).toBe(false);
+    // Firma gia' rinunciata.
+    expect(computeGuestSeatCancelable("CANCELED", { start: future, status: "CONFIRMED" }, now)).toBe(false);
+    // Prenotazione non piu' attiva.
+    expect(computeGuestSeatCancelable("ACTIVE", { start: future, status: "CANCELED" }, now)).toBe(false);
   });
 
   it("genera link firma ospiti e rinuncia senza marcatori di test", async () => {

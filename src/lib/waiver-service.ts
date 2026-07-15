@@ -17,7 +17,11 @@ import {
   demoGetWaiverContext,
   demoSignGuestWaiver,
 } from "@/lib/demo-store";
-import { sendGuestWaiverConfirmationEmail, sendWaiverEmail } from "@/lib/graph";
+import {
+  sendGuestWaiverConfirmationEmail,
+  sendOrganizerGuestWithdrewEmail,
+  sendWaiverEmail,
+} from "@/lib/graph";
 import {
   createManageToken,
   hashManageToken,
@@ -27,13 +31,14 @@ import {
   normalizePersonName,
 } from "@/lib/manage-token";
 import { prisma } from "@/lib/prisma";
+import { retryPrismaTransaction } from "@/lib/prisma-retry";
 import { generateWaiverPdf, waiverPdfFilename, waiverRegulationPath } from "@/lib/waiver-pdf";
 import { appConfig } from "@/lib/config";
 import {
   cancelOutlookEventForPendingBooking,
   markBookingConfirmedIfComplete,
-  processSignatureDeadlines,
-  signatureDeadlineAt,
+  runOpportunisticSignatureDeadlines,
+  signatureReplacementDeadlineAt,
   syncConfirmedBooking,
 } from "@/lib/signature-workflow";
 
@@ -97,6 +102,7 @@ export type AdminWaiverSignatureList = {
 };
 
 export type GuestWaiverCancelContext = {
+  canCancel: boolean;
   signature: {
     id: string;
     signerName: string;
@@ -149,7 +155,7 @@ function validateAdultBirthDate(birthDate: Date, now = new Date()) {
   adultLimit.setFullYear(adultLimit.getFullYear() - 18);
 
   if (birthDate > adultLimit) {
-    throw new AppError("Il flusso digitale self-service e' disponibile solo per maggiorenni.", 422);
+    throw new AppError("Il flusso digitale self-service è disponibile solo per maggiorenni.", 422);
   }
 }
 
@@ -170,7 +176,7 @@ function parseSignatureImageDataUrl(value: string | undefined) {
   }
 
   if (bytes.length > maxSignatureImageBytes) {
-    throw new AppError("La firma disegnata e' troppo pesante. Cancella e riprova.", 422);
+    throw new AppError("La firma disegnata è troppo pesante. Cancella e riprova.", 422);
   }
 
   if (bytes.length < pngSignature.length || !bytes.subarray(0, pngSignature.length).equals(pngSignature)) {
@@ -253,7 +259,7 @@ export function normalizeWaiverInput(input: WaiverInput, now = new Date()) {
   }
 
   if (signerEmail.length > 120) {
-    errors.push("L'email del firmatario e' troppo lunga.");
+    errors.push("L'email del firmatario è troppo lunga.");
   }
 
   if (birthPlace.length < 2 || birthPlace.length > 120) {
@@ -279,7 +285,7 @@ export function normalizeWaiverInput(input: WaiverInput, now = new Date()) {
   }
 
   if (!input.liabilityAccepted) {
-    errors.push("Accetta l'assunzione di responsabilita' e manleva.");
+    errors.push("Accetta l'assunzione di responsabilità e manleva.");
   }
 
   if (!input.specificApprovalAccepted) {
@@ -364,17 +370,24 @@ export function summarizeWaiverSignatures(input: {
   };
 }
 
-export async function createWaiverSignature(
-  tx: Prisma.TransactionClient,
+export type PreparedWaiverSignature = {
+  now: Date;
+  normalized: ReturnType<typeof normalizeWaiverInput>;
+  ipHash: string | null;
+  userAgentHash: string | null;
+  pdf: Awaited<ReturnType<typeof generateWaiverPdf>>;
+};
+
+// Il PDF dello scarico e' lo step lento (~10x rispetto alla scrittura): generarlo DENTRO la
+// transazione Serializable allarga la finestra di conflitto. Chi ha gia' il booking a
+// disposizione lo prepara PRIMA di aprire la tx e passa il risultato a createWaiverSignature; se
+// poi la tx rileva che non si puo' piu' firmare, questo lavoro si butta e va bene cosi'.
+export async function prepareWaiverSignature(
   booking: BookingForWaiver,
   input: WaiverInput,
   signerRole: "ORGANIZER" | "GUEST",
   evidence: WaiverEvidence,
-  options: {
-    cancelToken?: string;
-    guestEmailStatus?: WaiverEmailStatus;
-  } = {},
-) {
+): Promise<PreparedWaiverSignature> {
   const now = new Date();
   const normalized = normalizeWaiverInput(input, now);
   const ipHash = hashEvidence(evidence.ip);
@@ -396,6 +409,24 @@ export async function createWaiverSignature(
     ipHash,
     userAgentHash,
   });
+
+  return { now, normalized, ipHash, userAgentHash, pdf };
+}
+
+export async function createWaiverSignature(
+  tx: Prisma.TransactionClient,
+  booking: BookingForWaiver,
+  input: WaiverInput,
+  signerRole: "ORGANIZER" | "GUEST",
+  evidence: WaiverEvidence,
+  options: {
+    cancelToken?: string;
+    guestEmailStatus?: WaiverEmailStatus;
+    prepared?: PreparedWaiverSignature;
+  } = {},
+) {
+  const { now, normalized, ipHash, userAgentHash, pdf } =
+    options.prepared ?? (await prepareWaiverSignature(booking, input, signerRole, evidence));
 
   try {
     return await tx.waiverSignature.create({
@@ -430,7 +461,7 @@ export async function createWaiverSignature(
     });
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
-      throw new AppError("Questa email ha gia' firmato lo scarico per questa prenotazione.", 409);
+      throw new AppError("Questa email ha già firmato lo scarico per questa prenotazione.", 409);
     }
     throw error;
   }
@@ -529,7 +560,28 @@ function assertGuestWaiverAccess(
   }
 
   if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
-    throw new AppError("La prenotazione non e' piu' attiva.", 409);
+    throw new AppError("La prenotazione non è più attiva.", 409);
+  }
+}
+
+// Finora la scadenza firme era fatta rispettare SOLO dall'auto-annullo periodico: il link firma
+// resta valido fino a end+24h, quindi appena il cron non chiude una pending (perche' fermo, in
+// ritardo, o perche' la deadline coincide con l'inizio) un ospite puo' firmare a partita finita
+// e far diventare CONFIRMED una prenotazione gia' giocata, creando anche l'evento Outlook.
+// Il controllo deve stare dove si firma, non solo in chi fa pulizia.
+function assertSignatureWindowOpen(
+  booking: Pick<Booking, "status" | "signatureDeadlineAt">,
+  now = new Date(),
+) {
+  if (
+    booking.status === "PENDING_SIGNATURES" &&
+    booking.signatureDeadlineAt &&
+    booking.signatureDeadlineAt <= now
+  ) {
+    throw new AppError(
+      "La scadenza per le firme è passata: la prenotazione non è più confermabile.",
+      409,
+    );
   }
 }
 
@@ -550,16 +602,46 @@ function assertGuestCancelAccess(
   }
 }
 
+// Il token rinuncia resta valido fino a end+24h (manageTokenExpiresAt): senza questo controllo
+// un link vecchio cliccato a partita gia' giocata riporta la prenotazione in attesa firme e la
+// fa annullare all'indietro, con mail assurde e l'archivio degli scarichi che risulta annullato
+// proprio per le partite realmente giocate.
+function assertGuestCancelInTime(booking: Pick<Booking, "start">, now = new Date()) {
+  if (booking.start <= now) {
+    throw new AppError(
+      "La partita è già iniziata: non è più possibile rinunciare al posto.",
+      409,
+    );
+  }
+}
+
+// Verita' unica sul "si puo' ancora rinunciare": firma attiva, partita non ancora iniziata e
+// prenotazione ancora viva. Rispecchia i controlli che cancelGuestWaiverSignature applica prima
+// di rispondere 409, cosi' l'interfaccia non promette un'azione che il server rifiuta.
+export function computeGuestSeatCancelable(
+  signatureStatus: "ACTIVE" | "CANCELED",
+  booking: { start: Date; status: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED" },
+  now = new Date(),
+) {
+  return (
+    signatureStatus === "ACTIVE" &&
+    booking.start > now &&
+    (booking.status === "CONFIRMED" || booking.status === "PENDING_SIGNATURES")
+  );
+}
+
 function serializeGuestCancelContext(
   signature: WaiverSignature & {
     booking: Booking & {
       waiverSignatures?: Array<SignatureForSummaryWithStatus>;
     };
   },
+  now = new Date(),
 ): GuestWaiverCancelContext {
   const summary = summarizeWaiverSignatures(signature.booking);
 
   return {
+    canCancel: computeGuestSeatCancelable(signature.status, signature.booking, now),
     signature: {
       id: signature.id,
       signerName: signature.signerName,
@@ -585,7 +667,7 @@ export async function getWaiverContext(bookingId: string, token: string | null):
     return demoGetWaiverContext(bookingId, token);
   }
 
-  await processSignatureDeadlines();
+  await runOpportunisticSignatureDeadlines();
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     include: {
@@ -629,76 +711,95 @@ export async function signGuestWaiver(
   baseUrl?: string,
 ) {
   if (!appConfig.databaseConfigured) {
-    return demoSignGuestWaiver(bookingId, token, input, evidence);
+    return demoSignGuestWaiver(bookingId, token, input, evidence, baseUrl);
   }
 
-  await processSignatureDeadlines({ baseUrl });
+  await runOpportunisticSignatureDeadlines({ baseUrl });
   const cancelToken = createManageToken();
-  const result = await prisma.$transaction(
-    async (tx) => {
-      const booking = await tx.booking.findUnique({
-        where: { id: bookingId },
-        include: {
-          waiverSignatures: {
-            select: { bookingRevision: true, emailStatus: true, status: true },
+
+  // Il booking esiste gia': leggiamo i dati e generiamo il PDF PRIMA di aprire la transazione,
+  // cosi' lo step lento resta fuori dalla finestra Serializable e non moltiplica i conflitti. La
+  // validazione autorevole (accesso, finestra firme, conteggio, doppia firma) resta DENTRO la tx.
+  const snapshot = await prisma.booking.findUnique({ where: { id: bookingId } });
+
+  if (!snapshot) {
+    throw new AppError("Prenotazione non trovata.", 404);
+  }
+
+  assertGuestWaiverAccess(snapshot, token);
+  assertSignatureWindowOpen(snapshot);
+
+  const prepared = await prepareWaiverSignature(snapshot, input, "GUEST", evidence);
+
+  const result = await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const booking = await tx.booking.findUnique({
+          where: { id: bookingId },
+          include: {
+            waiverSignatures: {
+              select: { bookingRevision: true, emailStatus: true, status: true },
+            },
           },
-        },
-      });
+        });
 
-      if (!booking) {
-        throw new AppError("Prenotazione non trovata.", 404);
-      }
+        if (!booking) {
+          throw new AppError("Prenotazione non trovata.", 404);
+        }
 
-      assertGuestWaiverAccess(booking, token);
+        assertGuestWaiverAccess(booking, token);
+        assertSignatureWindowOpen(booking);
 
-      const summary = summarizeWaiverSignatures(booking);
-      if (summary.signedCount >= booking.playerCount) {
-        throw new AppError("Tutte le firme per questa prenotazione risultano gia' raccolte.", 409);
-      }
+        const summary = summarizeWaiverSignatures(booking);
+        if (summary.signedCount >= booking.playerCount) {
+          throw new AppError("Tutte le firme per questa prenotazione risultano già raccolte.", 409);
+        }
 
-      const existingSignature = await tx.waiverSignature.findFirst({
-        where: {
-          bookingId: booking.id,
-          bookingRevision: booking.waiverRevision,
-          signerEmail: normalizeEmail(input.signerEmail),
-          status: "ACTIVE",
-        },
-        select: { id: true },
-      });
-
-      if (existingSignature) {
-        throw new AppError("Questa email ha gia' firmato lo scarico per questa prenotazione.", 409);
-      }
-
-      const saved = await createWaiverSignature(tx, booking, input, "GUEST", evidence, {
-        cancelToken,
-        guestEmailStatus: "PENDING",
-      });
-      await tx.auditLog.create({
-        data: {
-          actorEmail: saved.signerEmail,
-          action: "WAIVER_SIGNED",
-          entityType: "WaiverSignature",
-          entityId: saved.id,
-          after: {
+        const existingSignature = await tx.waiverSignature.findFirst({
+          where: {
             bookingId: booking.id,
             bookingRevision: booking.waiverRevision,
-            signerRole: "GUEST",
-            signerEmail: saved.signerEmail,
-            signatureImageSha256: saved.signatureImageSha256,
-            pdfSha256: saved.pdfSha256,
+            signerEmail: normalizeEmail(input.signerEmail),
+            status: "ACTIVE",
           },
-        },
-      });
+          select: { id: true },
+        });
 
-      const confirmation = await markBookingConfirmedIfComplete(tx, booking, saved.signerEmail);
+        if (existingSignature) {
+          throw new AppError("Questa email ha già firmato lo scarico per questa prenotazione.", 409);
+        }
 
-      return {
-        signature: saved,
-        confirmedBooking: confirmation.confirmed ? confirmation.booking : null,
-      };
-    },
-    { isolationLevel: "Serializable" },
+        const saved = await createWaiverSignature(tx, booking, input, "GUEST", evidence, {
+          cancelToken,
+          guestEmailStatus: "PENDING",
+          prepared,
+        });
+        await tx.auditLog.create({
+          data: {
+            actorEmail: saved.signerEmail,
+            action: "WAIVER_SIGNED",
+            entityType: "WaiverSignature",
+            entityId: saved.id,
+            after: {
+              bookingId: booking.id,
+              bookingRevision: booking.waiverRevision,
+              signerRole: "GUEST",
+              signerEmail: saved.signerEmail,
+              signatureImageSha256: saved.signatureImageSha256,
+              pdfSha256: saved.pdfSha256,
+            },
+          },
+        });
+
+        const confirmation = await markBookingConfirmedIfComplete(tx, booking, saved.signerEmail);
+
+        return {
+          signature: saved,
+          confirmedBooking: confirmation.confirmed ? confirmation.booking : null,
+        };
+      },
+      { isolationLevel: "Serializable" },
+    ),
   );
 
   // Le email (Microsoft Graph) sono lo step lento: dopo la risposta. La firma e' gia' committata,
@@ -731,7 +832,7 @@ export async function getGuestWaiverCancelContext(
     return demoGetGuestWaiverCancelContext(signatureId, token);
   }
 
-  await processSignatureDeadlines();
+  await runOpportunisticSignatureDeadlines();
   const signature = await prisma.waiverSignature.findUnique({
     where: { id: signatureId },
     include: {
@@ -758,117 +859,135 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
     return demoCancelGuestWaiverSignature(signatureId, token);
   }
 
-  await processSignatureDeadlines();
-  const result = await prisma.$transaction(
-    async (tx) => {
-      const signature = await tx.waiverSignature.findUnique({
-        where: { id: signatureId },
-        include: {
-          booking: {
-            include: {
-              waiverSignatures: {
-                select: { bookingRevision: true, emailStatus: true, status: true },
+  await runOpportunisticSignatureDeadlines();
+  const result = await retryPrismaTransaction(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const signature = await tx.waiverSignature.findUnique({
+          where: { id: signatureId },
+          include: {
+            booking: {
+              include: {
+                waiverSignatures: {
+                  select: { bookingRevision: true, emailStatus: true, status: true },
+                },
               },
             },
           },
-        },
-      });
-
-      if (!signature) {
-        throw new AppError("Firma waiver non trovata.", 404);
-      }
-
-      assertGuestCancelAccess(signature, token);
-
-      if (signature.status === "CANCELED") {
-        return { canceled: signature, revertedBooking: null };
-      }
-
-      if (signature.booking.status !== "CONFIRMED" && signature.booking.status !== "PENDING_SIGNATURES") {
-        throw new AppError("La prenotazione non e' piu' attiva.", 409);
-      }
-
-      const saved = await tx.waiverSignature.update({
-        where: { id: signature.id },
-        data: {
-          status: "CANCELED",
-          canceledAt: new Date(),
-        },
-        include: {
-          booking: {
-            include: {
-              waiverSignatures: {
-                select: { bookingRevision: true, emailStatus: true, status: true },
-              },
-            },
-          },
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          actorEmail: saved.signerEmail,
-          action: "WAIVER_SIGNATURE_CANCELED",
-          entityType: "WaiverSignature",
-          entityId: saved.id,
-          before: {
-            status: "ACTIVE",
-            bookingId: saved.bookingId,
-            bookingRevision: saved.bookingRevision,
-          },
-          after: {
+        });
+  
+        if (!signature) {
+          throw new AppError("Firma waiver non trovata.", 404);
+        }
+  
+        assertGuestCancelAccess(signature, token);
+  
+        // Dopo l'early-return: chi ha gia' rinunciato deve ricevere la risposta idempotente, non
+        // un "la partita e' gia' iniziata" che gli racconta una storia diversa da quella vera.
+        if (signature.status === "CANCELED") {
+          return { canceled: signature, revertedBooking: null };
+        }
+  
+        assertGuestCancelInTime(signature.booking);
+  
+        if (signature.booking.status !== "CONFIRMED" && signature.booking.status !== "PENDING_SIGNATURES") {
+          throw new AppError("La prenotazione non è più attiva.", 409);
+        }
+  
+        const saved = await tx.waiverSignature.update({
+          where: { id: signature.id },
+          data: {
             status: "CANCELED",
-            canceledAt: saved.canceledAt?.toISOString() ?? null,
+            canceledAt: new Date(),
           },
-        },
-      });
-
-      const signedCount = saved.booking.waiverSignatures.filter(
-        (item) =>
-          item.bookingRevision === saved.booking.waiverRevision &&
-          item.status === "ACTIVE",
-      ).length;
-
-      if (saved.booking.status !== "CONFIRMED" || signedCount >= saved.booking.playerCount) {
-        return { canceled: saved, revertedBooking: null };
-      }
-
-      const revertedBooking = await tx.booking.update({
-        where: { id: saved.booking.id },
-        data: {
-          status: "PENDING_SIGNATURES",
-          signatureDeadlineAt: signatureDeadlineAt(saved.booking.start),
-          signatureReminderSentAt: null,
-          signatureConfirmedAt: null,
-          outlookSyncStatus: saved.booking.outlookEventId ? "PENDING" : "SKIPPED",
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          actorEmail: saved.signerEmail,
-          action: "BOOKING_SIGNATURES_INCOMPLETE",
-          entityType: "Booking",
-          entityId: saved.booking.id,
-          before: {
-            status: "CONFIRMED",
-            waiverSignedCount: signedCount + 1,
+          include: {
+            booking: {
+              include: {
+                waiverSignatures: {
+                  select: { bookingRevision: true, emailStatus: true, status: true },
+                },
+              },
+            },
           },
-          after: {
+        });
+  
+        await tx.auditLog.create({
+          data: {
+            actorEmail: saved.signerEmail,
+            action: "WAIVER_SIGNATURE_CANCELED",
+            entityType: "WaiverSignature",
+            entityId: saved.id,
+            before: {
+              status: "ACTIVE",
+              bookingId: saved.bookingId,
+              bookingRevision: saved.bookingRevision,
+            },
+            after: {
+              status: "CANCELED",
+              canceledAt: saved.canceledAt?.toISOString() ?? null,
+            },
+          },
+        });
+  
+        const signedCount = saved.booking.waiverSignatures.filter(
+          (item) =>
+            item.bookingRevision === saved.booking.waiverRevision &&
+            item.status === "ACTIVE",
+        ).length;
+  
+        if (saved.booking.status !== "CONFIRMED" || signedCount >= saved.booking.playerCount) {
+          return { canceled: saved, revertedBooking: null };
+        }
+  
+        const revertedBooking = await tx.booking.update({
+          where: { id: saved.booking.id },
+          data: {
             status: "PENDING_SIGNATURES",
-            waiverSignedCount: signedCount,
-            signatureDeadlineAt: revertedBooking.signatureDeadlineAt?.toISOString() ?? null,
+            signatureDeadlineAt: signatureReplacementDeadlineAt(saved.booking.start),
+            signatureWindowStartedAt: new Date(),
+            signatureReminderSentAt: null,
+            signatureConfirmedAt: null,
+            outlookSyncStatus: saved.booking.outlookEventId ? "PENDING" : "SKIPPED",
           },
-        },
-      });
+        });
+  
+        await tx.auditLog.create({
+          data: {
+            actorEmail: saved.signerEmail,
+            action: "BOOKING_SIGNATURES_INCOMPLETE",
+            entityType: "Booking",
+            entityId: saved.booking.id,
+            before: {
+              status: "CONFIRMED",
+              waiverSignedCount: signedCount + 1,
+            },
+            after: {
+              status: "PENDING_SIGNATURES",
+              waiverSignedCount: signedCount,
+              signatureDeadlineAt: revertedBooking.signatureDeadlineAt?.toISOString() ?? null,
+            },
+          },
+        });
 
-      return { canceled: saved, revertedBooking };
-    },
-    { isolationLevel: "Serializable" },
+        return { canceled: saved, revertedBooking, signedCount };
+      },
+      { isolationLevel: "Serializable" },
+    ),
   );
 
   if (result.revertedBooking) {
-    runAfterResponse(() => cancelOutlookEventForPendingBooking(result.revertedBooking!));
+    const reverted = result.revertedBooking;
+    const signerName = result.canceled.signerName;
+    const signedCount = result.signedCount ?? 0;
+
+    runAfterResponse(async () => {
+      const pending = await cancelOutlookEventForPendingBooking(reverted);
+
+      // Senza questa mail il referente scopre la rinuncia solo dalla cancellazione Outlook, che
+      // per giunta gli dice che la prenotazione e' annullata mentre invece sta solo scadendo.
+      // Il link firma ospiti non e' allegabile: il token e' salvato solo come hash.
+      await sendOrganizerGuestWithdrewEmail({ booking: pending, signerName, signedCount });
+    });
   }
 
   return getGuestWaiverCancelContext(signatureId, token);

@@ -25,6 +25,7 @@ import {
   deleteOutlookEvent,
   sendGuestBookingCanceledEmail,
   sendGuestBookingUpdatedEmail,
+  sendOrganizerAdminCanceledEmail,
   updateOutlookEvent,
 } from "@/lib/graph";
 import {
@@ -52,7 +53,7 @@ import {
 import {
   cancelOutlookEventForPendingBooking,
   markBookingConfirmedIfComplete,
-  processSignatureDeadlines,
+  runOpportunisticSignatureDeadlines,
   sendPendingSignatureNotice,
   signatureDeadlineAt,
   syncConfirmedBooking,
@@ -321,6 +322,21 @@ async function notifyGuestSignersOfCancellation(
   );
 }
 
+// L'admin che annulla puo' non essere il referente: in quel caso l'organizzatore va avvisato,
+// senza esporre l'identita' personale di chi ha annullato.
+function isAdminCancelByNonOrganizer(access: BookingAccess, booking: Booking) {
+  if (access.adminUser?.role !== "ADMIN") return false;
+  return normalizeEmail(access.adminUser.email) !== normalizeEmail(booking.organizerEmail);
+}
+
+async function notifyOrganizerOfAdminCancellation(booking: Booking) {
+  try {
+    await sendOrganizerAdminCanceledEmail({ booking });
+  } catch {
+    // La cancellazione prenotazione resta valida anche se una notifica accessoria fallisce.
+  }
+}
+
 async function getBookingWithWaivers(bookingId: string) {
   return prisma.booking.findUnique({
     where: { id: bookingId },
@@ -362,7 +378,7 @@ function normalizePublicBookingInput(input: PublicBookingInput) {
   }
 
   if (organizerEmail.length > 120) {
-    errors.push("L'email e' troppo lunga.");
+    errors.push("L'email è troppo lunga.");
   }
 
   if (errors.length > 0) {
@@ -425,11 +441,11 @@ async function validateNoConflicts(
   });
 
   if (overlappingBookings.length > 0) {
-    errors.push("Il campo e' gia' prenotato in quella fascia.");
+    errors.push("Il campo è già prenotato in quella fascia.");
   }
 
   if (overlappingBlocks.length > 0) {
-    errors.push("Il campo e' bloccato dall'admin in quella fascia.");
+    errors.push("Il campo è bloccato dall'admin in quella fascia.");
   }
 
   if (errors.length > 0) {
@@ -457,7 +473,7 @@ export async function getAvailability(dateValue: string | null) {
     return demoGetAvailability(dateValue);
   }
 
-  await processSignatureDeadlines();
+  await runOpportunisticSignatureDeadlines();
   const date = assertDateParam(dateValue);
   const bounds = zonedDayBounds(date);
   const now = new Date();
@@ -507,7 +523,7 @@ export async function lookupBookings(tokens: string[], baseUrl?: string) {
     return demoLookupBookings(tokens, baseUrl);
   }
 
-  await processSignatureDeadlines({ baseUrl });
+  await runOpportunisticSignatureDeadlines({ baseUrl });
   const cleanTokens = [...new Set(tokens.map((token) => token.trim()).filter(Boolean))].slice(0, 30);
   const tokenByHash = new Map(cleanTokens.map((token) => [hashManageToken(token), token]));
   const hashes = [...tokenByHash.keys()];
@@ -562,7 +578,7 @@ export async function createBooking(input: PublicBookingInput) {
     return demoCreateBooking(input);
   }
 
-  await processSignatureDeadlines({ baseUrl: input.baseUrl });
+  await runOpportunisticSignatureDeadlines({ baseUrl: input.baseUrl });
   const identity = normalizePublicBookingInput(input);
   const manageToken = createManageToken();
   const manageTokenHash = hashManageToken(manageToken);
@@ -592,6 +608,7 @@ export async function createBooking(input: PublicBookingInput) {
             manageTokenHash,
             manageTokenExpiresAt: tokenExpiresAt,
             signatureDeadlineAt: deadlineAt,
+            signatureWindowStartedAt: createdAt,
             ...guestWaiverData,
             outlookSyncStatus: "SKIPPED",
           },
@@ -672,7 +689,7 @@ export async function updateBooking(
     return demoUpdateBooking(access, bookingId, input);
   }
 
-  await processSignatureDeadlines({ baseUrl: access.baseUrl });
+  await runOpportunisticSignatureDeadlines({ baseUrl: access.baseUrl });
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     include: {
@@ -715,6 +732,14 @@ export async function updateBooking(
       : booking.status);
   const requiresFreshWaivers =
     slotOrPlayerCountChanged && nextStatus !== "CANCELED" && !canConfirmSinglePlayerWithCurrentSignature;
+
+  // Il manage token vive fino a end+24h: senza questo controllo si puo' riprogrammare una
+  // partita gia' giocata, il che invalida le firme reali e la fa annullare a posteriori,
+  // lasciando gli scarichi di responsabilita' appesi a uno slot annullato. La cancellazione
+  // resta permessa: e' solo lo spostamento a produrre il danno.
+  if (requiresFreshWaivers && booking.start <= new Date() && !isAdmin) {
+    throw new AppError("La partita è già iniziata: non è più modificabile.", 409);
+  }
   const isCancellation = booking.status !== "CANCELED" && nextStatus === "CANCELED";
   const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
   const guestSignersToNotify =
@@ -749,6 +774,7 @@ export async function updateBooking(
             ...(requiresFreshWaivers
               ? {
                   signatureDeadlineAt: signatureDeadlineAt(nextStart),
+                  signatureWindowStartedAt: new Date(),
                   signatureReminderSentAt: null,
                   signatureConfirmedAt: null,
                   autoCanceledAt: null,
@@ -791,6 +817,9 @@ export async function updateBooking(
       const synced = await markOutlookDeleted(updated);
       if (guestSignersToNotify.length > 0) {
         await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
+      }
+      if (isAdminCancelByNonOrganizer(access, booking)) {
+        await notifyOrganizerOfAdminCancellation(synced);
       }
       return;
     }
@@ -846,7 +875,7 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
     return demoCancelBooking(access, bookingId);
   }
 
-  await processSignatureDeadlines({ baseUrl: access.baseUrl });
+  await runOpportunisticSignatureDeadlines({ baseUrl: access.baseUrl });
   const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
 
   if (!booking) {
@@ -893,6 +922,9 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
     if (guestSignersToNotify.length > 0) {
       await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
     }
+    if (isAdminCancelByNonOrganizer(access, booking)) {
+      await notifyOrganizerOfAdminCancellation(synced);
+    }
   });
 
   const refreshed = await getBookingWithWaivers(canceled.id);
@@ -907,7 +939,7 @@ export async function createAdminBlock(
     return demoCreateAdminBlock(currentUser, input);
   }
 
-  await processSignatureDeadlines();
+  await runOpportunisticSignatureDeadlines();
 
   if (input.start >= input.end) {
     throw new AppError("Il blocco deve avere un orario di fine valido.", 422);
