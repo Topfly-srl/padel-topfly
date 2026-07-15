@@ -16,7 +16,11 @@ import {
   normalizePersonName,
 } from "@/lib/manage-token";
 import { assertDateParam, zonedDayBounds } from "@/lib/time";
-import { signatureDeadlineAt } from "@/lib/signature-workflow";
+import {
+  signatureDeadlineAt,
+  signatureReminderDueAt,
+  signatureReplacementDeadlineAt,
+} from "@/lib/signature-workflow";
 import type {
   AuditItem,
   AvailabilityBlock,
@@ -24,6 +28,7 @@ import type {
   CurrentUser,
   MyBooking,
 } from "@/lib/types";
+import { computeGuestSeatCancelable } from "@/lib/waiver-service";
 import type { WaiverEvidence, WaiverInput } from "@/lib/waiver-service";
 
 type DemoBooking = {
@@ -38,6 +43,7 @@ type DemoBooking = {
   playerCount: number;
   waiverRevision: number;
   signatureDeadlineAt: Date | null;
+  signatureWindowStartedAt: Date | null;
   signatureReminderSentAt: Date | null;
   signatureConfirmedAt: Date | null;
   autoCanceledAt: Date | null;
@@ -114,6 +120,12 @@ function buildGuestWaiverUrl(baseUrl: string | undefined, bookingId: string, tok
   return `${baseUrl.replace(/\/$/, "")}/waiver/${bookingId}?${params.toString()}`;
 }
 
+function buildGuestWaiverCancelUrl(baseUrl: string | undefined, signatureId: string, token: string | undefined) {
+  if (!baseUrl || !token) return undefined;
+  const params = new URLSearchParams({ token });
+  return `${baseUrl.replace(/\/$/, "")}/waiver/cancel/${signatureId}?${params.toString()}`;
+}
+
 function demoWaiverSummary(booking: DemoBooking) {
   const current = waiverSignatures.filter(
     (signature) =>
@@ -149,36 +161,39 @@ function isDemoActiveBooking(booking: DemoBooking, now = new Date()) {
 }
 
 function demoProcessDeadlines(now = new Date()) {
-  const reminderUpperBound = new Date(now.getTime() + 60 * 60_000);
-
+  let reminded = 0;
+  let canceled = 0;
   for (const booking of bookings) {
     if (booking.status !== "PENDING_SIGNATURES") continue;
     const summary = demoWaiverSummary(booking);
 
-    if (summary.signedCount >= booking.playerCount) {
-      booking.status = "CONFIRMED";
-      booking.signatureConfirmedAt = now;
-      booking.updatedAt = now;
-      continue;
-    }
+    // Il cron di produzione non riconferma da solo: la conferma avviene solo alla firma
+    // (markBookingConfirmedIfComplete). Una pending gia' completa resta com'e', ne' confermata
+    // ne' annullata, esattamente come i cancelCandidates che escono con signedCount pieno.
+    if (summary.signedCount >= booking.playerCount) continue;
 
     if (booking.signatureDeadlineAt && booking.signatureDeadlineAt <= now) {
       booking.status = "CANCELED";
       booking.autoCanceledAt = now;
       booking.updatedAt = now;
       addAudit("system", "BOOKING_AUTO_CANCELED_SIGNATURES", "Booking", booking.id);
+      canceled += 1;
       continue;
     }
 
-    if (
-      !booking.signatureReminderSentAt &&
-      booking.signatureDeadlineAt &&
-      booking.signatureDeadlineAt <= reminderUpperBound
-    ) {
+    const reminderDueAt = signatureReminderDueAt(booking);
+
+    if (!booking.signatureReminderSentAt && reminderDueAt && reminderDueAt <= now) {
       booking.signatureReminderSentAt = now;
       booking.updatedAt = now;
       addAudit("system", "BOOKING_SIGNATURE_REMINDER_SENT", "Booking", booking.id);
+      reminded += 1;
     }
+  }
+
+  // Riga di sintesi datata per ogni run con attivita', come in produzione: niente riga a vuoto.
+  if (reminded + canceled > 0) {
+    addAudit("system", "SIGNATURE_DEADLINES_RUN", "System");
   }
 }
 
@@ -256,7 +271,7 @@ function normalizePublicInput(input: DemoCreateInput) {
   }
 
   if (organizerEmail.length > 120) {
-    errors.push("L'email e' troppo lunga.");
+    errors.push("L'email è troppo lunga.");
   }
 
   if (errors.length > 0) {
@@ -295,11 +310,11 @@ function assertDemoBookingAllowed(
         rangesOverlap(start, end, booking.start, booking.end),
     )
   ) {
-    errors.push("Il campo e' gia' prenotato in quella fascia.");
+    errors.push("Il campo è già prenotato in quella fascia.");
   }
 
   if (blocks.some((block) => rangesOverlap(start, end, block.start, block.end))) {
-    errors.push("Il campo e' bloccato dall'admin in quella fascia.");
+    errors.push("Il campo è bloccato dall'admin in quella fascia.");
   }
 
   if (errors.length > 0) {
@@ -395,6 +410,7 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     playerCount,
     waiverRevision: 1,
     signatureDeadlineAt: signatureDeadlineAt(input.start, now),
+    signatureWindowStartedAt: now,
     signatureReminderSentAt: null,
     signatureConfirmedAt: null,
     autoCanceledAt: null,
@@ -469,6 +485,14 @@ export async function demoUpdateBooking(
       : booking.status);
   const requiresFreshWaivers =
     slotOrPlayerCountChanged && nextStatus !== "CANCELED" && !canConfirmSinglePlayerWithCurrentSignature;
+
+  // Il manage token vive fino a end+24h: senza questo controllo si puo' riprogrammare una
+  // partita gia' giocata, il che invalida le firme reali e la fa annullare a posteriori,
+  // lasciando gli scarichi di responsabilita' appesi a uno slot annullato. La cancellazione
+  // resta permessa: e' solo lo spostamento a produrre il danno.
+  if (requiresFreshWaivers && booking.start <= new Date() && !isAdmin) {
+    throw new AppError("La partita è già iniziata: non è più modificabile.", 409);
+  }
   const guestWaiverToken = requiresFreshWaivers ? createManageToken() : undefined;
 
   if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
@@ -485,6 +509,7 @@ export async function demoUpdateBooking(
     booking.guestWaiverTokenHash = hashManageToken(guestWaiverToken);
     booking.guestWaiverTokenExpiresAt = manageTokenExpiresAt(nextEnd);
     booking.signatureDeadlineAt = signatureDeadlineAt(nextStart);
+    booking.signatureWindowStartedAt = new Date();
     booking.signatureReminderSentAt = null;
     booking.signatureConfirmedAt = null;
     booking.autoCanceledAt = null;
@@ -583,7 +608,7 @@ function assertDemoGuestWaiverAccess(booking: DemoBooking, token: string | null 
   }
 
   if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
-    throw new AppError("La prenotazione non e' piu' attiva.", 409);
+    throw new AppError("La prenotazione non è più attiva.", 409);
   }
 }
 
@@ -618,6 +643,7 @@ export async function demoSignGuestWaiver(
   token: string | null,
   input: WaiverInput,
   _evidence: WaiverEvidence,
+  baseUrl?: string,
 ) {
   void _evidence;
 
@@ -626,9 +652,19 @@ export async function demoSignGuestWaiver(
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
 
   assertDemoGuestWaiverAccess(booking, token);
+  if (
+    booking.status === "PENDING_SIGNATURES" &&
+    booking.signatureDeadlineAt &&
+    booking.signatureDeadlineAt <= new Date()
+  ) {
+    throw new AppError(
+      "La scadenza per le firme è passata: la prenotazione non è più confermabile.",
+      409,
+    );
+  }
   const summary = demoWaiverSummary(booking);
   if (summary.signedCount >= booking.playerCount) {
-    throw new AppError("Tutte le firme per questa prenotazione risultano gia' raccolte.", 409);
+    throw new AppError("Tutte le firme per questa prenotazione risultano già raccolte.", 409);
   }
 
   const signerName = normalizePersonName(input.signerName);
@@ -642,12 +678,13 @@ export async function demoSignGuestWaiver(
         signature.status === "ACTIVE",
     )
   ) {
-    throw new AppError("Questa email ha gia' firmato lo scarico per questa prenotazione.", 409);
+    throw new AppError("Questa email ha già firmato lo scarico per questa prenotazione.", 409);
   }
 
   const cancelToken = createManageToken();
+  const signatureId = id("waiver");
   waiverSignatures.push({
-    id: id("waiver"),
+    id: signatureId,
     bookingId: booking.id,
     bookingRevision: booking.waiverRevision,
     status: "ACTIVE",
@@ -667,7 +704,14 @@ export async function demoSignGuestWaiver(
   }
   addAudit(signerEmail, "WAIVER_SIGNED", "WaiverSignature", booking.id);
 
-  return demoGetWaiverContext(bookingId, token);
+  // Campo extra ignorato dal chiamante prod (signGuestWaiver): in demo consegna l'URL di rinuncia
+  // col token vero — altrimenti il cancelToken resta hashato e irrecuperabile e la rinuncia ospite
+  // non e' esercitabile end-to-end nei test.
+  const context = await demoGetWaiverContext(bookingId, token);
+  return {
+    ...context,
+    guestWaiverCancelUrl: buildGuestWaiverCancelUrl(baseUrl, signatureId, cancelToken),
+  };
 }
 
 function assertDemoGuestCancelAccess(signature: DemoWaiverSignature, token: string | null | undefined) {
@@ -690,6 +734,7 @@ function demoCancelContext(signature: DemoWaiverSignature) {
   const summary = demoWaiverSummary(booking);
 
   return {
+    canCancel: computeGuestSeatCancelable(signature.status, booking),
     signature: {
       id: signature.id,
       signerName: signature.signerName,
@@ -711,6 +756,7 @@ function demoCancelContext(signature: DemoWaiverSignature) {
 }
 
 export async function demoGetGuestWaiverCancelContext(signatureId: string, token: string | null) {
+  demoProcessDeadlines();
   const signature = waiverSignatures.find((item) => item.id === signatureId);
   if (!signature) throw new AppError("Firma waiver non trovata.", 404);
 
@@ -726,19 +772,32 @@ export async function demoCancelGuestWaiverSignature(signatureId: string, token:
   assertDemoGuestCancelAccess(signature, token);
   const booking = bookings.find((item) => item.id === signature.bookingId);
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
-  if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
-    throw new AppError("La prenotazione non e' piu' attiva.", 409);
+
+  // Dopo l'early-return: chi ha gia' rinunciato deve ricevere la risposta idempotente, non
+  // un "la partita e' gia' iniziata" che gli racconta una storia diversa da quella vera.
+  if (signature.status === "CANCELED") {
+    return demoCancelContext(signature);
   }
 
-  if (signature.status !== "CANCELED") {
-    signature.status = "CANCELED";
-    signature.canceledAt = new Date();
-    addAudit(signature.signerEmail, "WAIVER_SIGNATURE_CANCELED", "WaiverSignature", signature.id);
+  if (booking.start <= new Date()) {
+    throw new AppError(
+      "La partita è già iniziata: non è più possibile rinunciare al posto.",
+      409,
+    );
   }
+
+  if (booking.status !== "CONFIRMED" && booking.status !== "PENDING_SIGNATURES") {
+    throw new AppError("La prenotazione non è più attiva.", 409);
+  }
+
+  signature.status = "CANCELED";
+  signature.canceledAt = new Date();
+  addAudit(signature.signerEmail, "WAIVER_SIGNATURE_CANCELED", "WaiverSignature", signature.id);
 
   if (booking.status === "CONFIRMED" && demoWaiverSummary(booking).signedCount < booking.playerCount) {
     booking.status = "PENDING_SIGNATURES";
-    booking.signatureDeadlineAt = signatureDeadlineAt(booking.start);
+    booking.signatureDeadlineAt = signatureReplacementDeadlineAt(booking.start);
+    booking.signatureWindowStartedAt = new Date();
     booking.signatureReminderSentAt = null;
     booking.signatureConfirmedAt = null;
     booking.updatedAt = new Date();
