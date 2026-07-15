@@ -12,15 +12,38 @@ import {
 import { prisma } from "@/lib/prisma";
 import { retryPrismaTransaction } from "@/lib/prisma-retry";
 
-const longDeadlineMs = 24 * 60 * 60_000;
+const minSignatureWindowMs = 24 * 60 * 60_000;
+const maxSignatureWindowMs = 4 * 24 * 60 * 60_000;
+const signatureWindowRatio = 0.5;
 const signatureCutoffBeforeStartMs = 4 * 60 * 60_000;
 const lastMinuteDeadlineMs = 30 * 60_000;
-const reminderLeadMs = 60 * 60_000;
+const replacementWindowMs = 2 * 60 * 60_000;
+const reminderLeadMs = 6 * 60 * 60_000;
 
 type BookingWithSignatureDeadlineFields = Pick<
   Booking,
   "start" | "signatureDeadlineAt"
 >;
+
+// Il reminder deve cadere a meta' della finestra, non a un anticipo fisso: con lead fisso una
+// prenotazione con finestra piu' corta del lead riceve il sollecito subito dopo la creazione,
+// quando non c'e' ancora nulla da sollecitare, e poi resta senza avvisi fino all'annullamento.
+// La finestra parte da signatureWindowStartedAt, non da createdAt: dopo una rinuncia (o una
+// modifica che azzera le firme) l'inizio si sposta ad adesso, cosi' una prenotazione nata giorni
+// prima non risulta con il sollecito gia' scaduto e non riceve due mail nello stesso istante.
+export function signatureReminderDueAt(
+  booking: Pick<Booking, "createdAt" | "signatureDeadlineAt"> & {
+    signatureWindowStartedAt?: Date | null;
+  },
+) {
+  if (!booking.signatureDeadlineAt) return null;
+
+  const windowStart = booking.signatureWindowStartedAt ?? booking.createdAt;
+  const windowMs = booking.signatureDeadlineAt.getTime() - windowStart.getTime();
+  const leadMs = Math.min(reminderLeadMs, Math.max(0, Math.round(windowMs / 2)));
+
+  return new Date(booking.signatureDeadlineAt.getTime() - leadMs);
+}
 
 type GuestSigner = {
   signerName: string;
@@ -29,12 +52,38 @@ type GuestSigner = {
 
 export function signatureDeadlineAt(start: Date, createdAt = new Date()) {
   const cutoffBeforeStart = new Date(start.getTime() - signatureCutoffBeforeStartMs);
+  // Pavimento garantito a tutti, non solo al ramo last minute: senza, chi prenota appena sopra
+  // il cutoff resta schiacciato contro di esso e riceve meno tempo di chi prenota dopo di lui
+  // (4h01m prima dell'inizio -> 1 minuto per firmare, contro i 30 di chi prenota a 3h59m).
+  const floor = minDate(new Date(createdAt.getTime() + lastMinuteDeadlineMs), start);
 
   if (cutoffBeforeStart <= createdAt) {
-    return minDate(new Date(createdAt.getTime() + lastMinuteDeadlineMs), start);
+    return floor;
   }
 
-  return minDate(new Date(createdAt.getTime() + longDeadlineMs), cutoffBeforeStart);
+  // Meta' del tempo mancante, mai meno di 24 ore e mai piu' di 4 giorni: chi prenota con largo
+  // anticipo non deve raccogliere le firme entro domani, ma una pending mai firmata non deve
+  // nemmeno tenere lo slot bloccato per una settimana.
+  const windowMs = Math.min(
+    maxSignatureWindowMs,
+    Math.max(
+      minSignatureWindowMs,
+      Math.round((cutoffBeforeStart.getTime() - createdAt.getTime()) * signatureWindowRatio),
+    ),
+  );
+  const deadline = minDate(new Date(createdAt.getTime() + windowMs), cutoffBeforeStart);
+
+  return deadline >= floor ? deadline : floor;
+}
+
+// Una prenotazione confermata che perde una firma non e' una prenotazione nuova: chi resta
+// deve trovare un sostituto, non ricominciare da capo. Merita quindi una finestra propria e
+// non i 30 minuti del ramo last minute, che qui punirebbero chi non ha fatto nulla di male.
+export function signatureReplacementDeadlineAt(start: Date, now = new Date()) {
+  const standard = signatureDeadlineAt(start, now);
+  const replacement = minDate(new Date(now.getTime() + replacementWindowMs), start);
+
+  return standard >= replacement ? standard : replacement;
 }
 
 export function isActiveBookingStatus(status: Booking["status"]) {
@@ -172,7 +221,7 @@ export async function syncConfirmedBooking(input: {
 export async function cancelOutlookEventForPendingBooking(booking: Booking) {
   if (!booking.outlookEventId) return booking;
 
-  const result = await deleteOutlookEvent(booking);
+  const result = await deleteOutlookEvent(booking, "pending");
 
   return prisma.booking.update({
     where: { id: booking.id },
@@ -235,6 +284,11 @@ export async function processSignatureDeadlines(input: {
       where: {
         status: "PENDING_SIGNATURES",
         signatureDeadlineAt: { lte: now },
+        // Nessun filtro su start: la deadline puo' coincidere con l'inizio (last minute e
+        // sostituzioni a ridosso), quindi "scaduta E non ancora iniziata" sarebbe un insieme
+        // vuoto e quelle prenotazioni resterebbero pending per sempre, con il link firma vivo.
+        // Le partite gia' iniziate vengono chiuse lo stesso: sono le NOTIFICHE a essere
+        // soppresse piu' sotto, perche' il danno era la mail di annullamento a posteriori.
       },
       include: {
         waiverSignatures: {
@@ -256,6 +310,9 @@ export async function processSignatureDeadlines(input: {
 
     if (signedCount >= booking.playerCount) continue;
 
+    const reminderDueAt = signatureReminderDueAt(booking);
+    if (reminderDueAt && reminderDueAt > now) continue;
+
     const saved = await prisma.booking.updateMany({
       where: {
         id: booking.id,
@@ -270,25 +327,33 @@ export async function processSignatureDeadlines(input: {
     if (saved.count === 0) continue;
     reminded += 1;
 
-    await prisma.auditLog.create({
-      data: {
-        actorEmail: "system",
-        action: "BOOKING_SIGNATURE_REMINDER_SENT",
-        entityType: "Booking",
-        entityId: booking.id,
-        after: {
-          signatureReminderSentAt: now.toISOString(),
-          waiverSignedCount: signedCount,
-        },
-      },
-    });
-
-    runAfterResponse(() =>
-      sendOrganizerSignatureReminderEmail({
+    // Il claim su signatureReminderSentAt e' gia' scritto e non va resettato in caso di errore
+    // (altrimenti il cron ritenterebbe l'invio ogni 10 minuti). L'audit invece riflette l'esito
+    // reale: si scrive DOPO l'invio, con l'azione FAILED e il motivo quando la mail non parte.
+    runAfterResponse(async () => {
+      const result = await sendOrganizerSignatureReminderEmail({
         booking,
         signedCount,
-      }),
-    );
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          actorEmail: "system",
+          action:
+            result.status === "SENT"
+              ? "BOOKING_SIGNATURE_REMINDER_SENT"
+              : "BOOKING_SIGNATURE_REMINDER_FAILED",
+          entityType: "Booking",
+          entityId: booking.id,
+          after: {
+            signatureReminderSentAt: now.toISOString(),
+            waiverSignedCount: signedCount,
+            emailStatus: result.status,
+            ...(result.status === "SENT" ? {} : { error: result.error ?? null }),
+          },
+        },
+      });
+    });
   }
 
   for (const booking of cancelCandidates) {
@@ -342,6 +407,15 @@ export async function processSignatureDeadlines(input: {
     if (!result) continue;
     canceled += 1;
 
+    // La pratica va chiusa comunque, ma su una partita gia' iniziata l'avviso di annullamento
+    // arriverebbe a cose fatte: la pending viene archiviata in silenzio, senza mail assurde.
+    if (result.booking.start <= now) {
+      if (result.booking.outlookEventId) {
+        runAfterResponse(() => cancelOutlookEventForPendingBooking(result.booking));
+      }
+      continue;
+    }
+
     const guestSigners = await activeGuestSigners(result.booking);
     runAfterResponse(async () => {
       const canceledBooking = result.booking.outlookEventId
@@ -357,7 +431,37 @@ export async function processSignatureDeadlines(input: {
     });
   }
 
+  // Una riga di sintesi datata per ogni run con attivita', cosi' l'admin ha una traccia del cron
+  // senza incrociare i singoli eventi. Niente riga quando non e' successo nulla: gonfierebbe la
+  // tabella a ogni giro da 10 minuti.
+  if (reminded + canceled > 0) {
+    await prisma.auditLog.create({
+      data: {
+        actorEmail: "system",
+        action: "SIGNATURE_DEADLINES_RUN",
+        entityType: "System",
+        after: { reminded, canceled },
+      },
+    });
+  }
+
   return { reminded, canceled };
+}
+
+// La pulizia opportunistica gira in testa alle richieste utente: un errore della manutenzione
+// non deve far fallire la richiesta che la ospita. Il cron (route interna) chiama invece
+// processSignatureDeadlines direttamente, cosi' continua a vedere gli errori e a segnalarli.
+export async function runOpportunisticSignatureDeadlines(input: {
+  now?: Date;
+  baseUrl?: string;
+  limit?: number;
+} = {}) {
+  try {
+    return await processSignatureDeadlines(input);
+  } catch (error) {
+    console.error("Pulizia opportunistica scadenze firme fallita.", error);
+    return { reminded: 0, canceled: 0 };
+  }
 }
 
 async function notifyGuestsCanceled(booking: Booking, guests: GuestSigner[]) {
