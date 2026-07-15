@@ -71,6 +71,7 @@ model Booking {
   playerCount       Int               @default(4)
   waiverRevision    Int               @default(1)
   signatureDeadlineAt DateTime?
+  signatureWindowStartedAt DateTime?
   signatureReminderSentAt DateTime?
   signatureConfirmedAt DateTime?
   autoCanceledAt    DateTime?
