@@ -61,6 +61,13 @@ jobs:
           cd /opt/padel-topfly
           echo "Remote host: $(hostname)"
           echo "Remote commit: $(git rev-parse --short HEAD)"
+          echo "::group::config checks"
+          if sudo grep -Eq '^APP_WAIVER_RECIPIENT_EMAIL="?padel@topflysolutions\.com"?$' .env.production; then
+            echo "APP_WAIVER_RECIPIENT_EMAIL: OK (padel@topflysolutions.com)"
+          else
+            echo "::warning::APP_WAIVER_RECIPIENT_EMAIL non allineato a padel@topflysolutions.com in .env.production"
+          fi
+          echo "::endgroup::"
           sudo docker compose -f docker-compose.production.yml ps
           echo "::group::app logs"
           sudo docker compose -f docker-compose.production.yml logs app --tail=200
