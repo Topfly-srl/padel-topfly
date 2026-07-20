@@ -10,7 +10,7 @@ import { waiverPayloadSchema } from "@/lib/waiver-schema";
 const signWaiverSchema = waiverPayloadSchema.extend({
   token: z.string().trim().min(1).max(200),
   signerName: z.string().min(1, "Inserisci nome e cognome.").max(80),
-  signerEmail: z.string().email("Inserisci un'email valida.").max(120),
+  signerEmail: z.email("Inserisci un'email valida.").max(120),
 });
 
 type RouteContext = {

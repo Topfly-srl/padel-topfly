@@ -7,7 +7,7 @@ describe("route errors", () => {
     let error: unknown;
 
     try {
-      z.object({ email: z.string().email("Email non valida.") }).parse({ email: "no" });
+      z.object({ email: z.email("Email non valida.") }).parse({ email: "no" });
     } catch (caught) {
       error = caught;
     }
