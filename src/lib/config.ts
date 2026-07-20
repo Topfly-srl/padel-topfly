@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defaultClosingHour, defaultOpeningHour } from "@/lib/booking-constants";
 import { isEmailAtDomain, normalizeAllowedDomain } from "@/lib/email";
 
 const optionalUrl = z.preprocess(
@@ -25,10 +26,20 @@ const envSchema = z.object({
   APP_WAIVER_RECIPIENT_EMAIL: z.string().email().default("padel@topflysolutions.com"),
   APP_WAIVER_DOCUMENT_VERSION: z.string().default("padel-waiver-v1"),
   APP_INTERNAL_CRON_SECRET: z.string().optional(),
+  APP_OPENING_HOUR: z.coerce.number().int().min(0).max(23).default(defaultOpeningHour),
+  APP_CLOSING_HOUR: z.coerce.number().int().min(1).max(24).default(defaultClosingHour),
   DATABASE_URL: z.string().optional(),
 });
 
 const env = envSchema.parse(process.env);
+
+// Una fascia con chiusura non oltre l'apertura svuoterebbe la griglia oraria e bloccherebbe ogni
+// prenotazione: meglio fallire subito al boot che servire un campo mai prenotabile.
+if (env.APP_CLOSING_HOUR <= env.APP_OPENING_HOUR) {
+  throw new Error(
+    "APP_CLOSING_HOUR deve essere maggiore di APP_OPENING_HOUR.",
+  );
+}
 const appEnvironment = env.APP_ENV ?? "development";
 const isProductionDeployment =
   process.env.VERCEL_ENV === "production" ||
@@ -82,6 +93,8 @@ export const appConfig = {
   ),
   publicOrigin: env.APP_PUBLIC_ORIGIN?.trim().replace(/\/$/, ""),
   timeZone: env.APP_TIME_ZONE,
+  openingHour: env.APP_OPENING_HOUR,
+  closingHour: env.APP_CLOSING_HOUR,
   isProduction: isProductionDeployment,
   environmentName: appEnvironment,
   authDevMode: env.AUTH_DEV_MODE === "true",

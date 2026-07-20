@@ -44,6 +44,7 @@ URL produzione:
 - Limiti applicativi:
   - step slot: 15 minuti;
   - durata: 15-120 minuti;
+  - fascia di apertura: 08:00-22:00 (override via `APP_OPENING_HOUR` / `APP_CLOSING_HOUR`);
   - anticipo massimo: 14 giorni;
   - massimo 2 prenotazioni future per email.
 
@@ -233,6 +234,8 @@ APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com
 APP_ALLOWED_DOMAIN=topflysolutions.com
 APP_ADMIN_EMAILS=antony.buffone@topflysolutions.com
 APP_TIME_ZONE=Europe/Rome
+APP_OPENING_HOUR=8
+APP_CLOSING_HOUR=22
 APP_INTERNAL_CRON_SECRET=...
 
 AUTH_DEV_MODE=false

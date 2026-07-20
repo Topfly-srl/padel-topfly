@@ -5,8 +5,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
-import { bookingDurationOptions } from "@/lib/booking-constants";
+import {
+  bookingDurationOptions,
+  defaultClosingHour,
+  defaultOpeningHour,
+} from "@/lib/booking-constants";
 import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
+import { bookingTimeOptions } from "@/lib/timeline-slots";
 import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/types";
 
 type Notice = {
@@ -17,6 +22,10 @@ type Notice = {
 type AvailabilityResponse = {
   bookings: AvailabilityBooking[];
   blocks: AvailabilityBlock[];
+  settings?: {
+    openingHour: number;
+    closingHour: number;
+  };
 };
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
@@ -55,13 +64,6 @@ function localDateTime(date: Date) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
-}
-
-function timeOptions() {
-  return Array.from({ length: 96 }, (_, index) => {
-    const minutes = index * 15;
-    return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
-  });
 }
 
 function readApiError(response: Response) {
@@ -112,7 +114,12 @@ export function ManageBooking({
   const [isSaving, setIsSaving] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const options = useMemo(() => timeOptions(), []);
+  const openingHour = availability?.settings?.openingHour ?? defaultOpeningHour;
+  const closingHour = availability?.settings?.closingHour ?? defaultClosingHour;
+  const options = useMemo(
+    () => bookingTimeOptions(openingHour, closingHour),
+    [openingHour, closingHour],
+  );
   const start = useMemo(
     () => dateTimeFromParts(selectedDate, selectedTime),
     [selectedDate, selectedTime],

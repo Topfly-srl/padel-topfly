@@ -271,6 +271,7 @@ function assertDemoBookingAllowed(
   start: Date,
   end: Date,
   ignoreBookingId?: string,
+  enforceOpeningHours = true,
 ) {
   demoProcessDeadlines();
   const futureBookingCount = bookings.filter(
@@ -285,6 +286,7 @@ function assertDemoBookingAllowed(
     start,
     end,
     futureBookingCount,
+    enforceOpeningHours,
   });
 
   if (
@@ -489,7 +491,9 @@ export async function demoUpdateBooking(
   const guestWaiverToken = requiresFreshWaivers ? createManageToken() : undefined;
 
   if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
-    assertDemoBookingAllowed(booking.organizerEmail, nextStart, nextEnd, booking.id);
+    // Come in produzione: la fascia vincola solo lo spostamento su un nuovo slot, cosi' una
+    // prenotazione gia' fuori fascia resta modificabile finche' non si cambia l'orario.
+    assertDemoBookingAllowed(booking.organizerEmail, nextStart, nextEnd, booking.id, timeChanged);
   }
 
   booking.start = nextStart;

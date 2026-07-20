@@ -9,6 +9,9 @@ export const bookingPolicy = {
   maxDurationMinutes: 120,
   maxAdvanceDays: 14,
   maxFutureBookings: 2,
+  // Fascia di apertura in ora locale del fuso configurato (default 8-22, override via env).
+  openingHour: appConfig.openingHour,
+  closingHour: appConfig.closingHour,
   durationOptions: bookingDurationOptions,
   durationPresets: bookingDurationOptions,
 } as const;
@@ -18,7 +21,23 @@ export type BookingValidationInput = {
   end: Date;
   now?: Date;
   futureBookingCount?: number;
+  // Le prenotazioni gia' esistenti fuori fascia restano gestibili: la modifica che non tocca
+  // lo slot passa false per non rifiutare uno slot legittimo scelto prima della regola.
+  enforceOpeningHours?: boolean;
 };
+
+function formatHourLabel(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+// Minuti trascorsi dalla mezzanotte locale (fuso configurato): serve a confrontare inizio e fine
+// con la fascia di apertura senza farsi ingannare dall'orario UTC sottostante.
+function localMinutesOfDay(date: Date) {
+  const [hours, minutes] = formatInTimeZone(date, appConfig.timeZone, "HH:mm")
+    .split(":")
+    .map(Number);
+  return hours * 60 + minutes;
+}
 
 export function minutesBetween(start: Date, end: Date) {
   return Math.round((end.getTime() - start.getTime()) / 60_000);
@@ -85,6 +104,21 @@ export function validateBookingPolicy(input: BookingValidationInput) {
 
   if (!isAlignedToSlot(input.start) || !isAlignedToSlot(input.end)) {
     errors.push("Inizio e fine devono essere arrotondati a 15 minuti.");
+  }
+
+  if (input.enforceOpeningHours !== false) {
+    const openingMinutes = bookingPolicy.openingHour * 60;
+    const closingMinutes = bookingPolicy.closingHour * 60;
+    const startMinutes = localMinutesOfDay(input.start);
+    // La fine e' inizio locale + durata: cosi' resta coerente anche a cavallo della mezzanotte
+    // senza dover gestire l'avvolgimento del giorno.
+    const endMinutes = startMinutes + duration;
+
+    if (startMinutes < openingMinutes || endMinutes > closingMinutes) {
+      errors.push(
+        `Il campo è prenotabile dalle ${formatHourLabel(bookingPolicy.openingHour)} alle ${formatHourLabel(bookingPolicy.closingHour)}.`,
+      );
+    }
   }
 
   if (

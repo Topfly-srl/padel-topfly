@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bookingTimeOptions,
   findOverlappingTimelineItem,
   rangeOverlapsMs,
   type TimelineRange,
@@ -54,5 +55,25 @@ describe("timeline slots", () => {
     const shiftedEnd = new Date("2026-07-03T11:15:00.000Z").getTime();
 
     expect(findOverlappingTimelineItem(ranges, shiftedStart, shiftedEnd, current.id)).toBe(other);
+  });
+
+  it("genera gli slot solo dentro la fascia di apertura di default (08:00-22:00)", () => {
+    const options = bookingTimeOptions();
+
+    expect(options[0]).toBe("08:00");
+    // Ultimo inizio possibile: uno slot da 15 minuti deve chiudersi entro le 22:00.
+    expect(options.at(-1)).toBe("21:45");
+    expect(options).not.toContain("07:45");
+    expect(options).not.toContain("22:00");
+    // Dalle 08:00 alle 21:45 a passi da 15 minuti sono 56 slot.
+    expect(options).toHaveLength(56);
+  });
+
+  it("rispetta una fascia personalizzata", () => {
+    const options = bookingTimeOptions(10, 12);
+
+    expect(options[0]).toBe("10:00");
+    expect(options.at(-1)).toBe("11:45");
+    expect(options).toHaveLength(8);
   });
 });
