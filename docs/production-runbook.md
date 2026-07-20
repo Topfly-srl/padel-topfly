@@ -132,7 +132,22 @@ Atteso:
   - `x-content-type-options: nosniff`;
   - `x-frame-options: DENY`;
   - `referrer-policy: strict-origin-when-cross-origin`;
+  - `strict-transport-security: max-age=86400` (vedi nota HSTS piu' sotto);
+  - `referrer-policy: no-referrer` sulle pagine token (`/manage/*`, `/waiver/*`, `/w/*`);
   - assenza di `x-powered-by`.
+
+### Nota HSTS (max-age progressivo)
+
+L'header `Strict-Transport-Security` parte volutamente basso: `max-age=86400` (un giorno), senza
+`includeSubDomains` ne `preload`. Motivo: un errore HSTS con `max-age` lungo (certificato scaduto,
+un sottodominio raggiungibile solo in HTTP) chiuderebbe fuori tutti i browser fino alla scadenza del
+valore, senza possibilita' di rientro rapido. Con un giorno il raggio d'azione di un eventuale errore
+resta piccolo.
+
+Piano di innalzamento: dopo qualche settimana di HTTPS senza problemi (certificato che si rinnova da
+solo, nessun sottodominio in chiaro), alzare il valore in `docker/Caddyfile` a
+`Strict-Transport-Security "max-age=31536000"` (un anno) e riavviare Caddy. Valutare
+`includeSubDomains`/`preload` solo dopo aver verificato che ogni sottodominio serva HTTPS.
 
 ## Procedura Aggiornamento Codice
 
@@ -310,9 +325,6 @@ porta in produzione ogni migrazione ancora da applicare. Questo deploy include
 `Booking.signatureWindowStartedAt` (inizio della finestra firme, usato dal sollecito dopo una
 rinuncia): e' additiva e retrocompatibile, i record esistenti restano a `NULL` e ricadono su
 `createdAt`.
-
-Il workflow imposta `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` per anticipare la
-migrazione GitHub Actions da Node 20 a Node 24.
 
 ### Fallback Manuale
 
@@ -525,8 +537,14 @@ Scadenze firme:
   il battito: se lo facesse, il traffico utente lo scriverebbe al posto del cron e mascherebbe un
   cron fermo. Il battito e' quindi la traccia che il cron ha girato anche in una giornata senza
   pending, quando `SIGNATURE_DEADLINES_RUN` non comparirebbe mai;
+- ritenzione audit: insieme al battito (quindi una sola volta al giorno, sul primo giro del cron)
+  vengono cancellate le righe `AuditLog` con `createdAt` oltre `APP_AUDIT_RETENTION_MONTHS` mesi
+  (default 24). Il numero di righe potate finisce nel corpo della run come `auditPruned`; per
+  allungare o accorciare lo storico basta cambiare `APP_AUDIT_RETENTION_MONTHS` nell'env dell'app.
 - se il workflow non gira, l'app fa comunque pulizia opportunistica su calendario, lookup e
   firma ospiti, ma ingoia i propri errori per non far fallire la richiesta utente che la ospita.
+  La pulizia opportunistica ha un throttle di 60s (giri utente ravvicinati saltano i findMany a
+  vuoto); il cron non passa dal throttle e resta la via affidabile.
 
 Diagnosi cron fermo:
 
@@ -759,6 +777,92 @@ Questa e' un'azione manuale in console a carico del committente, non automatizza
 deploy.
 
 Non usare `docker compose down -v` in produzione: elimina il volume Postgres.
+
+## Ambiente Di Staging
+
+Ambiente di prova minimale che gira sullo STESSO host della produzione (o in locale),
+descritto in `docker-compose.staging.yml`. Serve a provare una migrazione o una build
+prima di toccare la produzione dei colleghi.
+
+Cosa e' e cosa NON e':
+
+- solo due servizi: `app` + un Postgres dedicato. Niente Caddy, niente dominio, niente
+  HTTPS;
+- NON riceve traffico pubblico: l'app e' bindata su `127.0.0.1:8080` e si raggiunge solo
+  via SSH tunnel dalla propria macchina;
+- NON ha cron: i workflow `Signature Deadlines` e `Health Check` puntano solo alla
+  produzione. Lo staging non viene sollecitato da nessun cron;
+- e' un progetto Docker Compose separato (`name: padel-staging`), quindi container, rete e
+  volume NON collidono con la produzione: il volume dati e' `padel_staging_pgdata`, distinto
+  da quello di produzione;
+- il deploy dello staging e' MANUALE via SSH. Il workflow `Deploy Production` non lo tocca:
+  non esiste automazione per lo staging, e va bene cosi'.
+
+Env: copiare `.env.staging.example` in `.env.staging` e riempirlo. Contiene solo valori di
+prova, MAI secret veri (Graph/Entra restano vuoti apposta, cosi' lo staging non manda inviti
+ne' mail). Il file `.env.staging` e' gitignorato.
+
+### Tirarlo Su
+
+Sul server (o in locale, stessi comandi senza `sudo` in locale):
+
+```bash
+cd /opt/padel-topfly            # in locale: la cartella del repo
+cp .env.staging.example .env.staging   # solo la prima volta, poi editare
+sudo docker compose -f docker-compose.staging.yml up -d --build
+sudo docker compose -f docker-compose.staging.yml ps
+```
+
+L'immagine e' la stessa buildata dal repo (stesso `Dockerfile` della produzione). All'avvio
+`docker/entrypoint.sh` esegue gia' `npx prisma migrate deploy` contro il DB staging, quindi il
+solo `up` porta lo schema staging all'ultima migrazione.
+
+Accesso dalla propria macchina via SSH tunnel (lo staging NON e' esposto su Internet):
+
+```bash
+ssh -L 8080:127.0.0.1:8080 ubuntu@18.194.7.194
+# poi nel browser locale: http://localhost:8080
+```
+
+### Provare Una Migrazione
+
+Il modo consigliato e' rifare `up`: la ricostruzione riavvia l'app e l'entrypoint applica le
+migrazioni ancora da eseguire sul DB staging.
+
+```bash
+cd /opt/padel-topfly
+git pull --ff-only origin main   # o il branch con la migrazione da provare
+sudo docker compose -f docker-compose.staging.yml up -d --build
+sudo docker compose -f docker-compose.staging.yml logs app | grep -i migrat
+```
+
+In alternativa, applicare le migrazioni a mano senza ricostruire, dal container app gia' su:
+
+```bash
+sudo docker compose -f docker-compose.staging.yml exec -T app npx prisma migrate deploy
+sudo docker compose -f docker-compose.staging.yml exec -T app npx prisma migrate status
+```
+
+Atteso: `Database schema is up to date!`. Se la migrazione fallisce qui, si e' rotta solo lo
+staging: la produzione non e' stata toccata. Indagare e correggere prima di portare la
+migrazione in produzione con la procedura standard di deploy.
+
+### Spegnerlo
+
+```bash
+cd /opt/padel-topfly
+sudo docker compose -f docker-compose.staging.yml down
+```
+
+`down` senza `-v` lascia il volume `padel_staging_pgdata`, quindi i dati di prova restano al
+prossimo `up`. Per ripartire da un DB vuoto (solo staging, MAI in produzione):
+
+```bash
+sudo docker compose -f docker-compose.staging.yml down -v
+```
+
+Il `-v` qui e' sicuro perche' colpisce solo il volume staging dedicato, non quello di
+produzione. Verificare comunque sempre di aver passato `-f docker-compose.staging.yml`.
 
 ## Comandi Di Emergenza
 

@@ -1,0 +1,59 @@
+# Staging minimale sullo STESSO host della produzione.
+# Solo app + postgres dedicato: niente Caddy, niente dominio, niente cron.
+# Non riceve traffico pubblico: l'app e' bindata su 127.0.0.1:8080 e si raggiunge
+# via SSH tunnel (ssh -L 8080:127.0.0.1:8080 ...). Serve per provare una migrazione
+# contro un DB isolato prima di toccare la produzione dei colleghi.
+#
+# Progetto Compose separato ('name' sotto): container, rete e volumi default non
+# collidono con la produzione, che gira come progetto distinto sullo stesso host.
+name: padel-staging
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_ENV: development
+    env_file:
+      - .env.staging
+    ports:
+      # Bind SOLO su loopback: nessuna esposizione sulla rete pubblica del server.
+      # Accesso via SSH tunnel dalla propria macchina. Cambiare host qui aprirebbe
+      # lo staging a Internet: non farlo.
+      - "127.0.0.1:8080:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      - .env.staging
+    volumes:
+      # Volume dedicato allo staging: i dati non toccano il volume di produzione.
+      - padel_staging_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  padel_staging_pgdata:
