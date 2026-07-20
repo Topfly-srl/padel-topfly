@@ -23,6 +23,7 @@ function bookingFixture(overrides: Partial<Booking> = {}): Booking {
     signatureReminderSentAt: null,
     signatureConfirmedAt: null,
     autoCanceledAt: null,
+    cancelReason: null,
     guestWaiverTokenHash: null,
     guestWaiverTokenExpiresAt: null,
     createdAt: now,
@@ -101,7 +102,7 @@ function waiverRecipients(calls: SendMailCall[]) {
 type RenderedMail = {
   subject: string;
   body: { content: string };
-  attachments?: Array<{ name: string }>;
+  attachments?: Array<{ name: string; contentBytes?: string }>;
 };
 
 // Rende in un colpo solo tutte le email che escono dal progetto. I vincoli del guscio valgono
@@ -116,6 +117,10 @@ async function renderAllMails(): Promise<RenderedMail[]> {
   const booking = bookingFixture({
     status: "PENDING_SIGNATURES",
     signatureDeadlineAt: new Date("2026-06-04T12:00:00.000Z"),
+    // Sentinella: la causale d'annullamento e' l'unico campo a testo libero della prenotazione e
+    // NON deve mai finire in un'email (potrebbe contenere un nome). Presente su tutto il corpus,
+    // cosi' se un template la reintroducesse il guard qui sotto scatterebbe.
+    cancelReason: "CAUSALE-SENTINELLA-Mario-Verdi",
   });
   const signedAt = new Date("2026-06-03T10:00:00.000Z");
   const waiverPdf = { pdfBytes: new Uint8Array([37, 80, 68, 70]), filename: "scarico.pdf" };
@@ -861,6 +866,18 @@ describe("Microsoft Graph sync", () => {
     expect(payload.message.attachments[1].name).toBe("scarico-laura.pdf");
     expect(payload.message.attachments[1].contentType).toBe("application/pdf");
     expect(payload.message.attachments[1].contentBytes).toBe("JVBERg==");
+
+    // L'ICS di conferma (METHOD:PUBLISH) porta un allarme: l'ospite non ha il promemoria Outlook
+    // del referente, quindi l'avviso un'ora prima glielo da' il VALARM dentro l'evento.
+    const ics = Buffer.from(payload.message.attachments[0].contentBytes, "base64").toString("utf8");
+    expect(ics).toContain("METHOD:PUBLISH");
+    expect(ics).toContain("BEGIN:VALARM");
+    expect(ics).toContain("ACTION:DISPLAY");
+    expect(ics).toContain("TRIGGER:-PT60M");
+    expect(ics).toContain("END:VALARM");
+    // Il VALARM sta dentro il VEVENT, non appeso al calendario.
+    expect(ics.indexOf("BEGIN:VALARM")).toBeGreaterThan(ics.indexOf("BEGIN:VEVENT"));
+    expect(ics.indexOf("END:VALARM")).toBeLessThan(ics.indexOf("END:VEVENT"));
   });
 
   it("invia al referente la mail di prenotazione provvisoria con link firma ospiti", async () => {
@@ -1157,6 +1174,9 @@ describe("Microsoft Graph sync", () => {
     expect(ics).toContain("UID:booking_guest-laura@example.com@padel.topflysolutions.com");
     // Qui la partita e' annullata per davvero: l'allegato puo' dirlo.
     expect(ics).toContain("DESCRIPTION:Prenotazione campo Padel TOPFLY annullata.");
+    // Un allarme su un evento che sta sparendo non ha senso: la cancellazione non porta VALARM.
+    expect(ics).not.toContain("BEGIN:VALARM");
+    expect(ics).not.toContain("TRIGGER:-PT60M");
   });
 
   it("conferma la rinuncia a chi rinuncia e gli ritira l'evento firmato dal calendario", async () => {
@@ -1239,6 +1259,13 @@ describe("Microsoft Graph sync", () => {
     const uidOf = (value: string) => value.split("\r\n").find((line) => line.startsWith("UID:"));
     expect(uidOf(inviteIcs)).toBe("UID:booking_guest-laura@example.com@padel.topflysolutions.com");
     expect(uidOf(ics)).toBe(uidOf(inviteIcs));
+
+    // L'invito alla firma suona un'ora prima (VALARM); la rinuncia che lo ritira no: l'evento
+    // sparisce, un allarme lo seguirebbe nel nulla.
+    expect(inviteIcs).toContain("BEGIN:VALARM");
+    expect(inviteIcs).toContain("TRIGGER:-PT60M");
+    expect(ics).not.toContain("BEGIN:VALARM");
+    expect(ics).not.toContain("TRIGGER:-PT60M");
   });
 
   it("avvisa il referente quando un ospite rinuncia, dicendo chi e' stato ed entro quando", async () => {
@@ -1457,6 +1484,23 @@ describe("Microsoft Graph sync", () => {
     // Due titoli identici non dicono al referente perche' la partita e' saltata.
     expect(auto.body.content).toContain("Annullata: firme mancanti");
     expect(byAdmin.body.content).toContain("Annullata dall'amministrazione");
+  });
+
+  it("non fa mai trapelare la causale d'annullamento in un'email", async () => {
+    const messages = await renderAllMessages();
+    const sentinel = "CAUSALE-SENTINELLA-Mario-Verdi";
+
+    for (const mail of messages) {
+      // La causale e' testo libero (puo' nascondere un nome): niente oggetto, corpo o allegato.
+      expect(mail.subject).not.toContain(sentinel);
+      expect(mail.body.content).not.toContain(sentinel);
+      for (const attachment of mail.attachments ?? []) {
+        expect(attachment.name).not.toContain(sentinel);
+        if (typeof attachment.contentBytes === "string") {
+          expect(Buffer.from(attachment.contentBytes, "base64").toString("utf8")).not.toContain(sentinel);
+        }
+      }
+    }
   });
 
   it("chiama la prenotazione annullata, mai cancellata", async () => {

@@ -537,6 +537,15 @@ function guestCalendarAttachment(input: {
     `DESCRIPTION:${icsText(description)}`,
     "LOCATION:Campo Padel TOPFLY",
     `ATTENDEE;CN=${icsText(input.signerName)}:mailto:${input.signerEmail}`,
+    // L'evento entra in calendario ma da solo non suona: il referente ha il promemoria Outlook,
+    // gli ospiti no. Un VALARM DISPLAY a -PT60M da' anche a loro l'avviso un'ora prima. Vive solo
+    // qui, nell'ICS di conferma (METHOD:PUBLISH): sulla cancellazione (METHOD:CANCEL) un allarme
+    // non ha senso, l'evento sta sparendo.
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    "TRIGGER:-PT60M",
+    `DESCRIPTION:${icsText("Tra un'ora: accesso campo Padel TOPFLY")}`,
+    "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
     "",
