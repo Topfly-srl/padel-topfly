@@ -335,7 +335,7 @@ describe("public booking flow", () => {
     await demoGetAvailability(dateKey(slot.start));
     await demoGetAvailability(dateKey(slot.start));
 
-    const reminders = (await demoGetAdminAudit()).filter((item) => item.action === "BOOKING_SIGNATURE_REMINDER_SENT");
+    const reminders = (await demoGetAdminAudit()).items.filter((item) => item.action === "BOOKING_SIGNATURE_REMINDER_SENT");
     expect(reminders).toHaveLength(1);
   });
 
@@ -353,7 +353,7 @@ describe("public booking flow", () => {
     vi.setSystemTime(new Date(new Date(booking.signatureDeadlineAt!).getTime() + 60_000));
     await demoGetAvailability(dateKey(slot.start));
 
-    const actions = (await demoGetAdminAudit()).map((item) => item.action);
+    const actions = (await demoGetAdminAudit()).items.map((item) => item.action);
     expect(actions).toContain("BOOKING_AUTO_CANCELED_SIGNATURES");
     expect(actions).toContain("SIGNATURE_DEADLINES_RUN");
   });
@@ -371,7 +371,7 @@ describe("public booking flow", () => {
 
     await demoGetAvailability(dateKey(slot.start));
 
-    const actions = (await demoGetAdminAudit()).map((item) => item.action);
+    const actions = (await demoGetAdminAudit()).items.map((item) => item.action);
     expect(actions).not.toContain("SIGNATURE_DEADLINES_RUN");
   });
 

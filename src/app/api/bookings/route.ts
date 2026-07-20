@@ -13,7 +13,7 @@ const createBookingSchema = z.object({
   start: z.string(),
   end: z.string(),
   organizerName: z.string().min(1, "Inserisci nome e cognome.").max(80),
-  organizerEmail: z.string().email("Inserisci un'email valida.").max(120),
+  organizerEmail: z.email("Inserisci un'email valida.").max(120),
   playerCount: z.number().int().min(1).max(4),
   waiver: waiverPayloadSchema,
 });

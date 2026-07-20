@@ -1688,6 +1688,20 @@ summary:focus-visible {
   color: var(--danger);
 }
 
+/* Solo per screen reader: aggancia il motivo dell'errore all'input via aria-describedby
+   senza cambiare la resa visiva (il bordo aria-invalid resta il segnale per chi vede). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .form-submit-hint {
   display: block;
   color: var(--muted);
@@ -1970,6 +1984,56 @@ summary:focus-visible {
 .audit-row small {
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.stats-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.stat-block {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.stat-heading {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.stat-total {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.stat-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+
+.stat-line span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.stat-line strong {
+  flex: 0 0 auto;
+  font-weight: 500;
+}
+
+.stat-line-sub {
+  padding-left: 12px;
+  font-size: 0.8rem;
 }
 
 .signin-shell {

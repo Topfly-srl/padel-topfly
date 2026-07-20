@@ -17,11 +17,19 @@ import {
   demoCreateBooking,
   demoDeleteAdminBlock,
   demoGetAdminAudit,
+  demoGetAdminStats,
   demoGetAvailability,
   demoListBookings,
   demoLookupBookings,
   demoUpdateBooking,
 } from "@/lib/demo-store";
+import {
+  statsWeekWindowStart,
+  summarizeCancellations,
+  summarizeStartHours,
+  summarizeStatuses,
+  summarizeWeeks,
+} from "@/lib/admin-stats";
 import {
   deleteOutlookEvent,
   sendGuestBookingCanceledEmail,
@@ -61,8 +69,11 @@ import {
   signatureDeadlineAt,
   syncConfirmedBooking,
 } from "@/lib/signature-workflow";
+import { normalizeCancelReason } from "@/lib/cancel-reason";
 import type {
-  AuditItem,
+  AdminStats,
+  AuditAction,
+  AuditPage,
   AvailabilityBlock,
   AvailabilityBooking,
   CurrentUser,
@@ -134,6 +145,9 @@ function serializeManagedBooking(
     manageUrl: buildManageUrl(baseUrl, booking.id, manageToken),
     guestWaiverToken,
     guestWaiverUrl: buildGuestWaiverUrl(baseUrl, booking.id, guestWaiverToken),
+    // La causale resta fuori dal payload pubblico (serializeBooking): compare solo dove serve un
+    // token di gestione o l'admin, cioe' esattamente dove una prenotazione annullata e' visibile.
+    cancelReason: booking.cancelReason ?? null,
   };
 }
 
@@ -679,7 +693,7 @@ export async function createBooking(input: PublicBookingInput) {
 export async function updateBooking(
   access: BookingAccess,
   bookingId: string,
-  input: { start?: Date; end?: Date; status?: BookingStatus; playerCount?: number },
+  input: { start?: Date; end?: Date; status?: BookingStatus; playerCount?: number; cancelReason?: string | null },
 ) {
   if (!appConfig.databaseConfigured) {
     return demoUpdateBooking(access, bookingId, input);
@@ -737,6 +751,15 @@ export async function updateBooking(
     throw new AppError("La partita è già iniziata: non è più modificabile.", 409);
   }
   const isCancellation = booking.status !== "CANCELED" && nextStatus === "CANCELED";
+  // La causale vive solo su una prenotazione annullata: la scrivo quando l'annullamento avviene e la
+  // azzero quando lo stato torna attivo (riprogrammazione admin), cosi' non resta un motivo stantio
+  // appeso a uno slot di nuovo valido. Se lo stato resta CANCELED senza transizione, non la tocco.
+  const cancelReasonData =
+    isCancellation
+      ? { cancelReason: normalizeCancelReason(input.cancelReason) }
+      : nextStatus !== "CANCELED"
+        ? { cancelReason: null }
+        : {};
   const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
   const guestSignersToNotify =
     requiresFreshWaivers || isCancellation ? await activeGuestSignersForBooking(booking) : [];
@@ -763,6 +786,7 @@ export async function updateBooking(
             end: nextEnd,
             status: nextStatus,
             playerCount: nextPlayerCount,
+            ...cancelReasonData,
             manageTokenExpiresAt: manageTokenExpiresAt(nextEnd),
             ...(nextGuestWaiverToken
               ? {
@@ -861,9 +885,13 @@ export async function updateBooking(
   );
 }
 
-export async function cancelBooking(access: BookingAccess, bookingId: string) {
+export async function cancelBooking(
+  access: BookingAccess,
+  bookingId: string,
+  input: { cancelReason?: string | null } = {},
+) {
   if (!appConfig.databaseConfigured) {
-    return demoCancelBooking(access, bookingId);
+    return demoCancelBooking(access, bookingId, input);
   }
 
   await runOpportunisticSignatureDeadlines({ baseUrl: access.baseUrl });
@@ -891,7 +919,7 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
       async (tx) => {
         const saved = await tx.booking.update({
           where: { id: booking.id },
-          data: { status: "CANCELED" },
+          data: { status: "CANCELED", cancelReason: normalizeCancelReason(input.cancelReason) },
         });
 
         await audit(tx, actor, {
@@ -1017,24 +1045,108 @@ export async function deleteAdminBlock(currentUser: CurrentUser, blockId: string
   return { id: block.id };
 }
 
-export async function getAdminAudit(): Promise<AuditItem[]> {
+const adminAuditPageSize = 40;
+
+// Estrae la causale dall'after dell'audit di cancellazione: il sanitizzatore la lascia passare
+// (non e' un campo nascosto), quindi vive gia' nel JSON registrato. Difensivo su forma e tipo.
+function auditCancelReason(after: unknown): string | null {
+  if (!after || typeof after !== "object") return null;
+  const value = (after as { cancelReason?: unknown }).cancelReason;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+export async function getAdminAudit(
+  input: { action?: AuditAction; cursor?: string; limit?: number } = {},
+): Promise<AuditPage> {
   if (!appConfig.databaseConfigured) {
-    return demoGetAdminAudit();
+    return demoGetAdminAudit(input);
   }
 
+  const limit = Math.min(Math.max(input.limit ?? adminAuditPageSize, 10), 100);
+  const cursor = parseAdminAuditCursor(input.cursor);
+
   const items = await prisma.auditLog.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 40,
+    where: {
+      ...(input.action ? { action: input.action } : {}),
+      ...(cursor
+        ? {
+            OR: [
+              { createdAt: { lt: cursor.createdAt } },
+              { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+            ],
+          }
+        : {}),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 
-  return items.map((item) => ({
-    id: item.id,
-    actorEmail: item.actorEmail,
-    action: item.action,
-    entityType: item.entityType,
-    entityId: item.entityId,
-    createdAt: item.createdAt.toISOString(),
-  }));
+  const visible = items.slice(0, limit);
+  const last = visible.at(-1);
+
+  return {
+    items: visible.map((item) => ({
+      id: item.id,
+      actorEmail: item.actorEmail,
+      action: item.action,
+      entityType: item.entityType,
+      entityId: item.entityId,
+      createdAt: item.createdAt.toISOString(),
+      cancelReason: auditCancelReason(item.after),
+    })),
+    nextCursor: items.length > limit && last ? adminAuditCursor(last) : null,
+  };
+}
+
+function adminAuditCursor(item: { createdAt: Date; id: string }) {
+  return Buffer.from(`${item.createdAt.toISOString()}|${item.id}`, "utf8").toString("base64url");
+}
+
+function parseAdminAuditCursor(value: string | undefined) {
+  if (!value) return null;
+
+  try {
+    const [createdAtRaw, id] = Buffer.from(value, "base64url").toString("utf8").split("|");
+    const createdAt = new Date(createdAtRaw);
+    if (!id || Number.isNaN(createdAt.getTime())) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
+// Statistiche aggregate read-only. Solo numeri, nessun nome: ogni query conta righe e le raggruppa.
+// La demo twin (demoGetAdminStats) ricostruisce la stessa forma sui dati in memoria.
+export async function getAdminStats(now: Date = new Date()): Promise<AdminStats> {
+  if (!appConfig.databaseConfigured) {
+    return demoGetAdminStats(now);
+  }
+
+  const weekWindowStart = statsWeekWindowStart(now);
+
+  const [statusGroups, cancellations, recentStarts, allStarts] = await Promise.all([
+    prisma.booking.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.booking.findMany({
+      where: { status: "CANCELED" },
+      select: { autoCanceledAt: true, cancelReason: true },
+    }),
+    prisma.booking.findMany({
+      where: { start: { gte: weekWindowStart } },
+      select: { start: true },
+    }),
+    prisma.booking.findMany({ select: { start: true } }),
+  ]);
+
+  const byStatus = summarizeStatuses(statusGroups.map((group) => ({ status: group.status, count: group._count._all })));
+  const totalBookings = byStatus.reduce((sum, entry) => sum + entry.count, 0);
+
+  return {
+    totalBookings,
+    perWeek: summarizeWeeks(recentStarts.map((booking) => booking.start), now),
+    perStartHour: summarizeStartHours(allStarts.map((booking) => booking.start)),
+    byStatus,
+    cancellations: summarizeCancellations(cancellations),
+  };
 }
 
 export function hasRangeConflict(

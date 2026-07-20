@@ -6,6 +6,14 @@ import {
   validateBookingPolicy,
 } from "@/lib/booking-policy";
 import { appConfig } from "@/lib/config";
+import { normalizeCancelReason } from "@/lib/cancel-reason";
+import {
+  statsWeekWindowStart,
+  summarizeCancellations,
+  summarizeStartHours,
+  summarizeStatuses,
+  summarizeWeeks,
+} from "@/lib/admin-stats";
 import { AppError } from "@/lib/errors";
 import {
   createManageToken,
@@ -23,7 +31,10 @@ import {
   signatureReplacementDeadlineAt,
 } from "@/lib/signature-workflow";
 import type {
+  AdminStats,
+  AuditAction,
   AuditItem,
+  AuditPage,
   AvailabilityBlock,
   AvailabilityBooking,
   CurrentUser,
@@ -48,6 +59,7 @@ type DemoBooking = {
   signatureReminderSentAt: Date | null;
   signatureConfirmedAt: Date | null;
   autoCanceledAt: Date | null;
+  cancelReason: string | null;
   guestWaiverTokenHash: string | null;
   guestWaiverTokenExpiresAt: Date | null;
   createdAt: Date;
@@ -182,7 +194,13 @@ function demoProcessDeadlines(now = new Date()) {
   }
 }
 
-function addAudit(actorEmail: string, action: string, entityType: string, entityId?: string) {
+function addAudit(
+  actorEmail: string,
+  action: string,
+  entityType: string,
+  entityId?: string,
+  cancelReason?: string | null,
+) {
   audit.unshift({
     id: id("audit"),
     actorEmail,
@@ -190,6 +208,7 @@ function addAudit(actorEmail: string, action: string, entityType: string, entity
     entityType,
     entityId: entityId ?? null,
     createdAt: new Date().toISOString(),
+    cancelReason: cancelReason ?? null,
   });
 }
 
@@ -226,6 +245,7 @@ function managedBookingToApi(
     manageUrl: buildManageUrl(baseUrl, booking.id, manageToken),
     guestWaiverToken,
     guestWaiverUrl: buildGuestWaiverUrl(baseUrl, booking.id, guestWaiverToken),
+    cancelReason: booking.cancelReason,
   };
 }
 
@@ -407,6 +427,7 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     signatureReminderSentAt: null,
     signatureConfirmedAt: null,
     autoCanceledAt: null,
+    cancelReason: null,
     guestWaiverTokenHash: guestWaiverToken ? hashManageToken(guestWaiverToken) : null,
     guestWaiverTokenExpiresAt: guestWaiverToken ? manageTokenExpiresAt(input.end) : null,
     createdAt: now,
@@ -443,7 +464,13 @@ export async function demoCreateBooking(input: DemoCreateInput) {
 export async function demoUpdateBooking(
   access: DemoAccess,
   bookingId: string,
-  input: { start?: Date; end?: Date; status?: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED"; playerCount?: number },
+  input: {
+    start?: Date;
+    end?: Date;
+    status?: "PENDING_SIGNATURES" | "CONFIRMED" | "CANCELED";
+    playerCount?: number;
+    cancelReason?: string | null;
+  },
 ) {
   demoProcessDeadlines();
   const booking = bookings.find((item) => item.id === bookingId);
@@ -496,6 +523,14 @@ export async function demoUpdateBooking(
     assertDemoBookingAllowed(booking.organizerEmail, nextStart, nextEnd, booking.id, timeChanged);
   }
 
+  const isCancellation = booking.status !== "CANCELED" && nextStatus === "CANCELED";
+  // Come in produzione: la causale la scrivo solo quando l'annullamento avviene e la azzero quando
+  // lo stato torna attivo, cosi' un motivo non resta appeso a uno slot di nuovo valido.
+  if (isCancellation) {
+    booking.cancelReason = normalizeCancelReason(input.cancelReason);
+  } else if (nextStatus !== "CANCELED") {
+    booking.cancelReason = null;
+  }
   booking.start = nextStart;
   booking.end = nextEnd;
   booking.status = nextStatus;
@@ -521,12 +556,17 @@ export async function demoUpdateBooking(
     nextStatus === "CONFIRMED" ? "BOOKING_UPDATED" : "BOOKING_STATUS_CHANGED",
     "Booking",
     booking.id,
+    isCancellation ? booking.cancelReason : null,
   );
 
   return managedBookingToApi(booking, access.manageToken ?? undefined, access.baseUrl, guestWaiverToken);
 }
 
-export async function demoCancelBooking(access: DemoAccess, bookingId: string) {
+export async function demoCancelBooking(
+  access: DemoAccess,
+  bookingId: string,
+  input: { cancelReason?: string | null } = {},
+) {
   demoProcessDeadlines();
   const booking = bookings.find((item) => item.id === bookingId);
   if (!booking) throw new AppError("Prenotazione non trovata.", 404);
@@ -537,8 +577,9 @@ export async function demoCancelBooking(access: DemoAccess, bookingId: string) {
   }
 
   booking.status = "CANCELED";
+  booking.cancelReason = normalizeCancelReason(input.cancelReason);
   booking.updatedAt = new Date();
-  addAudit(actorEmail, "BOOKING_CANCELED", "Booking", booking.id);
+  addAudit(actorEmail, "BOOKING_CANCELED", "Booking", booking.id, booking.cancelReason);
 
   return managedBookingToApi(booking, access.manageToken ?? undefined, access.baseUrl);
 }
@@ -587,8 +628,43 @@ export async function demoDeleteAdminBlock(user: CurrentUser, blockId: string) {
   return { id: block.id };
 }
 
-export async function demoGetAdminAudit() {
-  return audit.slice(0, 40);
+export async function demoGetAdminAudit(
+  input: { action?: AuditAction; cursor?: string; limit?: number } = {},
+): Promise<AuditPage> {
+  const limit = Math.min(Math.max(input.limit ?? 40, 10), 100);
+  const filtered = input.action ? audit.filter((item) => item.action === input.action) : audit;
+  // Il cursore e' l'id dell'ultima riga della pagina precedente: la pagina nuova riparte subito
+  // dopo, ovunque si trovi ora (l'array puo' essere cambiato). Cursore ignoto -> riparte da capo.
+  const startIndex = input.cursor ? filtered.findIndex((item) => item.id === input.cursor) + 1 : 0;
+  const slice = filtered.slice(startIndex, startIndex + limit + 1);
+  const page = slice.slice(0, limit);
+  const last = page.at(-1);
+
+  return {
+    items: page,
+    nextCursor: slice.length > limit && last ? last.id : null,
+  };
+}
+
+export async function demoGetAdminStats(now: Date = new Date()): Promise<AdminStats> {
+  demoProcessDeadlines(now);
+
+  const windowStart = statsWeekWindowStart(now);
+  const recentStarts = bookings.filter((booking) => booking.start >= windowStart).map((booking) => booking.start);
+  const allStarts = bookings.map((booking) => booking.start);
+  const canceled = bookings
+    .filter((booking) => booking.status === "CANCELED")
+    .map((booking) => ({ autoCanceledAt: booking.autoCanceledAt, cancelReason: booking.cancelReason }));
+
+  const byStatus = summarizeStatuses(bookings.map((booking) => ({ status: booking.status, count: 1 })));
+
+  return {
+    totalBookings: bookings.length,
+    perWeek: summarizeWeeks(recentStarts, now),
+    perStartHour: summarizeStartHours(allStarts),
+    byStatus,
+    cancellations: summarizeCancellations(canceled),
+  };
 }
 
 function assertDemoGuestWaiverAccess(booking: DemoBooking, token: string | null | undefined) {

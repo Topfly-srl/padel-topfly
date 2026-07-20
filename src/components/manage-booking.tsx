@@ -5,6 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
+import { CancelReasonSelect } from "@/components/cancel-reason-select";
+import { resolveCancelReason, type CancelReasonMode } from "@/lib/cancel-reason";
 import {
   bookingDurationOptions,
   defaultClosingHour,
@@ -113,6 +115,8 @@ export function ManageBooking({
   const [duration, setDuration] = useState(60);
   const [isSaving, setIsSaving] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
+  const [cancelReasonMode, setCancelReasonMode] = useState<CancelReasonMode>("");
+  const [cancelReasonText, setCancelReasonText] = useState("");
   const [isPending, startTransition] = useTransition();
   const openingHour = availability?.settings?.openingHour ?? defaultOpeningHour;
   const closingHour = availability?.settings?.closingHour ?? defaultClosingHour;
@@ -238,11 +242,13 @@ export function ManageBooking({
     setNotice(null);
     setIsCanceling(true);
 
+    const cancelReason = resolveCancelReason(cancelReasonMode, cancelReasonText);
+
     try {
       const response = await fetch(appPath(`/api/bookings/${bookingId}`), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ manageToken }),
+        body: JSON.stringify({ manageToken, ...(cancelReason ? { cancelReason } : {}) }),
       });
 
       if (!response.ok) {
@@ -286,6 +292,9 @@ export function ManageBooking({
               </small>
               {booking.status === "PENDING_SIGNATURES" ? (
                 <small>{deadlineCopy(booking.signatureDeadlineAt)}</small>
+              ) : null}
+              {booking.status === "CANCELED" && booking.cancelReason ? (
+                <small>Motivo annullamento: {booking.cancelReason}</small>
               ) : null}
             </div>
 
@@ -367,7 +376,7 @@ export function ManageBooking({
                   })}
                 </div>
 
-                {selectionConflict ? <div className="notice error">{selectionConflict}</div> : null}
+                {selectionConflict ? <div className="notice error" role="alert" aria-live="assertive">{selectionConflict}</div> : null}
                 {notice ? (
                   <div
                     aria-live={notice.type === "error" ? "assertive" : "polite"}
@@ -386,6 +395,13 @@ export function ManageBooking({
                   <Check size={18} />
                   {isSaving ? "Salvo..." : "Salva modifica"}
                 </button>
+                <CancelReasonSelect
+                  mode={cancelReasonMode}
+                  otherText={cancelReasonText}
+                  onModeChange={setCancelReasonMode}
+                  onOtherTextChange={setCancelReasonText}
+                  disabled={actionsDisabled}
+                />
                 <button
                   className="ghost-button full-width danger-action"
                   disabled={actionsDisabled}

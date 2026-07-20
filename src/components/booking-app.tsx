@@ -24,7 +24,7 @@ import {
   defaultClosingHour,
   defaultOpeningHour,
 } from "@/lib/booking-constants";
-import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
+import { auditActionLabel, bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import {
   bookingTimeOptions,
@@ -35,12 +35,15 @@ import {
 import { retriableWaiverEmailLegs, type WaiverMailLeg } from "@/lib/waiver-email";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
+  AdminStats,
+  AuditAction,
   AuditItem,
   AvailabilityBlock,
   AvailabilityBooking,
   CurrentUser,
   MyBooking,
 } from "@/lib/types";
+import { auditActions } from "@/lib/types";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
 import { PendingSignaturePanel } from "@/components/pending-signature-panel";
 
@@ -92,6 +95,13 @@ type AdminWaiverItem = {
 const tokenStorageKey = "topfly-padel.tokens.v1";
 const guestWaiverLinksStorageKey = "topfly-padel.guest-waiver-links.v1";
 const adminWaiverPageSize = 50;
+const adminAuditPageSize = 40;
+
+function statsWeekLabel(weekStart: string) {
+  return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" }).format(
+    dateTimeFromParts(weekStart, "00:00"),
+  );
+}
 const fallbackInitialState: BookingInitialState = {
   date: "1970-01-01",
   time: "18:00",
@@ -336,6 +346,9 @@ export function BookingApp({
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(initialAvailability);
   const [myBookings, setMyBookings] = useState<MyBooking[]>([]);
   const [audit, setAudit] = useState<AuditItem[]>([]);
+  const [auditActionFilter, setAuditActionFilter] = useState<AuditAction | "ALL">("ALL");
+  const [auditNextCursor, setAuditNextCursor] = useState<string | null>(null);
+  const [stats, setStats] = useState<AdminStats | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [editingToken, setEditingToken] = useState<string | null>(null);
@@ -354,6 +367,7 @@ export function BookingApp({
   const [isAvailabilityLoading, setIsAvailabilityLoading] = useState(!initialAvailability);
   const [isMyBookingsLoading, setIsMyBookingsLoading] = useState(false);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
+  const [isStatsLoading, setIsStatsLoading] = useState(false);
   const [isAdminWaiversLoading, setIsAdminWaiversLoading] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
@@ -371,7 +385,7 @@ export function BookingApp({
   );
   const currentAvailability = availability?.date === selectedDate ? availability : null;
   const isAvailabilityBusy = isAvailabilityLoading || availability?.date !== selectedDate;
-  const isAdminLoading = isAuditLoading || isAdminWaiversLoading;
+  const isAdminLoading = isAuditLoading || isStatsLoading || isAdminWaiversLoading;
   const durationOptions = currentAvailability?.settings.durationOptions ?? bookingDurationOptions;
   const start = useMemo(
     () => dateTimeFromParts(selectedDate, selectedTime),
@@ -482,16 +496,38 @@ export function BookingApp({
     setAvailability((await response.json()) as AvailabilityResponse);
   }, []);
 
-  const loadAudit = useCallback(async (signal?: AbortSignal) => {
+  const loadAudit = useCallback(async (cursor?: string, signal?: AbortSignal) => {
     if (!isAdmin) return;
 
-    const response = await fetch(appPath("/api/admin/audit"), { cache: "no-store", signal });
+    const params = new URLSearchParams({ limit: String(adminAuditPageSize) });
+    if (auditActionFilter !== "ALL") {
+      params.set("action", auditActionFilter);
+    }
+    if (cursor) {
+      params.set("cursor", cursor);
+    }
+
+    const response = await fetch(appPath(`/api/admin/audit?${params.toString()}`), { cache: "no-store", signal });
     if (!response.ok) {
       throw new Error(await readApiError(response));
     }
 
-    const json = (await response.json()) as { audit: AuditItem[] };
-    setAudit(json.audit);
+    // Stesso pattern cursore degli scarichi: senza cursore la pagina sostituisce, col cursore accoda.
+    const json = (await response.json()) as { audit: AuditItem[]; nextCursor: string | null };
+    setAudit((current) => (cursor ? [...current, ...json.audit] : json.audit));
+    setAuditNextCursor(json.nextCursor);
+  }, [auditActionFilter, isAdmin]);
+
+  const loadStats = useCallback(async (signal?: AbortSignal) => {
+    if (!isAdmin) return;
+
+    const response = await fetch(appPath("/api/admin/stats"), { cache: "no-store", signal });
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+
+    const json = (await response.json()) as { stats: AdminStats };
+    setStats(json.stats);
   }, [isAdmin]);
 
   const loadAdminWaivers = useCallback(async (cursor?: string, signal?: AbortSignal) => {
@@ -612,7 +648,7 @@ export function BookingApp({
       if (controller.signal.aborted) return;
 
       setIsAuditLoading(true);
-      loadAudit(controller.signal)
+      loadAudit(undefined, controller.signal)
         .catch((error) => {
           if (controller.signal.aborted) return;
           setNotice({
@@ -629,6 +665,32 @@ export function BookingApp({
 
     return () => controller.abort();
   }, [isAdmin, loadAudit]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+
+      setIsStatsLoading(true);
+      loadStats(controller.signal)
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setNotice({
+            type: "warning",
+            text: errorText(error, "Impossibile caricare le statistiche admin."),
+          });
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setIsStatsLoading(false);
+          }
+        });
+    });
+
+    return () => controller.abort();
+  }, [isAdmin, loadStats]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -699,6 +761,14 @@ export function BookingApp({
           }
         })(),
         (async () => {
+          setIsStatsLoading(true);
+          try {
+            await loadStats();
+          } finally {
+            setIsStatsLoading(false);
+          }
+        })(),
+        (async () => {
           setIsAdminWaiversLoading(true);
           try {
             await loadAdminWaivers();
@@ -717,6 +787,22 @@ export function BookingApp({
         type: "warning",
         text: errorText(failed.reason, "Aggiornamento incompleto. Riprova tra poco."),
       });
+    }
+  }
+
+  async function loadMoreAudit() {
+    if (!auditNextCursor) return;
+
+    setIsAuditLoading(true);
+    try {
+      await loadAudit(auditNextCursor);
+    } catch (error) {
+      setNotice({
+        type: "warning",
+        text: errorText(error, "Impossibile caricare altro storico."),
+      });
+    } finally {
+      setIsAuditLoading(false);
     }
   }
 
@@ -1226,7 +1312,7 @@ export function BookingApp({
                 </p>
 
                 {selectionConflict ? (
-                  <div className="notice error">{selectionConflict}</div>
+                  <div className="notice error" role="alert" aria-live="assertive">{selectionConflict}</div>
                 ) : notice ? (
                   <div
                     aria-live={notice.type === "error" ? "assertive" : "polite"}
@@ -1594,16 +1680,132 @@ export function BookingApp({
               </details>
 
               <details>
-                <summary>Storico recente {isAuditLoading ? <span className="loading-pill">Aggiorno</span> : null}</summary>
-                <div className="audit-list">
-                  {audit.map((item) => (
-                    <div className="audit-row" key={item.id}>
-                      <span>{item.action}</span>
-                      <small>
-                        {item.actorEmail} - {localDateTime(new Date(item.createdAt))}
-                      </small>
+                <summary>
+                  Statistiche {isStatsLoading ? <span className="loading-pill">Aggiorno</span> : null}
+                </summary>
+                {stats ? (
+                  <div className="stats-grid">
+                    <div className="stat-block">
+                      <span className="stat-heading">Totale prenotazioni</span>
+                      <strong className="stat-total">{stats.totalBookings}</strong>
                     </div>
-                  ))}
+
+                    <div className="stat-block">
+                      <span className="stat-heading">Per stato</span>
+                      {stats.byStatus.map((entry) => (
+                        <div className="stat-line" key={entry.status}>
+                          <span>{bookingStatusLabel(entry.status)}</span>
+                          <strong>{entry.count}</strong>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="stat-block">
+                      <span className="stat-heading">Ultime 8 settimane</span>
+                      {stats.perWeek.map((entry) => (
+                        <div className="stat-line" key={entry.weekStart}>
+                          <span>Sett. {statsWeekLabel(entry.weekStart)}</span>
+                          <strong>{entry.count}</strong>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="stat-block">
+                      <span className="stat-heading">Per fascia oraria</span>
+                      {stats.perStartHour.length ? (
+                        stats.perStartHour.map((entry) => (
+                          <div className="stat-line" key={entry.hour}>
+                            <span>{pad(entry.hour)}:00</span>
+                            <strong>{entry.count}</strong>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="empty-state">Nessuna prenotazione registrata.</p>
+                      )}
+                    </div>
+
+                    <div className="stat-block">
+                      <span className="stat-heading">Annullamenti</span>
+                      <div className="stat-line">
+                        <span>Automatici (firme mancanti)</span>
+                        <strong>
+                          {stats.cancellations.auto} · {stats.cancellations.autoPercent}%
+                        </strong>
+                      </div>
+                      <div className="stat-line">
+                        <span>Manuali</span>
+                        <strong>
+                          {stats.cancellations.manual} · {stats.cancellations.manualPercent}%
+                        </strong>
+                      </div>
+                      {stats.cancellations.reasons.map((entry) => (
+                        <div className="stat-line stat-line-sub" key={entry.reason}>
+                          <span>{entry.reason}</span>
+                          <strong>{entry.count}</strong>
+                        </div>
+                      ))}
+                      {stats.cancellations.manualWithoutReason ? (
+                        <div className="stat-line stat-line-sub">
+                          <span>Senza causale</span>
+                          <strong>{stats.cancellations.manualWithoutReason}</strong>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : isStatsLoading ? null : (
+                  <p className="empty-state">Statistiche non disponibili.</p>
+                )}
+              </details>
+
+              <details>
+                <summary>Storico recente {isAuditLoading ? <span className="loading-pill">Aggiorno</span> : null}</summary>
+                <div className="admin-filter-row">
+                  <label>
+                    Azione
+                    <select
+                      value={auditActionFilter}
+                      onChange={(event) => setAuditActionFilter(event.target.value as AuditAction | "ALL")}
+                    >
+                      <option value="ALL">Tutte</option>
+                      {auditActions.map((action) => (
+                        <option key={action} value={action}>
+                          {auditActionLabel(action)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {isAuditLoading ? (
+                    <span className="loading-pill">Aggiorno</span>
+                  ) : (
+                    <span className="count-pill">{audit.length}</span>
+                  )}
+                </div>
+                <div className="audit-list">
+                  {audit.length ? (
+                    <>
+                      {audit.map((item) => (
+                        <div className="audit-row" key={item.id}>
+                          <span>{auditActionLabel(item.action)}</span>
+                          <small>
+                            {item.actorEmail} - {localDateTime(new Date(item.createdAt))}
+                          </small>
+                          {item.cancelReason ? <small>Causale: {item.cancelReason}</small> : null}
+                        </div>
+                      ))}
+                      {auditNextCursor ? (
+                        <button
+                          className="ghost-button full-width"
+                          disabled={isAuditLoading}
+                          onClick={loadMoreAudit}
+                          type="button"
+                        >
+                          Mostra altri
+                        </button>
+                      ) : null}
+                    </>
+                  ) : isAuditLoading ? null : (
+                    <p className="empty-state">Nessuna attività recente registrata.</p>
+                  )}
                 </div>
               </details>
             </section>

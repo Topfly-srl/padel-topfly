@@ -75,6 +75,7 @@ model Booking {
   signatureReminderSentAt DateTime?
   signatureConfirmedAt DateTime?
   autoCanceledAt    DateTime?
+  cancelReason      String?
   guestWaiverTokenHash String?
   guestWaiverTokenExpiresAt DateTime?
   createdAt         DateTime          @default(now())

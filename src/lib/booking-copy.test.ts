@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { publicOrganizerLabel } from "@/lib/booking-copy";
+import { auditActionLabel, publicOrganizerLabel } from "@/lib/booking-copy";
+import { auditActions } from "@/lib/types";
 
 describe("publicOrganizerLabel", () => {
   it("abbrevia il cognome a un'iniziale col punto", () => {
@@ -19,5 +20,19 @@ describe("publicOrganizerLabel", () => {
     expect(publicOrganizerLabel("  Mario   Rossi  ")).toBe("Mario R.");
     expect(publicOrganizerLabel("  Cher  ")).toBe("Cher");
     expect(publicOrganizerLabel("")).toBe("");
+  });
+});
+
+describe("auditActionLabel", () => {
+  it("da' un'etichetta leggibile a ogni azione offerta dal filtro", () => {
+    for (const action of auditActions) {
+      const label = auditActionLabel(action);
+      expect(label).not.toBe(action);
+      expect(label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("ripiega sul codice grezzo per un'azione non mappata", () => {
+    expect(auditActionLabel("BOOKING_SIGNATURE_REMINDER_SENT")).toBe("BOOKING_SIGNATURE_REMINDER_SENT");
   });
 });

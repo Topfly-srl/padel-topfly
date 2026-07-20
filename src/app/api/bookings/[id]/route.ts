@@ -2,12 +2,14 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { cancelBooking, updateBooking } from "@/lib/booking-service";
 import { jsonResponse, routeError } from "@/lib/errors";
+import { maxCancelReasonLength } from "@/lib/cancel-reason";
 import { getPublicBaseUrl } from "@/lib/public-url";
 import { assertRateLimit, assertTrustedOrigin } from "@/lib/request-guard";
 import { getCurrentUser } from "@/lib/server-auth";
 import { toDateOrThrow } from "@/lib/time";
 
 const manageTokenSchema = z.string().trim().min(1).max(200);
+const cancelReasonSchema = z.string().trim().max(maxCancelReasonLength);
 
 const updateBookingSchema = z.object({
   start: z.string().optional(),
@@ -15,10 +17,12 @@ const updateBookingSchema = z.object({
   status: z.enum(["PENDING_SIGNATURES", "CONFIRMED", "CANCELED"]).optional(),
   playerCount: z.number().int().min(1).max(4).optional(),
   manageToken: manageTokenSchema.optional(),
+  cancelReason: cancelReasonSchema.optional(),
 });
 
 const deleteBookingSchema = z.object({
   manageToken: manageTokenSchema.optional(),
+  cancelReason: cancelReasonSchema.optional(),
 });
 
 type RouteContext = {
@@ -48,6 +52,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         end: body.end ? toDateOrThrow(body.end, "Fine") : undefined,
         status: body.status,
         playerCount: body.playerCount,
+        cancelReason: body.cancelReason,
       },
     );
 
@@ -77,6 +82,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         baseUrl: getPublicBaseUrl(request),
       },
       id,
+      { cancelReason: body.cancelReason },
     );
 
     return jsonResponse({ booking });
