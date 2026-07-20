@@ -332,6 +332,9 @@ sudo docker compose -f docker-compose.production.yml logs -f app
 curl -I https://padel.topflysolutions.com
 ```
 
+I log di ogni servizio (app, postgres, caddy) usano il driver `json-file` con rotazione
+`max-size: 10m` e `max-file: 3`, quindi non riempiono il disco senza intervento manuale.
+
 ## Procedura Aggiornamento Env
 
 Prima backup:

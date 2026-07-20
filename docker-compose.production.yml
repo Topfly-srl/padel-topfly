@@ -15,6 +15,11 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   postgres:
     image: postgres:16-alpine
@@ -28,6 +33,11 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   caddy:
     image: caddy:2-alpine
@@ -43,6 +53,11 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   padel_topfly_pgdata:
