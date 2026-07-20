@@ -3,7 +3,7 @@
 import { ArrowLeft, CalendarDays, Check, Clock3, FileText, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
@@ -171,6 +171,8 @@ export function BookingCheckout({
   const [copiedGuestWaiverLink, setCopiedGuestWaiverLink] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const checkoutCardRef = useRef<HTMLElement | null>(null);
+  const organizerNameErrorId = useId();
+  const organizerEmailErrorId = useId();
 
   const start = useMemo(() => dateTimeFromParts(selectedDate, selectedTime), [selectedDate, selectedTime]);
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
@@ -205,6 +207,8 @@ export function BookingCheckout({
   const missingCopy = canSubmit
     ? "Tutto pronto: puoi confermare la prenotazione."
     : "Completa i campi mancanti per continuare.";
+  const organizerNameInvalid = showFieldError("organizerName", normalizedOrganizerName.length < 2);
+  const organizerEmailInvalid = showFieldError("organizerEmail", !isValidEmail(normalizedOrganizerEmail));
   const pendingMissingSignatures = createdBooking
     ? Math.max(0, createdBooking.playerCount - createdBooking.waiverSignedCount)
     : 0;
@@ -460,12 +464,18 @@ export function BookingCheckout({
                     <input
                       autoComplete="name"
                       required
-                      aria-invalid={showFieldError("organizerName", normalizedOrganizerName.length < 2) || undefined}
+                      aria-invalid={organizerNameInvalid || undefined}
+                      aria-describedby={organizerNameInvalid ? organizerNameErrorId : undefined}
                       value={organizerName}
                       onBlur={() => markTouched("organizerName")}
                       onChange={(event) => setOrganizerName(event.target.value)}
                       placeholder="Mario Rossi"
                     />
+                    {organizerNameInvalid ? (
+                      <span className="sr-only" id={organizerNameErrorId}>
+                        Inserisci nome e cognome.
+                      </span>
+                    ) : null}
                   </label>
                   <label>
                     Email
@@ -474,7 +484,8 @@ export function BookingCheckout({
                       inputMode="email"
                       required
                       type="email"
-                      aria-invalid={showFieldError("organizerEmail", !isValidEmail(normalizedOrganizerEmail)) || undefined}
+                      aria-invalid={organizerEmailInvalid || undefined}
+                      aria-describedby={organizerEmailInvalid ? organizerEmailErrorId : undefined}
                       value={organizerEmail}
                       onBlur={() => {
                         markTouched("organizerEmail");
@@ -483,6 +494,11 @@ export function BookingCheckout({
                       onChange={(event) => setOrganizerEmail(event.target.value)}
                       placeholder={`nome@${allowedDomain}`}
                     />
+                    {organizerEmailInvalid ? (
+                      <span className="sr-only" id={organizerEmailErrorId}>
+                        {"Inserisci un'email valida."}
+                      </span>
+                    ) : null}
                   </label>
                   <label>
                     Giocatori

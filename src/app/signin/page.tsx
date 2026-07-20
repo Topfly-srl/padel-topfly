@@ -43,7 +43,7 @@ export default async function SignInPage() {
         </p>
 
         {user ? (
-          <div className="notice error">Account Microsoft valido, ma non abilitato come admin.</div>
+          <div className="notice error" role="alert">Account Microsoft valido, ma non abilitato come admin.</div>
         ) : null}
 
         {microsoftReady ? (

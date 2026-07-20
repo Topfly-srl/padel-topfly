@@ -2,7 +2,7 @@
 
 import { Check, MailWarning } from "lucide-react";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
 import { deadlineCopy } from "@/lib/booking-copy";
@@ -103,6 +103,8 @@ export function WaiverSigning({
   const [hasSigned, setHasSigned] = useState(false);
   const [isPending, startTransition] = useTransition();
   const waiverCardRef = useRef<HTMLElement | null>(null);
+  const signerNameErrorId = useId();
+  const signerEmailErrorId = useId();
 
   const birthDateIso = birthDateInputToIsoDate(waiverForm.birthDate);
   const normalizedSignerName = signerName.trim().replace(/\s+/g, " ");
@@ -245,6 +247,8 @@ export function WaiverSigning({
   const markTouched = (field: GuestField) => {
     setTouchedFields((current) => ({ ...current, [field]: true }));
   };
+  const signerNameInvalid = showFieldError("signerName", normalizedSignerName.length < 2);
+  const signerEmailInvalid = showFieldError("signerEmail", !isValidEmail(normalizedSignerEmail));
 
   return (
     <main className="app-shell compact-shell">
@@ -338,12 +342,18 @@ export function WaiverSigning({
                         <input
                           autoComplete="name"
                           required
-                          aria-invalid={showFieldError("signerName", normalizedSignerName.length < 2) || undefined}
+                          aria-invalid={signerNameInvalid || undefined}
+                          aria-describedby={signerNameInvalid ? signerNameErrorId : undefined}
                           value={signerName}
                           onBlur={() => markTouched("signerName")}
                           onChange={(event) => setSignerName(event.target.value)}
                           placeholder="Mario Rossi"
                         />
+                        {signerNameInvalid ? (
+                          <span className="sr-only" id={signerNameErrorId}>
+                            Inserisci nome e cognome.
+                          </span>
+                        ) : null}
                       </label>
                       <label>
                         Email
@@ -352,7 +362,8 @@ export function WaiverSigning({
                           inputMode="email"
                           required
                           type="email"
-                          aria-invalid={showFieldError("signerEmail", !isValidEmail(normalizedSignerEmail)) || undefined}
+                          aria-invalid={signerEmailInvalid || undefined}
+                          aria-describedby={signerEmailInvalid ? signerEmailErrorId : undefined}
                           value={signerEmail}
                           onBlur={() => {
                             markTouched("signerEmail");
@@ -361,6 +372,11 @@ export function WaiverSigning({
                           onChange={(event) => setSignerEmail(event.target.value)}
                           placeholder="nome@topflysolutions.com"
                         />
+                        {signerEmailInvalid ? (
+                          <span className="sr-only" id={signerEmailErrorId}>
+                            {"Inserisci un'email valida."}
+                          </span>
+                        ) : null}
                       </label>
                     </div>
                     <div className="checkout-step-actions">

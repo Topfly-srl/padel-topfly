@@ -2,7 +2,7 @@
 
 import { RotateCcw } from "lucide-react";
 import type { PointerEvent } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useId, useRef } from "react";
 
 type SignaturePadProps = {
   value: string;
@@ -29,6 +29,7 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const onChangeRef = useRef(onChange);
   const hasSignature = Boolean(value);
+  const errorId = useId();
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -77,6 +78,25 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
     if (resetCanvas() && value) {
       drawStoredSignature(value);
     }
+  }, [drawStoredSignature, resetCanvas, value]);
+
+  // Scelta D3: al resize/rotazione il canvas cambia dimensione e il buffer va rifatto,
+  // altrimenti il tratto resterebbe stirato. Rifacciamo il buffer alle nuove misure e
+  // ridisegniamo la firma gia' salvata (il tratto e' conservato nel data URL di 'value'),
+  // cosi' non si perde ne' si distorce. Il pulsante 'Cancella' resta sempre visibile.
+  useEffect(() => {
+    const handleViewportChange = () => {
+      if (resetCanvas() && value) {
+        drawStoredSignature(value);
+      }
+    };
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("orientationchange", handleViewportChange);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("orientationchange", handleViewportChange);
+    };
   }, [drawStoredSignature, resetCanvas, value]);
 
   const pointFromEvent = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -158,6 +178,7 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
       <canvas
         ref={canvasRef}
         aria-invalid={showError || undefined}
+        aria-describedby={showError ? errorId : undefined}
         aria-label="Disegna la tua firma"
         className="signature-pad"
         tabIndex={0}
@@ -168,7 +189,7 @@ export function SignaturePad({ value, showError = false, onChange, onTouched }: 
         onPointerUp={stopDrawing}
       />
       {showError ? (
-        <small className="field-hint error">Disegna la firma nel riquadro per continuare.</small>
+        <small className="field-hint error" id={errorId}>Disegna la firma nel riquadro per continuare.</small>
       ) : (
         <small className={`field-hint ${hasSignature ? "success" : ""}`}>
           {hasSignature ? "Firma acquisita." : ""}

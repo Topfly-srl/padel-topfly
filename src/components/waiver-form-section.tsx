@@ -1,6 +1,7 @@
 "use client";
 
 import { FileCheck2, FileText, Shield } from "lucide-react";
+import { useId } from "react";
 import { formatBirthDateInput } from "@/lib/birth-date-input";
 import { SignaturePad } from "@/components/signature-pad";
 
@@ -47,37 +48,31 @@ const consentRows: Array<{
     "birthDate" | "birthPlace" | "signatureImageDataUrl"
   >;
   title: string;
-  shortTitle: string;
   copy: string;
 }> = [
   {
     field: "isAdultConfirmed",
     title: "Confermo di essere maggiorenne",
-    shortTitle: "Sono maggiorenne",
     copy: "Per minori serve autorizzazione della Direzione.",
   },
   {
     field: "privacyAccepted",
     title: "Ho preso visione della privacy",
-    shortTitle: "Ho letto la privacy",
     copy: "Ho ricevuto o potuto leggere l'informativa applicabile.",
   },
   {
     field: "regulationAccepted",
     title: "Ho letto e accetto il regolamento",
-    shortTitle: "Accetto il regolamento",
     copy: "Ho letto, compreso e accetto il regolamento.",
   },
   {
     field: "liabilityAccepted",
     title: "Accetto responsabilità e manleva",
-    shortTitle: "Accetto responsabilità e manleva",
     copy: "Accetto nei limiti previsti dalla legge.",
   },
   {
     field: "specificApprovalAccepted",
     title: "Approvo le clausole specifiche del modulo",
-    shortTitle: "Approvo le clausole del modulo",
     copy: "Approvo le clausole indicate nel modulo.",
   },
 ];
@@ -100,6 +95,10 @@ export function WaiverFormSection({
   const isCheckout = layout === "checkout";
   const fieldInvalid = (field: WaiverField, invalid: boolean) =>
     invalid && (showErrors || Boolean(touched[field]));
+  const birthDateErrorId = useId();
+  const birthPlaceErrorId = useId();
+  const birthDateInvalid = fieldInvalid("birthDate", !birthDateIsValid);
+  const birthPlaceInvalid = fieldInvalid("birthPlace", value.birthPlace.trim().length < 2);
 
   const update = (next: Partial<WaiverFormValue>) => {
     onChange({ ...value, ...next });
@@ -120,22 +119,34 @@ export function WaiverFormSection({
                 placeholder="gg/mm/aaaa"
                 required
                 type="text"
-                aria-invalid={fieldInvalid("birthDate", !birthDateIsValid) || undefined}
+                aria-invalid={birthDateInvalid || undefined}
+                aria-describedby={birthDateInvalid ? birthDateErrorId : undefined}
                 value={value.birthDate}
                 onBlur={() => onTouched?.("birthDate")}
                 onChange={(event) => update({ birthDate: formatBirthDateInput(event.target.value) })}
               />
+              {birthDateInvalid ? (
+                <span className="sr-only" id={birthDateErrorId}>
+                  Inserisci una data di nascita valida nel formato gg/mm/aaaa.
+                </span>
+              ) : null}
             </label>
             <label>
               Luogo di nascita
               <input
                 required
-                aria-invalid={fieldInvalid("birthPlace", value.birthPlace.trim().length < 2) || undefined}
+                aria-invalid={birthPlaceInvalid || undefined}
+                aria-describedby={birthPlaceInvalid ? birthPlaceErrorId : undefined}
                 value={value.birthPlace}
                 onBlur={() => onTouched?.("birthPlace")}
                 onChange={(event) => update({ birthPlace: event.target.value })}
                 placeholder="Pretoro"
               />
+              {birthPlaceInvalid ? (
+                <span className="sr-only" id={birthPlaceErrorId}>
+                  Inserisci il luogo di nascita.
+                </span>
+              ) : null}
             </label>
           </div>
         </div>
@@ -170,7 +181,8 @@ export function WaiverFormSection({
                   type="checkbox"
                 />
                 <span>
-                  <strong>{row.shortTitle}</strong>
+                  <strong>{row.title}</strong>
+                  <small>{row.copy}</small>
                 </span>
               </label>
             ))}
@@ -207,22 +219,34 @@ export function WaiverFormSection({
             placeholder="gg/mm/aaaa"
             required
             type="text"
-            aria-invalid={fieldInvalid("birthDate", !birthDateIsValid) || undefined}
+            aria-invalid={birthDateInvalid || undefined}
+            aria-describedby={birthDateInvalid ? birthDateErrorId : undefined}
             value={value.birthDate}
             onBlur={() => onTouched?.("birthDate")}
             onChange={(event) => update({ birthDate: formatBirthDateInput(event.target.value) })}
           />
+          {birthDateInvalid ? (
+            <span className="sr-only" id={birthDateErrorId}>
+              Inserisci una data di nascita valida nel formato gg/mm/aaaa.
+            </span>
+          ) : null}
         </label>
         <label>
           Luogo di nascita
           <input
             required
-            aria-invalid={fieldInvalid("birthPlace", value.birthPlace.trim().length < 2) || undefined}
+            aria-invalid={birthPlaceInvalid || undefined}
+            aria-describedby={birthPlaceInvalid ? birthPlaceErrorId : undefined}
             value={value.birthPlace}
             onBlur={() => onTouched?.("birthPlace")}
             onChange={(event) => update({ birthPlace: event.target.value })}
             placeholder="Pretoro"
           />
+          {birthPlaceInvalid ? (
+            <span className="sr-only" id={birthPlaceErrorId}>
+              Inserisci il luogo di nascita.
+            </span>
+          ) : null}
         </label>
       </div>
 
