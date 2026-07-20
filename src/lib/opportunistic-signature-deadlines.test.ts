@@ -38,13 +38,18 @@ vi.mock("@/lib/after-response", () => ({
   runAfterResponse: vi.fn(),
 }));
 
-const { processSignatureDeadlines, runOpportunisticSignatureDeadlines } = await import(
-  "@/lib/signature-workflow"
-);
+const {
+  processSignatureDeadlines,
+  runOpportunisticSignatureDeadlines,
+  resetOpportunisticSignatureThrottle,
+} = await import("@/lib/signature-workflow");
 
 describe("runOpportunisticSignatureDeadlines", () => {
   beforeEach(() => {
     h.findMany.mockReset();
+    // Il throttle e' module-level: senza reset il secondo test dello stesso file, che gira nello
+    // stesso secondo, verrebbe frenato prima di toccare il mock.
+    resetOpportunisticSignatureThrottle();
   });
 
   afterEach(() => {
@@ -72,6 +77,23 @@ describe("runOpportunisticSignatureDeadlines", () => {
     await expect(runOpportunisticSignatureDeadlines()).resolves.toEqual({
       reminded: 0,
       canceled: 0,
+      auditPruned: 0,
     });
+  });
+
+  it("frena i giri ravvicinati: il secondo salta senza toccare il DB", async () => {
+    h.findMany.mockResolvedValue([]);
+
+    await runOpportunisticSignatureDeadlines();
+    expect(h.findMany).toHaveBeenCalled();
+
+    h.findMany.mockClear();
+
+    // Secondo giro nello stesso secondo: throttle, nessuna query, esito neutro a due campi.
+    await expect(runOpportunisticSignatureDeadlines()).resolves.toEqual({
+      reminded: 0,
+      canceled: 0,
+    });
+    expect(h.findMany).not.toHaveBeenCalled();
   });
 });

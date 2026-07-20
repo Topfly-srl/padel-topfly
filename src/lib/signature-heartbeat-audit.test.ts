@@ -7,11 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   auditCreate: vi.fn(),
   auditFindFirst: vi.fn(),
+  auditDeleteMany: vi.fn(),
   findMany: vi.fn(),
 }));
 
 vi.mock("@/lib/config", () => ({
-  appConfig: { databaseConfigured: true, timeZone: "Europe/Rome" },
+  appConfig: { databaseConfigured: true, timeZone: "Europe/Rome", auditRetentionMonths: 24 },
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -22,7 +23,7 @@ vi.mock("@/lib/prisma", () => ({
       update: vi.fn(),
       findUnique: vi.fn(),
     },
-    auditLog: { create: h.auditCreate, findFirst: h.auditFindFirst },
+    auditLog: { create: h.auditCreate, findFirst: h.auditFindFirst, deleteMany: h.auditDeleteMany },
     $transaction: vi.fn(),
   },
 }));
@@ -48,6 +49,8 @@ describe("heartbeat cron firme", () => {
   beforeEach(() => {
     h.auditCreate.mockReset();
     h.auditFindFirst.mockReset();
+    h.auditDeleteMany.mockReset();
+    h.auditDeleteMany.mockResolvedValue({ count: 0 });
     h.findMany.mockReset();
 
     // Nessuna pending: la giornata e' tranquilla, il battito e' l'unica traccia possibile.

@@ -23,9 +23,13 @@ const envSchema = z.object({
   MS_GRAPH_CLIENT_ID: z.string().optional(),
   MS_GRAPH_CLIENT_SECRET: z.string().optional(),
   MS_GRAPH_MAILBOX: z.string().optional(),
-  APP_WAIVER_RECIPIENT_EMAIL: z.string().email().default("padel@topflysolutions.com"),
+  APP_WAIVER_RECIPIENT_EMAIL: z.email().default("padel@topflysolutions.com"),
   APP_WAIVER_DOCUMENT_VERSION: z.string().default("padel-waiver-v1"),
   APP_INTERNAL_CRON_SECRET: z.string().optional(),
+  // Ritenzione dell'audit in mesi: oltre questa soglia le righe vengono potate dal giro del cron
+  // (una volta al giorno, col battito). Default 24 mesi: due anni di storico bastano alle
+  // verifiche, senza far crescere la tabella all'infinito.
+  APP_AUDIT_RETENTION_MONTHS: z.coerce.number().int().min(1).default(24),
   APP_OPENING_HOUR: z.coerce.number().int().min(0).max(23).default(defaultOpeningHour),
   APP_CLOSING_HOUR: z.coerce.number().int().min(1).max(24).default(defaultClosingHour),
   DATABASE_URL: z.string().optional(),
@@ -119,6 +123,7 @@ export const appConfig = {
     documentVersion: env.APP_WAIVER_DOCUMENT_VERSION.trim(),
   },
   internalCronSecret: env.APP_INTERNAL_CRON_SECRET?.trim(),
+  auditRetentionMonths: env.APP_AUDIT_RETENTION_MONTHS,
 };
 
 export function isAllowedCompanyEmail(email: string) {

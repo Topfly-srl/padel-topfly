@@ -13,6 +13,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { retryPrismaTransaction } from "@/lib/prisma-retry";
 import { zonedDayBounds } from "@/lib/time";
+import { subMonths } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 
 const minSignatureWindowMs = 24 * 60 * 60_000;
@@ -22,6 +23,23 @@ const signatureCutoffBeforeStartMs = 4 * 60 * 60_000;
 const lastMinuteDeadlineMs = 30 * 60_000;
 const replacementWindowMs = 2 * 60 * 60_000;
 const reminderLeadMs = 6 * 60 * 60_000;
+
+// La pulizia opportunistica parte in testa a ~10 percorsi utente e i suoi due findMany sono
+// quasi sempre a vuoto: il cron ripassa comunque ogni 10 minuti. Un throttle module-level frena
+// i giri ravvicinati: se l'ultimo giro opportunistico e' piu' recente di questa soglia si salta
+// del tutto (nessuna query, esito neutro). Il cron (processSignatureDeadlines diretta) NON passa
+// di qui e non e' mai frenato. Il demo store gira in memoria su un array minuscolo, senza alcuna
+// query ne' round-trip al DB, e i suoi test contano sulla pulizia immediata nello stesso secondo:
+// la' un throttle non porterebbe alcun risparmio e romperebbe solo il determinismo, quindi resta
+// senza.
+const opportunisticThrottleMs = 60_000;
+let lastOpportunisticRunMs: number | null = null;
+
+// I test che esercitano piu' giri opportunistici nello stesso secondo azzerano il throttle con
+// questa funzione dedicata, invece di manomettere l'orologio.
+export function resetOpportunisticSignatureThrottle() {
+  lastOpportunisticRunMs = null;
+}
 
 type BookingWithSignatureDeadlineFields = Pick<
   Booking,
@@ -274,7 +292,7 @@ async function writeHeartbeatIfFirstToday(now: Date) {
     select: { id: true },
   });
 
-  if (existing) return;
+  if (existing) return false;
 
   await prisma.auditLog.create({
     data: {
@@ -283,6 +301,24 @@ async function writeHeartbeatIfFirstToday(now: Date) {
       entityType: "System",
     },
   });
+
+  // La riga e' stata scritta ora: e' il primo giro del cron di oggi.
+  return true;
+}
+
+// L'audit cresce a ogni prenotazione, firma e annullamento e non va mai in pulizia da solo.
+// La potatura viaggia col battito, quindi una sola volta al giorno: cancella le righe piu'
+// vecchie della finestra di ritenzione e restituisce quante ne ha rimosse, per il log della run.
+async function purgeExpiredAuditLogs(now: Date) {
+  const cutoff = subMonths(now, appConfig.auditRetentionMonths);
+
+  const deleted = await prisma.auditLog.deleteMany({
+    where: {
+      createdAt: { lt: cutoff },
+    },
+  });
+
+  return deleted.count;
 }
 
 export async function processSignatureDeadlines(input: {
@@ -292,15 +328,21 @@ export async function processSignatureDeadlines(input: {
   heartbeat?: boolean;
 } = {}) {
   if (!appConfig.databaseConfigured) {
-    return { reminded: 0, canceled: 0 };
+    return { reminded: 0, canceled: 0, auditPruned: 0 };
   }
 
   const now = input.now ?? new Date();
   const limit = input.limit ?? 50;
   const reminderUpperBound = new Date(now.getTime() + reminderLeadMs);
 
+  let auditPruned = 0;
   if (input.heartbeat) {
-    await writeHeartbeatIfFirstToday(now);
+    // La potatura dell'audit resta agganciata al primo battito del giorno: gira una sola volta
+    // al giorno, non a ogni giro del cron da 10 minuti.
+    const firstToday = await writeHeartbeatIfFirstToday(now);
+    if (firstToday) {
+      auditPruned = await purgeExpiredAuditLogs(now);
+    }
   }
 
   const [reminderCandidates, cancelCandidates] = await Promise.all([
@@ -486,7 +528,7 @@ export async function processSignatureDeadlines(input: {
     });
   }
 
-  return { reminded, canceled };
+  return { reminded, canceled, auditPruned };
 }
 
 // La pulizia opportunistica gira in testa alle richieste utente: un errore della manutenzione
@@ -497,6 +539,19 @@ export async function runOpportunisticSignatureDeadlines(input: {
   baseUrl?: string;
   limit?: number;
 } = {}) {
+  // Throttle: se un altro giro opportunistico e' passato da meno della soglia, si salta senza
+  // toccare il DB. Il tempo del throttle e' quello reale dell'orologio, indipendente da input.now
+  // (che serve solo alla logica delle scadenze): due richieste utente ravvicinate non devono
+  // rifare gli stessi findMany a vuoto.
+  const nowMs = Date.now();
+  if (
+    lastOpportunisticRunMs !== null &&
+    nowMs - lastOpportunisticRunMs < opportunisticThrottleMs
+  ) {
+    return { reminded: 0, canceled: 0 };
+  }
+  lastOpportunisticRunMs = nowMs;
+
   try {
     return await processSignatureDeadlines(input);
   } catch (error) {
