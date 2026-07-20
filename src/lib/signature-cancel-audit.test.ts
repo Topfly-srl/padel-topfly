@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sendGuestBookingCanceledEmail, sendOrganizerAutoCanceledEmail } from "@/lib/graph";
 
 // processSignatureDeadlines gira solo col database configurato (in demo mode esce subito), quindi il
 // ramo di auto-annullo si esercita mockando prisma, la coda after-response e retryPrismaTransaction.
@@ -100,6 +101,8 @@ describe("audit auto-annullo firme", () => {
     h.findMany.mockReset();
     h.findUnique.mockReset();
     h.update.mockReset();
+    vi.mocked(sendOrganizerAutoCanceledEmail).mockReset();
+    vi.mocked(sendGuestBookingCanceledEmail).mockReset();
 
     // Nessun candidato reminder; una sola pending scaduta da annullare.
     h.findMany.mockImplementation((args: { where: Record<string, unknown> }) =>
@@ -136,5 +139,18 @@ describe("audit auto-annullo firme", () => {
     expect(cancelAudit.before.status).toBe("PENDING_SIGNATURES");
     expect(cancelAudit.after.status).toBe("CANCELED");
     expect(cancelAudit.after.organizerEmail).toBe("antony@example.com");
+  });
+
+  // Invariante "silenzio per partite iniziate": la pending scaduta con start <= now viene comunque
+  // chiusa (audit scritto), ma NESSUNA mail di annullamento parte a cose fatte. Questo test pinza la
+  // guardia signature-workflow.ts "if (result.booking.start <= now) { ...continue }": disattivandola
+  // (facendo accodare sendOrganizerAutoCanceledEmail + notifyGuestsCanceled) l'asserzione fallisce.
+  it("chiude in silenzio la partita gia' iniziata: nessuna mail di annullamento a posteriori", async () => {
+    const result = await processSignatureDeadlines({ now });
+    await flushAfterTasks();
+
+    expect(result.canceled).toBe(1);
+    expect(sendOrganizerAutoCanceledEmail).not.toHaveBeenCalled();
+    expect(sendGuestBookingCanceledEmail).not.toHaveBeenCalled();
   });
 });

@@ -125,6 +125,42 @@ describe("audit sollecito firme", () => {
     expect(summary.after).toEqual({ reminded: result.reminded, canceled: result.canceled });
   });
 
+  it("ancora ENTRAMBI gli strati di dedup: filtro di query E claim atomico su signatureReminderSentAt: null", async () => {
+    // I due strati si coprono a vicenda, quindi un test end-to-end sul "niente doppio sollecito" resta
+    // verde anche togliendo un solo filtro. Qui li pinziamo singolarmente sulla forma degli argomenti:
+    // rimuovere il filtro dalla query (findMany) O dalla updateMany-claim fa fallire una di queste due
+    // asserzioni, non serve che cadano insieme.
+    h.sendReminder.mockResolvedValue({ status: "SENT" });
+
+    await processSignatureDeadlines({ now });
+    await flushAfterTasks();
+
+    const reminderQuery = h.findMany.mock.calls
+      .map((call) => call[0])
+      .find((args) => args?.where && "signatureReminderSentAt" in args.where);
+    expect(reminderQuery?.where.signatureReminderSentAt).toBeNull();
+
+    const claim = h.updateMany.mock.calls
+      .map((call) => call[0])
+      .find((args) => args?.data?.signatureReminderSentAt);
+    expect(claim?.where?.signatureReminderSentAt).toBeNull();
+  });
+
+  it("non sollecita quando il claim atomico e' perso: updateMany count 0 -> niente mail ne' SENT", async () => {
+    // Ragione d'essere della updateMany-claim: se una run concorrente ha gia' rivendicato la riga
+    // (count 0), questa run non deve mandare il promemoria ne' registrare un invio.
+    h.sendReminder.mockResolvedValue({ status: "SENT" });
+    h.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await processSignatureDeadlines({ now });
+    await flushAfterTasks();
+
+    expect(result.reminded).toBe(0);
+    expect(h.sendReminder).not.toHaveBeenCalled();
+    const actions = h.auditCreate.mock.calls.map((call) => call[0].data.action);
+    expect(actions).not.toContain("BOOKING_SIGNATURE_REMINDER_SENT");
+  });
+
   it("non scrive la riga di sintesi quando la run non fa nulla", async () => {
     // Nessun candidato: ne' reminder ne' cancellazioni, quindi niente riga a vuoto.
     h.findMany.mockResolvedValue([]);
