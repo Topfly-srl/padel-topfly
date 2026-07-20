@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { appConfig } from "@/lib/config";
 import { AppError, jsonResponse, routeError } from "@/lib/errors";
 import { getPublicBaseUrl } from "@/lib/public-url";
+import { timingSafeStringEqual } from "@/lib/secure-compare";
 import { processSignatureDeadlines } from "@/lib/signature-workflow";
 
 function assertCronSecret(request: NextRequest) {
@@ -12,7 +13,9 @@ function assertCronSecret(request: NextRequest) {
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
 
-  if (!token || token !== appConfig.internalCronSecret) {
+  // Confronto a tempo costante: un === trapelerebbe, carattere per carattere, quanto del secret e'
+  // corretto misurando i tempi di risposta. timingSafeStringEqual normalizza la lunghezza via hash.
+  if (!token || !timingSafeStringEqual(token, appConfig.internalCronSecret)) {
     throw new AppError("Non autorizzato.", 401);
   }
 }

@@ -7,6 +7,10 @@
 		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; upgrade-insecure-requests"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# HSTS con max-age PROGRESSIVO: si parte da un giorno, senza includeSubDomains ne preload.
+		# Un max-age lungo con un errore (certificato, sottodominio solo-HTTP) chiuderebbe fuori tutti
+		# fino alla scadenza, quindi si sale con calma. Vedi runbook: dopo qualche settimana -> 31536000.
+		Strict-Transport-Security "max-age=86400"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 	}
@@ -19,7 +23,9 @@
 {$APP_DOMAIN} {
 	import padel_security_headers
 
-	@token_pages path /manage/* /waiver/*
+	# Pagine legate a un token: niente referrer, cosi' il token in URL non trapela verso terzi.
+	# Incluso il link corto /w/* (redirect verso /waiver), che altrimenti perderebbe la protezione.
+	@token_pages path /manage/* /waiver/* /w/*
 	header @token_pages Referrer-Policy "no-referrer"
 
 	handle {
