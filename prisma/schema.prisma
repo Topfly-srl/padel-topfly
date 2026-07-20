@@ -146,6 +146,7 @@ model WaiverSignature {
   @@index([guestEmailStatus])
   @@index([signerEmailStatus])
   @@index([status])
+  @@index([signedAt])
 }
 
 model AdminBlock {

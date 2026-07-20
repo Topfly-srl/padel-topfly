@@ -1228,9 +1228,28 @@ export async function listAdminWaiverSignatures(input: {
     ...(andFilters.length ? { AND: andFilters } : {}),
   };
 
+  // Select esplicito: la lista carica 100 righe e il mapper legge solo i metadati, mai i BLOB
+  // pesanti (pdfBytes, signatureImageBytes). Selezionare SOLO i campi usati evita di trascinarli
+  // via rete a ogni pagina d'archivio. retryWaiverEmail resta a parte: quella carica una firma
+  // sola e i bytes le servono per rimandare il PDF.
   const signatures = await prisma.waiverSignature.findMany({
     where,
-    include: {
+    select: {
+      id: true,
+      bookingId: true,
+      bookingRevision: true,
+      status: true,
+      signerRole: true,
+      signerName: true,
+      signerEmail: true,
+      emailStatus: true,
+      emailError: true,
+      guestEmailStatus: true,
+      guestEmailError: true,
+      signerEmailStatus: true,
+      signerEmailError: true,
+      signedAt: true,
+      canceledAt: true,
       booking: {
         select: {
           start: true,
