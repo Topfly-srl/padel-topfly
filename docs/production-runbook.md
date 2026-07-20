@@ -93,7 +93,10 @@ Da browser normale:
 2. Creare una prenotazione con nome e email aziendale.
 3. Compilare e firmare lo scarico responsabilita' del referente.
 4. Copiare il link firma ospiti e firmare come ospite in finestra anonima/mobile.
-5. Verificare che il PDF firmato arrivi nella mailbox condivisa `padel@topflysolutions.com`.
+5. Verificare che il PDF firmato arrivi nella mailbox condivisa `padel@topflysolutions.com` e,
+   per la firma del referente, che la sua copia arrivi anche alla casella del referente: sono
+   due invii separati, e in `/admin` devono risultare due stati distinti ("PDF Direzione" e
+   "Copia referente").
 6. Verificare che lo slot risulti occupato con solo nome visibile.
 7. Verificare "Le mie prenotazioni".
 8. Modificare la prenotazione e verificare che venga generato un nuovo link ospiti.
@@ -472,7 +475,21 @@ Scarichi responsabilita':
   nuove firme;
 - ogni firma genera un PDF archiviato in Postgres;
 - l'app invia il PDF alla mailbox condivisa Padel tramite Graph `sendMail`;
-- se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`.
+- il PDF del referente parte con DUE `sendMail` distinti, tracciati separatamente: la copia
+  all'archivio legale (`emailStatus`/`emailError`, destinatario `APP_WAIVER_RECIPIENT_EMAIL`) e
+  la copia al referente stesso (`signerEmailStatus`/`signerEmailError`). Le firme ospite non
+  prevedono copia al firmatario: `signerEmailStatus` resta `SKIPPED` senza errore, e la loro
+  mail di conferma e' un'altra cosa ancora (`guestEmailStatus`);
+- un esito non contamina l'altro: l'archivio puo' risultare `SENT` mentre la copia al referente
+  e' `FAILED`, e in quel caso l'area admin mostra "PDF Direzione Inviata" accanto a "Copia
+  referente Da reinviare";
+- se l'invio fallisce, l'admin puo' filtrare gli scarichi per stato e ritentare da `/admin`. Il
+  reinvio manda SOLO le copie non riuscite (`FAILED`, oppure `SKIPPED` con errore, cioe' non
+  partite): quella gia' arrivata non viene duplicata. Se sono a posto entrambe la API risponde
+  409 e il pulsante non compare;
+- le firme antecedenti alla migrazione `20260717025831_waiver_signer_copy_email_status` hanno
+  `signerEmailStatus = SKIPPED` senza errore: la colonna e' nuova, per loro la copia al referente
+  non e' mai stata tracciata e non risulta da reinviare.
 
 Scadenze firme:
 

@@ -118,6 +118,30 @@ manuale dello stesso workflow passa e restituisce `{"ok":true,...}`.
   perche' non sono invitati diretti dell'evento Outlook principale.
 - `/sendMail` e' ammesso per i PDF degli scarichi responsabilita' e per le email ospiti
   legate a firma, modifica e cancellazione.
+- Il PDF dello scarico parte con due `sendMail` separati (archivio legale e copia al
+  firmatario) con esiti tracciati a parte (`emailStatus` e `signerEmailStatus`): un invio
+  riuscito non deve mai coprire l'altro fallito. Chi aggiunge una nuova copia segua lo stesso
+  schema, niente esito unico per piu' destinatari.
+- Alla creazione al referente parte UNA mail sola: quando la prenotazione nasce in attesa firme
+  la copia del suo scarico viaggia allegata all'avviso "Prenotazione in attesa firme", e l'esito
+  di quell'invio finisce comunque in `signerEmailStatus` (l'avviso ha assorbito quella leg, e
+  l'area admin e il reinvio continuano a leggere di li'). L'archivio legale resta separato.
+  Con `playerCount` 1 la prenotazione nasce confermata, l'avviso non parte e il PDF torna ad
+  avere la sua mail: senza avviso non c'e' niente a cui allegarlo.
+- Di conseguenza la leg `signer` ha due proprietari, e il reinvio deve mandare quello giusto:
+  `signerLegCarriesPendingNotice` (src/lib/waiver-email.ts) decide in base allo stato della
+  partita, perche' finche' e' in attesa firme la colonna registra l'avviso e non il PDF nudo.
+  Rimandare il PDF nudo al posto dell'avviso riporta la colonna a SENT e fa sparire il bottone,
+  ma il link firma ospiti non arriva e la partita si auto-annulla lo stesso: reinvio che dice
+  "fatto" avendo recuperato meta' del contenuto. I link non sono ricostruibili (token salvati
+  come hash) e non vanno rigenerati nel reinvio: brucerebbero quelli che il referente ha gia'
+  in mano nell'app. L'avviso reinviato parte senza link e dice dove trovarlo.
+- Le email non usano `--brand` #f31317: bianco su quel rosso da' 4.27:1 e il kicker (12px) e
+  l'etichetta del bottone (15px) non arrivano ai 4.5:1 di AA. Fasce e bottoni usano `--brand-2`
+  #c81317 (5.90:1), che e' comunque del brand vero.
+- Il guscio HTML tiene i 560px con una ghost table `<!--[if mso]>`: il motore Word ignora
+  `max-width` e in cascata il CSS batte l'attributo `width`, quindi un contenitore
+  `width="560" style="width: 100%"` su Outlook desktop si stira per tutta la finestra.
 
 ## Documentazione
 

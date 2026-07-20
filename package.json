@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "preview:emails": "node scripts/preview-emails.mjs",
     "clean": "node -e \"const fs=require('fs'); for (const path of ['.next','coverage','output/playwright','.playwright-cli']) fs.rmSync(path,{recursive:true,force:true});\"",
     "clean:full": "npm run clean && node -e \"const fs=require('fs'); fs.rmSync('node_modules',{recursive:true,force:true});\"",
     "prisma:generate": "prisma generate",

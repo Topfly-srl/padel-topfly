@@ -91,6 +91,12 @@ npm audit --omit=dev
 DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
 ```
 
+### Anteprima Email
+
+`npm run preview:emails` rende con dati finti tutte le email di `src/lib/graph.ts` in
+`output/anteprima-email.html` (`-- --out percorso.html` per cambiare file): non invia niente,
+intercetta le chiamate a Graph e mostra oggetto, destinatario e preheader di ogni messaggio.
+
 ### Pulizia Locale
 
 La cartella locale puo' pesare oltre 1 GB anche se il sito e' piccolo: quasi tutto lo

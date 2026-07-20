@@ -3,6 +3,7 @@ node_modules/
 dist/
 coverage/
 output/playwright/
+output/anteprima-email.html
 .playwright-cli/
 .env
 .env*.local
