@@ -1,5 +1,6 @@
 import type { Booking, Prisma } from "@prisma/client";
 import { runAfterResponse } from "@/lib/after-response";
+import { auditJson } from "@/lib/audit-sanitizer";
 import { appConfig } from "@/lib/config";
 import {
   createOutlookEvent,
@@ -161,8 +162,8 @@ async function audit(
       action: input.action,
       entityType: "Booking",
       entityId: input.entityId,
-      before: input.before === undefined ? undefined : JSON.parse(JSON.stringify(input.before)),
-      after: input.after === undefined ? undefined : JSON.parse(JSON.stringify(input.after)),
+      before: input.before === undefined ? undefined : auditJson(input.before),
+      after: input.after === undefined ? undefined : auditJson(input.after),
     },
   });
 }

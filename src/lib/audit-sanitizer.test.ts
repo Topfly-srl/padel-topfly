@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeAuditValue } from "@/lib/booking-service";
+import { sanitizeAuditValue } from "@/lib/audit-sanitizer";
 
 describe("audit sanitizer", () => {
   it("rimuove token e dettagli tecnici dai payload audit", () => {
