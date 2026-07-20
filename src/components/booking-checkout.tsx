@@ -88,6 +88,9 @@ async function readApiError(response: Response) {
   return json?.error ?? "Richiesta non riuscita.";
 }
 
+// Mostrato quando fetch lancia (rete assente), non quando la risposta e' un errore applicativo.
+const networkErrorText = "Rete non disponibile. Controlla la connessione e riprova.";
+
 function readStoredTokens() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(tokenStorageKey) ?? "[]") as unknown;
@@ -268,51 +271,57 @@ export function BookingCheckout({
     }
 
     setIsSubmitting(true);
-    const response = await fetch(appPath("/api/bookings"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        start: start.toISOString(),
-        end: end.toISOString(),
-        organizerName,
-        organizerEmail: normalizedOrganizerEmail,
-        playerCount,
-        waiver: {
-          birthDate: birthDateIso,
-          birthPlace: waiverForm.birthPlace,
-          isAdultConfirmed: waiverForm.isAdultConfirmed,
-          privacyAccepted: waiverForm.privacyAccepted,
-          regulationAccepted: waiverForm.regulationAccepted,
-          liabilityAccepted: waiverForm.liabilityAccepted,
-          specificApprovalAccepted: waiverForm.specificApprovalAccepted,
-          signatureImageDataUrl: waiverForm.signatureImageDataUrl,
-        },
-      }),
-    });
-    setIsSubmitting(false);
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
-    }
-
-    const json = (await response.json()) as { booking: CreatedBooking };
-    if (json.booking.manageToken) {
-      rememberToken(json.booking.manageToken);
-    }
-    if (json.booking.guestWaiverUrl) {
-      rememberGuestWaiverLink(json.booking.id, json.booking.guestWaiverUrl);
-    }
-
-    setCreatedBooking(json.booking);
-    setNotice(
-      json.booking.status === "PENDING_SIGNATURES"
-        ? null
-        : {
-            type: "success",
-            text: "Prenotazione confermata.",
+    try {
+      const response = await fetch(appPath("/api/bookings"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: start.toISOString(),
+          end: end.toISOString(),
+          organizerName,
+          organizerEmail: normalizedOrganizerEmail,
+          playerCount,
+          waiver: {
+            birthDate: birthDateIso,
+            birthPlace: waiverForm.birthPlace,
+            isAdultConfirmed: waiverForm.isAdultConfirmed,
+            privacyAccepted: waiverForm.privacyAccepted,
+            regulationAccepted: waiverForm.regulationAccepted,
+            liabilityAccepted: waiverForm.liabilityAccepted,
+            specificApprovalAccepted: waiverForm.specificApprovalAccepted,
+            signatureImageDataUrl: waiverForm.signatureImageDataUrl,
           },
-    );
+        }),
+      });
+
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      const json = (await response.json()) as { booking: CreatedBooking };
+      if (json.booking.manageToken) {
+        rememberToken(json.booking.manageToken);
+      }
+      if (json.booking.guestWaiverUrl) {
+        rememberGuestWaiverLink(json.booking.id, json.booking.guestWaiverUrl);
+      }
+
+      setCreatedBooking(json.booking);
+      setNotice(
+        json.booking.status === "PENDING_SIGNATURES"
+          ? null
+          : {
+              type: "success",
+              text: "Prenotazione confermata.",
+            },
+      );
+    } catch {
+      setNotice({ type: "error", text: networkErrorText });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (

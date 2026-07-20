@@ -203,6 +203,9 @@ function errorText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+// Mostrato quando fetch lancia (rete assente), non quando la risposta e' un errore applicativo.
+const networkErrorText = "Rete non disponibile. Controlla la connessione e riprova.";
+
 function syncLabel(status: string, bookingStatus?: string) {
   const isCanceled = bookingStatus === "CANCELED";
   const isPendingSignatures = bookingStatus === "PENDING_SIGNATURES";
@@ -939,51 +942,55 @@ export function BookingApp({
           },
         };
 
-    const response = await fetch(appPath(isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings"), {
-      method: isEditing ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    try {
+      const response = await fetch(appPath(isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings"), {
+        method: isEditing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
-    }
-
-    const json = (await response.json()) as { booking: MyBooking };
-    let nextTokens = localTokens;
-
-    if (!isEditing) {
-      if (json.booking.manageToken) {
-        nextTokens = rememberToken(json.booking.manageToken);
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
       }
-    }
 
-    if (json.booking.guestWaiverUrl) {
-      rememberGuestWaiverLink(json.booking.id, json.booking.guestWaiverUrl);
-    }
+      const json = (await response.json()) as { booking: MyBooking };
+      let nextTokens = localTokens;
 
-    setEditingBookingId(null);
-    setEditingToken(null);
-    setIsBookingFormOpen(false);
-    setBookingFormStep(1);
-    setBookingSubmitAttempted(false);
-    setTouchedFields({});
-    if (!isEditing) {
-      setWaiverForm(emptyWaiverForm);
-      setOrganizerName("");
-      setOrganizerEmail("");
-      setPlayerCount(4);
+      if (!isEditing) {
+        if (json.booking.manageToken) {
+          nextTokens = rememberToken(json.booking.manageToken);
+        }
+      }
+
+      if (json.booking.guestWaiverUrl) {
+        rememberGuestWaiverLink(json.booking.id, json.booking.guestWaiverUrl);
+      }
+
+      setEditingBookingId(null);
+      setEditingToken(null);
+      setIsBookingFormOpen(false);
+      setBookingFormStep(1);
+      setBookingSubmitAttempted(false);
+      setTouchedFields({});
+      if (!isEditing) {
+        setWaiverForm(emptyWaiverForm);
+        setOrganizerName("");
+        setOrganizerEmail("");
+        setPlayerCount(4);
+      }
+      setNotice(
+        json.booking.status === "PENDING_SIGNATURES"
+          ? null
+          : {
+              type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
+              text: bookingSuccessText(json.booking.outlookSyncStatus),
+            },
+      );
+      await refresh(nextTokens);
+    } catch {
+      setNotice({ type: "error", text: networkErrorText });
     }
-    setNotice(
-      json.booking.status === "PENDING_SIGNATURES"
-        ? null
-        : {
-            type: json.booking.outlookSyncStatus === "FAILED" ? "warning" : "success",
-            text: bookingSuccessText(json.booking.outlookSyncStatus),
-          },
-    );
-    await refresh(nextTokens);
   }
 
   async function cancelBooking(booking: MyBooking | AvailabilityBooking) {
@@ -998,20 +1005,24 @@ export function BookingApp({
       return;
     }
 
-    const response = await fetch(appPath(`/api/bookings/${booking.id}`), {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ manageToken }),
-    });
+    try {
+      const response = await fetch(appPath(`/api/bookings/${booking.id}`), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manageToken }),
+      });
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      const json = (await response.json()) as { booking: MyBooking };
+      setNotice({ type: "info", text: cancellationSuccessText(json.booking.outlookSyncStatus) });
+      await refresh();
+    } catch {
+      setNotice({ type: "error", text: networkErrorText });
     }
-
-    const json = (await response.json()) as { booking: MyBooking };
-    setNotice({ type: "info", text: cancellationSuccessText(json.booking.outlookSyncStatus) });
-    await refresh();
   }
 
   function editBooking(booking: MyBooking | AvailabilityBooking) {
@@ -1035,23 +1046,27 @@ export function BookingApp({
   }
 
   async function createBlock() {
-    const response = await fetch(appPath("/api/admin/blocks"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        start: dateTimeFromParts(selectedDate, blockStart).toISOString(),
-        end: dateTimeFromParts(selectedDate, blockEnd).toISOString(),
-        reason: blockReason,
-      }),
-    });
+    try {
+      const response = await fetch(appPath("/api/admin/blocks"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: dateTimeFromParts(selectedDate, blockStart).toISOString(),
+          end: dateTimeFromParts(selectedDate, blockEnd).toISOString(),
+          reason: blockReason,
+        }),
+      });
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      setNotice({ type: "success", text: "Blocco admin creato." });
+      await refresh();
+    } catch {
+      setNotice({ type: "error", text: networkErrorText });
     }
-
-    setNotice({ type: "success", text: "Blocco admin creato." });
-    await refresh();
   }
 
   async function deleteBlock(id: string) {
@@ -1059,29 +1074,37 @@ export function BookingApp({
       return;
     }
 
-    const response = await fetch(appPath(`/api/admin/blocks/${id}`), { method: "DELETE" });
+    try {
+      const response = await fetch(appPath(`/api/admin/blocks/${id}`), { method: "DELETE" });
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      setNotice({ type: "info", text: "Blocco rimosso." });
+      await refresh();
+    } catch {
+      setNotice({ type: "error", text: networkErrorText });
     }
-
-    setNotice({ type: "info", text: "Blocco rimosso." });
-    await refresh();
   }
 
   async function retryWaiverEmail(signatureId: string) {
-    const response = await fetch(appPath(`/api/admin/waivers/${signatureId}/retry-email`), {
-      method: "POST",
-    });
+    try {
+      const response = await fetch(appPath(`/api/admin/waivers/${signatureId}/retry-email`), {
+        method: "POST",
+      });
 
-    if (!response.ok) {
-      setNotice({ type: "error", text: await readApiError(response) });
-      return;
+      if (!response.ok) {
+        setNotice({ type: "error", text: await readApiError(response) });
+        return;
+      }
+
+      setNotice({ type: "success", text: "Invio PDF ritentato." });
+      await refreshAdminWaivers();
+    } catch {
+      setNotice({ type: "error", text: networkErrorText });
     }
-
-    setNotice({ type: "success", text: "Invio PDF ritentato." });
-    await refreshAdminWaivers();
   }
 
   const canSave = !selectionConflict && !isAvailabilityBusy && !isConfirmedSelection && isBookingFormValid;
