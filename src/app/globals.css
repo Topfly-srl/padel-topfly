@@ -1429,8 +1429,7 @@ summary:focus-visible {
   padding: 10px;
 }
 
-.booking-form label,
-.wizard-section label {
+.booking-form label {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -1701,205 +1700,8 @@ summary:focus-visible {
   color: var(--success);
 }
 
-.booking-wizard-backdrop {
-  position: fixed;
-  z-index: 50;
-  inset: 0;
-  display: grid;
-  place-items: end center;
-  background: rgba(20, 22, 27, 0.38);
-}
-
-.booking-wizard {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  width: min(620px, calc(100% - 24px));
-  max-height: min(760px, calc(100dvh - 24px));
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: 0 24px 70px rgba(20, 22, 27, 0.24);
-}
-
-.booking-wizard-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--line);
-  padding: 16px;
-}
-
-.booking-wizard-header h2 {
-  margin: 0;
-  font-size: 1.18rem;
-  font-weight: 550;
-  line-height: 1.2;
-}
-
-.wizard-steps {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  border-bottom: 1px solid var(--line);
-  background: #fbfbfc;
-  padding: 10px 16px;
-}
-
-.wizard-steps button {
-  display: flex;
-  min-width: 0;
-  min-height: 40px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-weight: 500;
-  padding: 0 10px;
-}
-
-.wizard-steps button span {
-  display: inline-flex;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 0.76rem;
-}
-
-.wizard-steps button.active {
-  border-color: rgba(243, 19, 23, 0.2);
-  background: var(--accent-soft);
-  color: var(--brand-2);
-}
-
-.wizard-steps button.active span {
-  background: var(--brand);
-  color: #fff;
-}
-
-.booking-wizard-body {
-  min-height: 0;
-  overflow: auto;
-  padding: 16px;
-}
-
-.wizard-section {
-  display: grid;
-  gap: 14px;
-}
-
-.booking-wizard .selector-row {
-  grid-template-columns: 1fr 1fr;
-}
-
-.booking-wizard .document-stack {
-  grid-template-columns: 1fr 1fr;
-}
-
-.booking-wizard .waiver-head {
-  border: 1px solid rgba(15, 122, 79, 0.14);
-  border-radius: 8px;
-  background: var(--success-soft);
-  padding: 10px;
-}
-
-.booking-wizard .waiver-head .waiver-icon {
-  background: #fff;
-  color: var(--success);
-}
-
-.booking-wizard .document-link {
-  display: flex;
-  grid-template-columns: none;
-  min-height: 40px;
-  border-color: var(--line);
-  background: #fff;
-  color: var(--blue);
-  padding: 8px 10px;
-}
-
-.booking-wizard .document-link small {
-  display: none;
-}
-
-.booking-wizard .waiver-checklist {
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.booking-wizard .checklist-heading {
-  border-bottom: 1px solid var(--line);
-  background: #fbfbfc;
-  padding: 9px 10px;
-}
-
-.booking-wizard .checklist-heading small,
 .compact-waiver .check-row small {
   display: none;
-}
-
-.booking-wizard .check-row {
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: #fff;
-  padding: 9px 10px;
-}
-
-.booking-wizard .check-row:last-child {
-  border-bottom: 0;
-}
-
-.booking-wizard .check-row small {
-  margin-top: 1px;
-}
-
-.booking-wizard-footer {
-  display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 10px;
-  align-items: end;
-  border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
-  padding: 12px 16px;
-}
-
-.booking-wizard-footer > div {
-  display: grid;
-  gap: 8px;
-}
-
-.booking-wizard-footer.with-note {
-  grid-template-columns: 1fr;
-}
-
-.wizard-footer-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.booking-wizard-footer .ghost-button,
-.booking-wizard-footer .primary-button {
-  width: 100%;
-  white-space: nowrap;
-}
-
-.booking-wizard-footer .form-submit-hint {
-  margin: 0;
-  text-align: left;
 }
 
 .primary-button,
@@ -2379,68 +2181,6 @@ summary:focus-visible {
   .signature-pad {
     height: 158px;
   }
-
-  .booking-wizard-backdrop {
-    place-items: stretch;
-    background: var(--background);
-  }
-
-  .booking-wizard {
-    width: 100%;
-    max-height: none;
-    height: 100dvh;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .booking-wizard-header {
-    padding: 14px;
-  }
-
-  .wizard-steps {
-    padding: 9px 14px;
-  }
-
-  .wizard-steps button {
-    justify-content: center;
-    padding: 0 8px;
-  }
-
-  .booking-wizard-body {
-    padding: 14px;
-  }
-
-  .booking-wizard .selector-row {
-    grid-template-columns: 1fr;
-  }
-
-  .booking-wizard .selector-row.compact,
-  .booking-wizard .document-stack {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .booking-wizard .document-link {
-    font-size: 0.78rem;
-  }
-
-  .booking-wizard-footer {
-    grid-template-columns: 1fr 1fr;
-    padding: 10px 14px max(10px, env(safe-area-inset-bottom));
-  }
-
-  .wizard-footer-actions {
-    grid-template-columns: 0.88fr 1.22fr;
-  }
-
-  .booking-wizard-footer .ghost-button,
-  .booking-wizard-footer .primary-button {
-    font-size: 0.9rem;
-  }
-
-  .booking-wizard-footer .form-submit-hint {
-    text-align: left;
-  }
 }
 
 @media (max-width: 360px) {
@@ -2451,8 +2191,6 @@ summary:focus-visible {
   }
 
   .checkout-documents,
-  .booking-wizard .selector-row.compact,
-  .booking-wizard .document-stack,
   .waiver-page-card .selector-row.compact,
   .waiver-page-card .document-stack {
     grid-template-columns: 1fr;
