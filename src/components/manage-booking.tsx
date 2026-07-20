@@ -72,9 +72,9 @@ function readApiError(response: Response) {
 }
 
 function cancellationSuccessText(status: string) {
-  if (status === "SYNCED") return "Prenotazione cancellata. Cancellazione Outlook inviata.";
-  if (status === "FAILED") return "Prenotazione cancellata. Cancellazione Outlook non riuscita.";
-  return "Prenotazione cancellata.";
+  if (status === "SYNCED") return "Prenotazione annullata. Cancellazione Outlook inviata.";
+  if (status === "FAILED") return "Prenotazione annullata. Cancellazione Outlook non riuscita.";
+  return "Prenotazione annullata.";
 }
 
 function isActiveBooking(booking: Pick<MyBooking, "status">) {
@@ -269,7 +269,7 @@ export function ManageBooking({
         <p className="eyebrow">Gestione prenotazione</p>
         {booking ? (
           <>
-            <h1>{isActiveBooking(booking) ? "Gestisci il tuo slot" : "Prenotazione cancellata"}</h1>
+            <h1>{isActiveBooking(booking) ? "Gestisci il tuo slot" : "Prenotazione annullata"}</h1>
             <div className="manage-current">
               <span>{bookingStatusLabel(booking.status)}</span>
               <strong>{localDateTime(new Date(booking.start))}</strong>

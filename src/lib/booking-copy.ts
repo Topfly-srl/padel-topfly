@@ -3,7 +3,7 @@ import type { BookingStatus } from "@prisma/client";
 export function bookingStatusLabel(status: BookingStatus) {
   if (status === "PENDING_SIGNATURES") return "In attesa firme";
   if (status === "CONFIRMED") return "Confermata";
-  return "Cancellata";
+  return "Annullata";
 }
 
 export function bookingDateTime(date: Date) {

@@ -29,6 +29,7 @@ import {
   rangeOverlapsMs,
   type TimelineRange,
 } from "@/lib/timeline-slots";
+import { retriableWaiverEmailLegs, type WaiverMailLeg } from "@/lib/waiver-email";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
   AuditItem,
@@ -82,6 +83,8 @@ type AdminWaiverItem = {
   emailError: string | null;
   guestEmailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
   guestEmailError: string | null;
+  signerEmailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+  signerEmailError: string | null;
   bookingStart: string;
   bookingEnd: string;
   playerCount: number;
@@ -237,9 +240,9 @@ function bookingSuccessText(status: string) {
 }
 
 function cancellationSuccessText(status: string) {
-  if (status === "SYNCED") return "Prenotazione cancellata. Cancellazione Outlook inviata.";
-  if (status === "FAILED") return "Prenotazione cancellata. Cancellazione Outlook non riuscita.";
-  return "Prenotazione cancellata.";
+  if (status === "SYNCED") return "Prenotazione annullata. Cancellazione Outlook inviata.";
+  if (status === "FAILED") return "Prenotazione annullata. Cancellazione Outlook non riuscita.";
+  return "Prenotazione annullata.";
 }
 
 function waiverEmailStatusLabel(status: AdminWaiverItem["emailStatus"]) {
@@ -254,6 +257,11 @@ function waiverEmailStatusTone(status: AdminWaiverItem["emailStatus"]) {
   if (status === "FAILED") return "danger";
   if (status === "SKIPPED") return "neutral";
   return "warning";
+}
+
+function waiverRetryLabel(legs: WaiverMailLeg[]) {
+  if (legs.length > 1) return "Reinvia PDF Direzione e copia referente";
+  return legs[0] === "signer" ? "Reinvia copia al referente" : "Reinvia PDF Direzione";
 }
 
 function waiverSignatureStatusLabel(status: AdminWaiverItem["status"]) {
@@ -1648,54 +1656,63 @@ export function BookingApp({
                 <div className="booking-list">
                   {adminWaivers.length ? (
                     <>
-                      {adminWaivers.map((waiver) => (
-                        <article className="booking-item" key={waiver.id}>
-                          <div>
-                            <strong>{waiver.signerName}</strong>
-                            <span>
-                              {waiver.signerRole === "ORGANIZER" ? "Referente" : "Ospite"} -{" "}
-                              {localDay(new Date(waiver.bookingStart))}, {localTime(new Date(waiver.bookingStart))} -{" "}
-                              {localTime(new Date(waiver.bookingEnd))}
-                            </span>
-                            <small>
-                              <span className={`status-badge ${waiverSignatureStatusTone(waiver.status)}`}>
-                                Firma {waiverSignatureStatusLabel(waiver.status)}
-                              </span>{" "}
-                              <span className={`status-badge ${waiverEmailStatusTone(waiver.emailStatus)}`}>
-                                PDF Direzione {waiverEmailStatusLabel(waiver.emailStatus)}
-                              </span>{" "}
-                              {waiver.signerRole === "GUEST" ? (
-                                <span className={`status-badge ${waiverEmailStatusTone(waiver.guestEmailStatus)}`}>
-                                  Email ospite {waiverEmailStatusLabel(waiver.guestEmailStatus)}
-                                </span>
-                              ) : null}
-                              {waiver.emailError ? ` - PDF: ${waiver.emailError.slice(0, 80)}` : ""}
-                              {waiver.guestEmailError ? ` - Ospite: ${waiver.guestEmailError.slice(0, 80)}` : ""}
-                            </small>
-                          </div>
-                          <div className="item-actions">
-                            <a
-                              className="mini-button"
-                              href={appPath(`/api/admin/waivers/${waiver.id}/pdf`)}
-                              aria-label={`Scarica PDF di ${waiver.signerName}`}
-                              title="Scarica PDF"
-                            >
-                              <Download size={15} />
-                            </a>
-                            {waiver.emailStatus === "FAILED" || waiver.emailStatus === "SKIPPED" ? (
-                              <button
+                      {adminWaivers.map((waiver) => {
+                        const retryLegs = retriableWaiverEmailLegs(waiver);
+
+                        return (
+                          <article className="booking-item" key={waiver.id}>
+                            <div>
+                              <strong>{waiver.signerName}</strong>
+                              <span>
+                                {waiver.signerRole === "ORGANIZER" ? "Referente" : "Ospite"} -{" "}
+                                {localDay(new Date(waiver.bookingStart))}, {localTime(new Date(waiver.bookingStart))} -{" "}
+                                {localTime(new Date(waiver.bookingEnd))}
+                              </span>
+                              <small>
+                                <span className={`status-badge ${waiverSignatureStatusTone(waiver.status)}`}>
+                                  Firma {waiverSignatureStatusLabel(waiver.status)}
+                                </span>{" "}
+                                <span className={`status-badge ${waiverEmailStatusTone(waiver.emailStatus)}`}>
+                                  PDF Direzione {waiverEmailStatusLabel(waiver.emailStatus)}
+                                </span>{" "}
+                                {waiver.signerRole === "ORGANIZER" ? (
+                                  <span className={`status-badge ${waiverEmailStatusTone(waiver.signerEmailStatus)}`}>
+                                    Copia referente {waiverEmailStatusLabel(waiver.signerEmailStatus)}
+                                  </span>
+                                ) : (
+                                  <span className={`status-badge ${waiverEmailStatusTone(waiver.guestEmailStatus)}`}>
+                                    Email ospite {waiverEmailStatusLabel(waiver.guestEmailStatus)}
+                                  </span>
+                                )}
+                                {waiver.emailError ? ` - PDF: ${waiver.emailError.slice(0, 80)}` : ""}
+                                {waiver.signerEmailError ? ` - Referente: ${waiver.signerEmailError.slice(0, 80)}` : ""}
+                                {waiver.guestEmailError ? ` - Ospite: ${waiver.guestEmailError.slice(0, 80)}` : ""}
+                              </small>
+                            </div>
+                            <div className="item-actions">
+                              <a
                                 className="mini-button"
-                                onClick={() => retryWaiverEmail(waiver.id)}
-                                type="button"
-                                aria-label={`Reinvia PDF di ${waiver.signerName}`}
-                                title="Reinvia PDF"
+                                href={appPath(`/api/admin/waivers/${waiver.id}/pdf`)}
+                                aria-label={`Scarica PDF di ${waiver.signerName}`}
+                                title="Scarica PDF"
                               >
-                                <RotateCcw size={15} />
-                              </button>
-                            ) : null}
-                          </div>
-                        </article>
-                      ))}
+                                <Download size={15} />
+                              </a>
+                              {retryLegs.length ? (
+                                <button
+                                  className="mini-button"
+                                  onClick={() => retryWaiverEmail(waiver.id)}
+                                  type="button"
+                                  aria-label={`${waiverRetryLabel(retryLegs)} di ${waiver.signerName}`}
+                                  title={waiverRetryLabel(retryLegs)}
+                                >
+                                  <RotateCcw size={15} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </article>
+                        );
+                      })}
                       {adminWaiverNextCursor ? (
                         <button
                           className="ghost-button full-width"
