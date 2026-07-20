@@ -13,7 +13,7 @@ export default async function AdminPage() {
   }
 
   const initialState = createBookingInitialState(new Date(), appConfig.timeZone);
-  const initialAvailability = await getAvailability(initialState.date);
+  const initialAvailability = await getAvailability(initialState.date, user);
 
   return (
     <BookingApp

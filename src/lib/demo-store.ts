@@ -15,6 +15,7 @@ import {
   normalizeEmail,
   normalizePersonName,
 } from "@/lib/manage-token";
+import { availabilityOrganizerLabel } from "@/lib/booking-copy";
 import { assertDateParam, zonedDayBounds } from "@/lib/time";
 import {
   signatureDeadlineAt,
@@ -318,7 +319,10 @@ function assertDemoAccess(booking: DemoBooking, access: DemoAccess) {
   throw new AppError("Link di gestione non valido o scaduto.", 403);
 }
 
-export async function demoGetAvailability(dateValue: string | null) {
+export async function demoGetAvailability(
+  dateValue: string | null,
+  viewer?: { role?: CurrentUser["role"] | null } | null,
+) {
   demoProcessDeadlines();
   const date = assertDateParam(dateValue);
   const bounds = zonedDayBounds(date);
@@ -335,7 +339,10 @@ export async function demoGetAvailability(dateValue: string | null) {
           isDemoActiveBooking(booking) &&
           rangesOverlap(bounds.start, bounds.end, booking.start, booking.end),
       )
-      .map(bookingToApi),
+      .map((booking) => ({
+        ...bookingToApi(booking),
+        organizerName: availabilityOrganizerLabel(booking.organizerName, viewer?.role),
+      })),
     blocks: blocks
       .filter((block) => rangesOverlap(bounds.start, bounds.end, block.start, block.end))
       .map(blockToApi),

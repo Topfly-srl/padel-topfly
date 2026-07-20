@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { retryPrismaTransaction } from "@/lib/prisma-retry";
 
 type RateLimitAction =
+  | "availability:read"
   | "booking:create"
   | "booking:create-email"
   | "booking:lookup"
@@ -19,6 +20,12 @@ type RateLimitAction =
   | "waiver:sign-email";
 
 const rateLimitPolicy: Record<RateLimitAction, { max: number; windowMs: number }> = {
+  // Lettura del calendario per IP: e' un'app aziendale, molti dipendenti condividono lo stesso IP
+  // di egress NAT e nei picchi (apertura prenotazioni, pausa pranzo) la somma delle navigazioni
+  // per giorno di tutto l'ufficio supererebbe una soglia stretta, restituendo 429 a utenti del
+  // tutto legittimi. Cap generoso perche' la lettura e' economica e non muta nulla, ma comunque
+  // limitato per fermare uno scraping aggressivo da un singolo IP.
+  "availability:read": { max: 300, windowMs: 60_000 },
   "booking:create": { max: 8, windowMs: 5 * 60_000 },
   "booking:create-email": { max: 5, windowMs: 15 * 60_000 },
   "booking:lookup": { max: 40, windowMs: 60_000 },

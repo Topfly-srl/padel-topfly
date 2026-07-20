@@ -100,6 +100,19 @@ describe("request guard", () => {
     ).rejects.toThrow("Troppe richieste ravvicinate.");
   });
 
+  it("limita le letture ravvicinate della disponibilita' per IP", async () => {
+    const { assertRateLimit } = await loadGuard("development");
+    const request = makeRequest({ "x-real-ip": "203.0.113.60" });
+
+    for (let index = 0; index < 300; index += 1) {
+      await assertRateLimit(request, "availability:read");
+    }
+
+    await expect(assertRateLimit(request, "availability:read")).rejects.toThrow(
+      "Troppe richieste ravvicinate.",
+    );
+  });
+
   it("applica il rate limit email anche se cambia IP", async () => {
     const { assertRateLimit } = await loadGuard("development");
 

@@ -86,7 +86,7 @@ describe("public booking flow", () => {
     expect("organizerEmail" in booking).toBe(false);
   });
 
-  it("non espone email nella availability pubblica", async () => {
+  it("non espone email ne' cognome intero nella availability pubblica", async () => {
     const slot = futureSlot(1, 10);
     await createDemoBooking({
       ...slot,
@@ -97,9 +97,37 @@ describe("public booking flow", () => {
     const availability = await demoGetAvailability(dateKey(slot.start));
 
     expect(availability.bookings).toHaveLength(1);
-    expect(availability.bookings[0].organizerName).toBe("Mario Rossi");
+    expect(availability.bookings[0].organizerName).toBe("Mario R.");
+    expect(availability.bookings[0].organizerName).not.toBe("Mario Rossi");
     expect(availability.bookings[0].status).toBe("PENDING_SIGNATURES");
     expect("organizerEmail" in availability.bookings[0]).toBe(false);
+  });
+
+  it("mostra il nome intero nella availability quando la legge un admin", async () => {
+    const slot = futureSlot(1, 10);
+    await createDemoBooking({
+      ...slot,
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@example.com",
+    });
+
+    const availability = await demoGetAvailability(dateKey(slot.start), adminUser);
+
+    expect(availability.bookings).toHaveLength(1);
+    expect(availability.bookings[0].organizerName).toBe("Mario Rossi");
+  });
+
+  it("il lookup del proprietario mostra il nome completo", async () => {
+    const slot = futureSlot(1, 10);
+    const booking = await createDemoBooking({
+      ...slot,
+      organizerName: "Mario Rossi",
+      organizerEmail: "mario@example.com",
+    });
+
+    const [found] = await demoLookupBookings([booking.manageToken!]);
+
+    expect(found.organizerName).toBe("Mario Rossi");
   });
 
   it("annulla automaticamente una pending incompleta dopo la deadline", async () => {

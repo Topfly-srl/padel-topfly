@@ -1,6 +1,7 @@
 import type { Booking, Prisma, WaiverEmailStatus } from "@prisma/client";
 import { BookingStatus, Prisma as PrismaNamespace } from "@prisma/client";
 import { runAfterResponse } from "@/lib/after-response";
+import { auditJson } from "@/lib/audit-sanitizer";
 import { AppError } from "@/lib/errors";
 import {
   bookingPolicy,
@@ -8,6 +9,7 @@ import {
   rangesOverlap,
   validateBookingPolicy,
 } from "@/lib/booking-policy";
+import { availabilityOrganizerLabel } from "@/lib/booking-copy";
 import { appConfig } from "@/lib/config";
 import {
   demoCancelBooking,
@@ -147,36 +149,6 @@ function serializeBlock(block: {
     end: block.end.toISOString(),
     reason: block.reason,
   };
-}
-
-const hiddenAuditFields = new Set([
-  "manageTokenHash",
-  "manageTokenExpiresAt",
-  "guestWaiverTokenHash",
-  "guestWaiverTokenExpiresAt",
-  "outlookEventId",
-  "outlookSyncError",
-]);
-
-export function sanitizeAuditValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sanitizeAuditValue);
-  }
-
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => !hiddenAuditFields.has(key))
-        .map(([key, nestedValue]) => [key, sanitizeAuditValue(nestedValue)]),
-    );
-  }
-
-  return value;
-}
-
-function auditJson(value: unknown) {
-  const serializableValue = JSON.parse(JSON.stringify(value));
-  return sanitizeAuditValue(serializableValue) as Prisma.InputJsonValue;
 }
 
 async function audit(
@@ -462,9 +434,14 @@ function assertBookingAccess(booking: Booking, access: BookingAccess): AuditActo
   throw new AppError("Link di gestione non valido o scaduto.", 403);
 }
 
-export async function getAvailability(dateValue: string | null) {
+// Il calendario e' pubblico, ma l'admin (unico contesto autenticato che rende questa griglia)
+// deve vedere il nome intero: passiamo il viewer cosi' la stessa query serve entrambi i pubblici
+// senza esporre il cognome a chi non e' admin.
+export type AvailabilityViewer = { role?: CurrentUser["role"] | null } | null;
+
+export async function getAvailability(dateValue: string | null, viewer?: AvailabilityViewer) {
   if (!appConfig.databaseConfigured) {
-    return demoGetAvailability(dateValue);
+    return demoGetAvailability(dateValue, viewer);
   }
 
   await runOpportunisticSignatureDeadlines();
@@ -507,7 +484,10 @@ export async function getAvailability(dateValue: string | null) {
       ...bookingPolicy,
       allowedDomain: appConfig.allowedDomain,
     },
-    bookings: bookings.map(serializeBooking),
+    bookings: bookings.map((booking) => ({
+      ...serializeBooking(booking),
+      organizerName: availabilityOrganizerLabel(booking.organizerName, viewer?.role),
+    })),
     blocks: blocks.map(serializeBlock),
   };
 }
