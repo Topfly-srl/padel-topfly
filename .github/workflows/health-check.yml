@@ -1,0 +1,43 @@
+name: Health Check
+
+# Sonda esterna: colpisce la home e l'API disponibilita' ogni 15 minuti. Se una delle due non
+# risponde 2xx entro il timeout, il workflow fallisce e GitHub notifica chi segue il repo (vedi
+# runbook). Serve anche a tenere vivo lo scheduling del repo: GitHub sospende i cron dopo 60
+# giorni senza attivita', quindi un repo tranquillo perderebbe pure il cron delle firme.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: health-check
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe production endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Curl home and availability
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Data odierna calcolata a runtime: l'API disponibilita' vuole ?date=YYYY-MM-DD.
+          today="$(date -u +%Y-%m-%d)"
+
+          echo "Probing home page..."
+          curl --fail --silent --show-error --max-time 15 \
+            https://padel.topflysolutions.com > /dev/null
+
+          echo "Probing availability API for ${today}..."
+          curl --fail --silent --show-error --max-time 15 \
+            "https://padel.topflysolutions.com/api/availability?date=${today}" > /dev/null
+
+          echo "Both endpoints healthy."

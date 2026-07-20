@@ -55,11 +55,57 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
+  integration:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://padel:padel@localhost:5432/padel_topfly
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: padel
+          POSTGRES_PASSWORD: padel
+          POSTGRES_DB: padel_topfly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U padel -d padel_topfly"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Schema reale sul Postgres del service: le stesse migration che girano in produzione,
+      # incluso l'indice UNIQUE parziale creato via SQL grezzo su cui si appoggia la dedup firme.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Integration tests
+        run: npm run test:integration
+
   deploy:
     name: Deploy to Lightsail
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: ci
+    needs: [ci, integration]
     if: github.event_name == 'workflow_dispatch' || vars.PRODUCTION_AUTO_DEPLOY == 'true'
 
     steps:
@@ -131,6 +177,16 @@ jobs:
           git pull --ff-only origin main
           echo "Remote commit: $(git rev-parse --short HEAD)"
 
+          # Backup notturno: installa lo script in posizione stabile e il cron.
+          # Idempotente: install e tee sovrascrivono a ogni deploy.
+          sudo install -m 755 scripts/backup.sh /usr/local/bin/padel-backup.sh
+          sudo tee /etc/cron.d/padel-backup >/dev/null <<'CRON'
+          # Backup notturno Postgres Padel TOPFLY. Gestito dal deploy, non modificare a mano.
+          # min ora * * * utente comando
+          15 3 * * * root /usr/local/bin/padel-backup.sh >> /var/log/padel-backup.log 2>&1
+          CRON
+          sudo chmod 644 /etc/cron.d/padel-backup
+
           if [ -f .env.production ]; then
             cp -p .env.production "${BACKUP_DIR}/env.production.$(date +%Y%m%d-%H%M%S).bak"
 
@@ -138,11 +194,16 @@ jobs:
               key="$1"
               value="$2"
 
-              if grep -q "^${key}=" .env.production; then
-                sed -i "s|^${key}=.*|${key}=\"${value}\"|" .env.production
-              else
-                printf '\n%s="%s"\n' "${key}" "${value}" >> .env.production
-              fi
+              # Niente sed sulla riga: APP_INTERNAL_CRON_SECRET ha valore arbitrario
+              # e i caratteri | & \ romperebbero o corromperebbero la sostituzione
+              # (| chiude il comando, & diventa l'intero match, \ introduce escape).
+              # Togliamo la riga esistente con grep (la chiave non ha metacaratteri
+              # regex) e riscriviamo il valore con printf %s, che non interpreta nulla.
+              tmp="$(mktemp)"
+              grep -v "^${key}=" .env.production > "${tmp}" || true
+              printf '%s="%s"\n' "${key}" "${value}" >> "${tmp}"
+              cat "${tmp}" > .env.production
+              rm -f "${tmp}"
             }
 
             set_env_key APP_ENV production

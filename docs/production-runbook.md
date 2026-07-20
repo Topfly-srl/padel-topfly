@@ -64,6 +64,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 - Repository variable `PRODUCTION_AUTO_DEPLOY=false`: il push su `main` esegue CI, poi il deploy
   Lightsail va lanciato manualmente se il job deploy risulta skipped.
 - Backup pre-deploy salvato fuori repo in `/var/backups/padel-topfly`.
+- Backup notturno automatico del database (`scripts/backup.sh` via cron `03:15`, dump gzippati con
+  retention 14 giorni), installato dal deploy in `/etc/cron.d/padel-backup`.
 - Container `app` hardenizzato con utente non-root, `no-new-privileges` e capabilities rimosse.
 - API sensibili con `Cache-Control: no-store`.
 - Controllo Origin/Referer attivo sulle mutazioni in produzione.
@@ -77,7 +79,8 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 
 ## Cosa Non E' Ancora Fatto
 
-- Backup automatici non ancora configurati.
+- Backup notturno del database configurato (cron `03:15`, vedi "Backup E Ripristino"); resta
+  da abilitare in console gli snapshot automatici Lightsail per una copia fuori dalla macchina.
 - Monitoraggio/alerting non ancora configurato.
 - Verifica che il permesso Graph `Mail.Send` sia limitato alla sola mailbox Padel.
 - Limitazione dei permessi Graph Application alla sola mailbox Padel tramite Exchange
@@ -292,9 +295,12 @@ congelare i deploy da `main`.
 4. crea un dump Postgres in `/var/backups/padel-topfly` se il container Postgres e'
    gia' disponibile; altrimenti segnala il backup skipped;
 5. esegue `git pull --ff-only origin main`;
-6. ricostruisce Docker Compose;
-7. riavvia Caddy per ricaricare eventuali modifiche al proxy/header;
-8. esegue health check su <https://padel.topflysolutions.com> e su
+6. installa/aggiorna in modo idempotente lo script di backup notturno in
+   `/usr/local/bin/padel-backup.sh` e il cron `/etc/cron.d/padel-backup` (vedi
+   "Backup E Ripristino");
+7. ricostruisce Docker Compose;
+8. riavvia Caddy per ricaricare eventuali modifiche al proxy/header;
+9. esegue health check su <https://padel.topflysolutions.com> e su
    `/api/availability`, verificando anche `Cache-Control: no-store`.
 
 Le migrazioni Prisma NON girano nel workflow: le applica `docker/entrypoint.sh` con
@@ -406,7 +412,8 @@ Costo atteso dopo eventuale periodo gratuito: circa il costo mensile del piano L
 3. Verificare mail conferma e mail cancellazione Outlook dopo ogni patch Graph.
 4. Verificare che `Mail.Send` sia presente ma limitato alla sola mailbox Padel.
 5. Limitare `Calendars.ReadWrite` alla mailbox `padel@topflysolutions.com`.
-6. Valutare snapshot manuale o backup database schedulato.
+6. Abilitare gli snapshot automatici Lightsail in console (il backup database schedulato e' gia'
+   attivo, vedi "Backup E Ripristino").
 7. Preparare messaggio interno con link e regole d'uso.
 
 ## Microsoft Graph
@@ -511,6 +518,13 @@ Scadenze firme:
   corpo non riporta `ok:true`;
 - ogni run che sollecita o annulla almeno una pending scrive una riga di audit riassuntiva
   (`SIGNATURE_DEADLINES_RUN`, con `reminded`/`canceled`); le run a vuoto non scrivono nulla;
+- battito giornaliero: solo la route interna del cron passa `heartbeat: true`, quindi al primo
+  giro del giorno (confini calcolati con il timezone dell'app) viene scritta UNA riga
+  `SIGNATURE_DEADLINES_HEARTBEAT` (`actorEmail` `system`, `entityType` `System`), con guardia
+  sulla riga di oggi per non duplicarla ai giri successivi. La pulizia opportunistica NON scrive
+  il battito: se lo facesse, il traffico utente lo scriverebbe al posto del cron e mascherebbe un
+  cron fermo. Il battito e' quindi la traccia che il cron ha girato anche in una giornata senza
+  pending, quando `SIGNATURE_DEADLINES_RUN` non comparirebbe mai;
 - se il workflow non gira, l'app fa comunque pulizia opportunistica su calendario, lookup e
   firma ospiti, ma ingoia i propri errori per non far fallire la richiesta utente che la ospita.
 
@@ -520,6 +534,18 @@ Diagnosi cron fermo:
   scadenza senza essere annullate ne' sollecitate. Una prenotazione ancora `PENDING_SIGNATURES`
   con `signatureDeadlineAt` passata da piu' cicli da 10 minuti indica un cron `Signature
   Deadlines` fermo o in errore;
+- conferma piu' diretta, indipendente dal fatto che ci siano pending: se nella pagina admin
+  audit manca la riga `SIGNATURE_DEADLINES_HEARTBEAT` di oggi, il cron non ha girato nemmeno una
+  volta oggi. A DB la query e':
+
+  ```sql
+  SELECT "createdAt" FROM "AuditLog"
+  WHERE action = 'SIGNATURE_DEADLINES_HEARTBEAT'
+  ORDER BY "createdAt" DESC LIMIT 5;
+  ```
+
+  Il battito piu' recente e' la conferma dell'ultimo giorno in cui il cron ha effettivamente
+  chiamato la route interna; se e' di ieri o piu' vecchio, il cron e' fermo;
 - conferma: nell'audit non compaiono righe `SIGNATURE_DEADLINES_RUN` recenti, oppure la lista
   run mostra esecuzioni mancanti o rosse:
 
@@ -538,6 +564,24 @@ Diagnosi cron fermo:
   Il log deve chiudersi con `{"ok":true,...}`. Una pending scaduta viene comunque chiusa alla
   prima richiesta utente grazie alla pulizia opportunistica, ma non e' garanzia sufficiente se su
   quel percorso non arriva traffico: il cron resta la via affidabile.
+
+Health check esterno:
+
+- workflow `.github/workflows/health-check.yml`, schedule ogni 15 minuti piu' `workflow_dispatch`;
+- sonda due endpoint con `curl --fail --silent --max-time 15`: la home
+  `https://padel.topflysolutions.com` e l'API disponibilita'
+  `https://padel.topflysolutions.com/api/availability?date=<oggi>` (la data odierna e' calcolata
+  a runtime nel job). Se uno dei due non risponde 2xx entro 15 secondi, il job esce con codice 1
+  e la run risulta rossa;
+- notifica: una run fallita e' un workflow fallito, quindi GitHub manda la notifica standard di
+  Actions a chi segue il repo (watch su Actions / owner). Non c'e' integrazione esterna: la
+  notifica arriva dal repo stesso, quindi chi deve accorgersene deve avere le notifiche Actions
+  attive;
+- effetto collaterale utile: il workflow tiene vivo lo scheduling del repo. GitHub sospende i
+  cron dopo 60 giorni senza attivita', quindi una sonda che gira ogni 15 minuti evita che anche
+  il cron `Signature Deadlines` venga spento su un repo tranquillo;
+- rilancio manuale: `gh workflow run "Health Check" --ref main`, poi
+  `gh run watch <run-id> --exit-status`.
 
 Privacy e retention:
 
@@ -591,9 +635,46 @@ sudo docker compose -f docker-compose.production.yml exec -T app node - <<'JS'
 JS
 ```
 
-## Backup Database
+## Backup E Ripristino
 
-Prima di un deploy importante creare un dump Postgres:
+### Dove Stanno I Dump E Con Che Retention
+
+- Tutti i dump vivono in `/var/backups/padel-topfly` sull'istanza Lightsail (fuori dal
+  repo). Sono file `padel_topfly_AAAAMMGG-HHMMSS.sql.gz`.
+- Backup notturno automatico: `scripts/backup.sh`, installato dal deploy in
+  `/usr/local/bin/padel-backup.sh` e schedulato via `/etc/cron.d/padel-backup` alle
+  `03:15` come utente `root`. L'output di ogni run viene appeso a
+  `/var/log/padel-backup.log`.
+- Lo script fa `pg_dump` (stesso comando del pre-deploy), lo comprime con `gzip` e pota
+  automaticamente i dump piu' vecchi di 14 giorni. Con una riga di log a notte, il file
+  di log resta piccolo e non serve logrotate.
+- I dump pre-deploy creati dal workflow `Deploy Production` finiscono nella stessa
+  cartella e seguono la stessa retention (li pota il cron notturno).
+
+Attenzione: questi dump vivono sulla stessa macchina che dovrebbero proteggere. Per una
+copia fuori dalla macchina servono gli snapshot Lightsail (vedi in fondo).
+
+### Verificare Che Il Backup Notturno Giri
+
+```bash
+ls -lh /var/backups/padel-topfly | tail
+sudo tail -n 20 /var/log/padel-backup.log
+cat /etc/cron.d/padel-backup
+```
+
+Ci si aspetta un dump `.sql.gz` nuovo ogni notte e una riga di log `Dump completato`
+per ciascuna esecuzione.
+
+### Backup Manuale Immediato
+
+Prima di un deploy importante, o per una copia al volo, si puo' lanciare lo stesso
+script del cron:
+
+```bash
+sudo /usr/local/bin/padel-backup.sh
+```
+
+In alternativa, il dump manuale grezzo (non compresso):
 
 ```bash
 cd /opt/padel-topfly
@@ -604,6 +685,78 @@ sudo docker compose -f docker-compose.production.yml exec -T postgres \
   > "$BACKUP_DIR/padel_topfly_$(date +%Y%m%d-%H%M%S).sql" < /dev/null
 ls -lh "$BACKUP_DIR" | tail
 ```
+
+### Procedura Di Restore (Da Provare Una Volta)
+
+Un backup non provato non e' un backup. La procedura sotto ripristina un dump in un
+database di PROVA dentro lo stesso container Postgres, senza toccare il database di
+produzione, e verifica che le migrazioni Prisma tornino.
+
+1. Scegliere il dump da ripristinare:
+
+   ```bash
+   ls -lh /var/backups/padel-topfly
+   DUMP=/var/backups/padel-topfly/padel_topfly_AAAAMMGG-HHMMSS.sql.gz
+   ```
+
+2. Creare un database di prova (NON toccare `padel_topfly`):
+
+   ```bash
+   cd /opt/padel-topfly
+   sudo docker compose -f docker-compose.production.yml exec -T postgres \
+     psql -U padel -d postgres -c 'CREATE DATABASE padel_restore_test;' < /dev/null
+   ```
+
+3. Caricare il dump gzippato nel database di prova:
+
+   ```bash
+   gunzip -c "$DUMP" | sudo docker compose -f docker-compose.production.yml exec -T \
+     postgres psql -U padel -d padel_restore_test
+   ```
+
+   (Per un dump grezzo `.sql` non compresso usare `cat "$DUMP" | ...` al posto di
+   `gunzip -c`.)
+
+4. Verificare lo stato delle migrazioni Prisma sul database ripristinato. Si riusa il
+   `DATABASE_URL` del container app cambiando solo il nome del database, cosi' non si
+   espone la password:
+
+   ```bash
+   sudo docker compose -f docker-compose.production.yml exec -T app sh -lc '
+     RESTORE_URL="$(printf "%s" "$DATABASE_URL" | sed "s#/padel_topfly#/padel_restore_test#")"
+     DATABASE_URL="$RESTORE_URL" npx prisma migrate status' < /dev/null
+   ```
+
+   Atteso: `Database schema is up to date!`. Se compaiono migrazioni non applicate o un
+   mismatch, il dump o lo schema non sono allineati: indagare prima di considerare il
+   backup valido.
+
+5. Eliminare il database di prova:
+
+   ```bash
+   sudo docker compose -f docker-compose.production.yml exec -T postgres \
+     psql -U padel -d postgres -c 'DROP DATABASE padel_restore_test;' < /dev/null
+   ```
+
+Raccomandazione: eseguire questa procedura almeno una volta subito dopo aver abilitato
+il backup notturno e annotare qui sotto l'esito (data, dump usato, output di
+`prisma migrate status`). Ripeterla dopo cambi importanti allo schema.
+
+Esito ultimo test di restore: _da compilare al primo test._
+
+### Snapshot Automatici Lightsail (Azione Committente)
+
+I dump `.sql.gz` proteggono i dati ma restano sul disco dell'istanza: se si perde la
+macchina si perdono anche i backup. Per una copia fuori dalla macchina, abilitare gli
+snapshot automatici dell'istanza dalla console AWS Lightsail:
+
+- Lightsail, istanza `padel-topfly`, scheda `Snapshots`;
+- attivare `Automatic snapshots` scegliendo un orario notturno;
+- gli snapshot coprono l'intero disco (DB, volumi Docker, `.env.production`) e vivono
+  fuori dall'istanza.
+
+Questa e' un'azione manuale in console a carico del committente, non automatizzabile dal
+deploy.
 
 Non usare `docker compose down -v` in produzione: elimina il volume Postgres.
 
