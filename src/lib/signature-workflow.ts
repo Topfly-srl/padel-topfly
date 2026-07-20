@@ -12,6 +12,8 @@ import {
 } from "@/lib/graph";
 import { prisma } from "@/lib/prisma";
 import { retryPrismaTransaction } from "@/lib/prisma-retry";
+import { zonedDayBounds } from "@/lib/time";
+import { formatInTimeZone } from "date-fns-tz";
 
 const minSignatureWindowMs = 24 * 60 * 60_000;
 const maxSignatureWindowMs = 4 * 24 * 60 * 60_000;
@@ -255,10 +257,39 @@ export function sendPendingSignatureNotice(input: {
   );
 }
 
+// Battito del cron: la route interna passa heartbeat true, cosi' anche una giornata senza
+// pending lascia una traccia. La pulizia opportunistica NON lo passa: quel traffico e' legato
+// alle richieste utente e maschererebbe un cron fermo scrivendo il battito al posto suo.
+async function writeHeartbeatIfFirstToday(now: Date) {
+  const today = formatInTimeZone(now, appConfig.timeZone, "yyyy-MM-dd");
+  const { start, end } = zonedDayBounds(today);
+
+  // Guardia sulla riga di oggi: un solo battito al giorno, non uno ogni 10 minuti.
+  const existing = await prisma.auditLog.findFirst({
+    where: {
+      action: "SIGNATURE_DEADLINES_HEARTBEAT",
+      entityType: "System",
+      createdAt: { gte: start, lt: end },
+    },
+    select: { id: true },
+  });
+
+  if (existing) return;
+
+  await prisma.auditLog.create({
+    data: {
+      actorEmail: "system",
+      action: "SIGNATURE_DEADLINES_HEARTBEAT",
+      entityType: "System",
+    },
+  });
+}
+
 export async function processSignatureDeadlines(input: {
   now?: Date;
   baseUrl?: string;
   limit?: number;
+  heartbeat?: boolean;
 } = {}) {
   if (!appConfig.databaseConfigured) {
     return { reminded: 0, canceled: 0 };
@@ -267,6 +298,10 @@ export async function processSignatureDeadlines(input: {
   const now = input.now ?? new Date();
   const limit = input.limit ?? 50;
   const reminderUpperBound = new Date(now.getTime() + reminderLeadMs);
+
+  if (input.heartbeat) {
+    await writeHeartbeatIfFirstToday(now);
+  }
 
   const [reminderCandidates, cancelCandidates] = await Promise.all([
     prisma.booking.findMany({

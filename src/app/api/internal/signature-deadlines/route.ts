@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
     assertCronSecret(request);
     const result = await processSignatureDeadlines({
       baseUrl: getPublicBaseUrl(request),
+      // Solo il cron passa heartbeat: la pulizia opportunistica no, altrimenti il traffico
+      // utente scriverebbe il battito al posto del cron e ne mascherebbe l'arresto.
+      heartbeat: true,
     });
 
     return jsonResponse({ ok: true, ...result });
