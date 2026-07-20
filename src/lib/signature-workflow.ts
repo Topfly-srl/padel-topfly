@@ -201,12 +201,17 @@ export async function markBookingConfirmedIfComplete(
 
 export async function syncConfirmedBooking(input: {
   booking: Booking;
-  baseUrl?: string;
-  guestWaiverToken?: string;
+  manageUrl?: string;
 }) {
-  void input.baseUrl;
-  void input.guestWaiverToken;
-  const result = await createOutlookEvent(input.booking, organizerContact(input.booking));
+  // A firme complete l'unica azione che serve nell'invito e' gestire o annullare: il link firma
+  // ospiti non avrebbe piu' nessuno da mandare a firmare. Dove il token di gestione non e'
+  // disponibile in chiaro (conferma innescata dall'ultima firma ospite) l'invito resta senza
+  // bottoni, ma il referente ha comunque il link nella mail di prenotazione.
+  const result = await createOutlookEvent(
+    input.booking,
+    organizerContact(input.booking),
+    input.manageUrl,
+  );
 
   return prisma.booking.update({
     where: { id: input.booking.id },

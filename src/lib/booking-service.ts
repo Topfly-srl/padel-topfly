@@ -21,12 +21,12 @@ import {
   demoUpdateBooking,
 } from "@/lib/demo-store";
 import {
-  createOutlookEvent,
   deleteOutlookEvent,
   sendGuestBookingCanceledEmail,
   sendGuestBookingUpdatedEmail,
-  sendOrganizerAdminCanceledEmail,
+  sendOrganizerBookingCanceledEmail,
   updateOutlookEvent,
+  type BookingCancelActor,
 } from "@/lib/graph";
 import {
   createManageToken,
@@ -44,6 +44,7 @@ import {
   createGuestWaiverToken,
   createWaiverSignature,
   guestWaiverTokenData,
+  sendOrganizerPendingSignatureWithWaiver,
   sendWaiverSignatureEmail,
   summarizeWaiverSignatures,
   validatePlayerCount,
@@ -209,19 +210,9 @@ function bookingOrganizer(booking: Booking) {
   };
 }
 
-async function syncBooking(
-  booking: Booking,
-  mode: "create" | "update",
-  manageToken?: string,
-  baseUrl?: string,
-  guestWaiverToken?: string,
-) {
+async function syncBooking(booking: Booking, manageToken?: string, baseUrl?: string) {
   const manageUrl = buildManageUrl(baseUrl, booking.id, manageToken);
-  const guestWaiverUrl = buildGuestWaiverUrl(baseUrl, booking.id, guestWaiverToken);
-  const result =
-    mode === "create"
-      ? await createOutlookEvent(booking, bookingOrganizer(booking), manageUrl, guestWaiverUrl)
-      : await updateOutlookEvent(booking, bookingOrganizer(booking), manageUrl, guestWaiverUrl);
+  const result = await updateOutlookEvent(booking, bookingOrganizer(booking), manageUrl);
 
   return prisma.booking.update({
     where: { id: booking.id },
@@ -322,16 +313,19 @@ async function notifyGuestSignersOfCancellation(
   );
 }
 
-// L'admin che annulla puo' non essere il referente: in quel caso l'organizzatore va avvisato,
-// senza esporre l'identita' personale di chi ha annullato.
-function isAdminCancelByNonOrganizer(access: BookingAccess, booking: Booking) {
-  if (access.adminUser?.role !== "ADMIN") return false;
-  return normalizeEmail(access.adminUser.email) !== normalizeEmail(booking.organizerEmail);
+// Il referente e' l'unico a non sapere nulla del proprio annullamento: gli ospiti che avevano
+// firmato ricevono la loro mail, lui no. Riceve sempre una ricevuta, con testo diverso a seconda
+// di chi ha annullato; l'identita' personale dell'admin non compare mai, e' un requisito.
+function bookingCancelActor(access: BookingAccess, booking: Booking): BookingCancelActor {
+  if (access.adminUser?.role !== "ADMIN") return "organizer";
+  return normalizeEmail(access.adminUser.email) === normalizeEmail(booking.organizerEmail)
+    ? "organizer"
+    : "admin";
 }
 
-async function notifyOrganizerOfAdminCancellation(booking: Booking) {
+async function notifyOrganizerOfCancellation(booking: Booking, actor: BookingCancelActor) {
   try {
-    await sendOrganizerAdminCanceledEmail({ booking });
+    await sendOrganizerBookingCanceledEmail({ booking, actor });
   } catch {
     // La cancellazione prenotazione resta valida anche se una notifica accessoria fallisce.
   }
@@ -655,26 +649,46 @@ export async function createBooking(input: PublicBookingInput) {
     ),
   );
 
-  // Email e Microsoft Graph sono step lenti: li eseguiamo dopo la risposta.
+  // Email e Microsoft Graph sono step lenti: li eseguiamo dopo la risposta. Una prenotazione da
+  // un giocatore nasce confermata: l'avviso di attesa firme non parte, quindi il PDF al
+  // referente ha bisogno della sua mail come sempre. Negli altri casi l'avviso si porta dietro
+  // il PDF e la copia separata sparisce: al referente arriva una mail sola.
+  const pendingNoticeCarriesWaiver = result.booking.status === "PENDING_SIGNATURES";
   runAfterResponse(async () => {
-    await sendWaiverSignatureEmail(result.organizerWaiverId);
+    // L'archivio ha il suo try, e le due mail restano in fila nello stesso task perche' l'ordine
+    // di arrivo (prima l'archivio, poi il referente) e' voluto. sendWaiverSignatureEmail ingoia
+    // gli errori Graph e li scrive come FAILED, ma non il 404 della riga che non si trova ne' un
+    // blip del DB sulla update: senza questo catch l'eccezione si porterebbe via l'avviso di
+    // attesa firme, cioe' l'unica copia del link firma ospiti che il referente riceve. Nessuno
+    // firmerebbe, la partita morirebbe alla scadenza, e col cron in silenzio (start passato) il
+    // referente non saprebbe nemmeno perche'.
+    try {
+      await sendWaiverSignatureEmail(
+        result.organizerWaiverId,
+        pendingNoticeCarriesWaiver ? ["archive"] : undefined,
+      );
+    } catch {
+      // L'esito dell'archivio e' gia' scritto sulla riga: qui si protegge solo la mail che segue.
+    }
+
+    if (pendingNoticeCarriesWaiver) {
+      await sendOrganizerPendingSignatureWithWaiver({
+        signatureId: result.organizerWaiverId,
+        booking: result.booking,
+        manageUrl: buildManageUrl(input.baseUrl, result.booking.id, manageToken),
+        guestWaiverUrl: buildGuestWaiverUrl(input.baseUrl, result.booking.id, guestWaiverToken),
+        signedCount: 1,
+      });
+      return;
+    }
 
     if (result.confirmedBooking) {
       await syncConfirmedBooking({
         booking: result.confirmedBooking,
-        baseUrl: input.baseUrl,
-        guestWaiverToken,
+        manageUrl: buildManageUrl(input.baseUrl, result.booking.id, manageToken),
       });
     }
   });
-  if (result.booking.status === "PENDING_SIGNATURES") {
-    sendPendingSignatureNotice({
-      booking: result.booking,
-      manageUrl: buildManageUrl(input.baseUrl, result.booking.id, manageToken),
-      guestWaiverUrl: buildGuestWaiverUrl(input.baseUrl, result.booking.id, guestWaiverToken),
-      signedCount: 1,
-    });
-  }
 
   const refreshed = await getBookingWithWaivers(result.booking.id);
   return serializeManagedBooking(refreshed ?? result.booking, manageToken, input.baseUrl, guestWaiverToken);
@@ -818,9 +832,7 @@ export async function updateBooking(
       if (guestSignersToNotify.length > 0) {
         await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
       }
-      if (isAdminCancelByNonOrganizer(access, booking)) {
-        await notifyOrganizerOfAdminCancellation(synced);
-      }
+      await notifyOrganizerOfCancellation(synced, bookingCancelActor(access, booking));
       return;
     }
 
@@ -849,13 +861,7 @@ export async function updateBooking(
     }
 
     if (updated.status === "CONFIRMED") {
-      await syncBooking(
-        updated,
-        "update",
-        access.manageToken ?? undefined,
-        access.baseUrl,
-        nextGuestWaiverToken,
-      );
+      await syncBooking(updated, access.manageToken ?? undefined, access.baseUrl);
     } else if (updated.status === "PENDING_SIGNATURES") {
       await cancelOutlookEventForPendingBooking(updated);
     }
@@ -922,9 +928,7 @@ export async function cancelBooking(access: BookingAccess, bookingId: string) {
     if (guestSignersToNotify.length > 0) {
       await notifyGuestSignersOfCancellation(synced, guestSignersToNotify);
     }
-    if (isAdminCancelByNonOrganizer(access, booking)) {
-      await notifyOrganizerOfAdminCancellation(synced);
-    }
+    await notifyOrganizerOfCancellation(synced, bookingCancelActor(access, booking));
   });
 
   const refreshed = await getBookingWithWaivers(canceled.id);

@@ -19,9 +19,16 @@ import {
 } from "@/lib/demo-store";
 import {
   sendGuestWaiverConfirmationEmail,
+  sendGuestWithdrawalConfirmationEmail,
   sendOrganizerGuestWithdrewEmail,
+  sendOrganizerPendingSignatureEmail,
   sendWaiverEmail,
 } from "@/lib/graph";
+import {
+  retriableWaiverEmailLegs,
+  signerLegCarriesPendingNotice,
+  type WaiverMailLeg,
+} from "@/lib/waiver-email";
 import {
   createManageToken,
   hashManageToken,
@@ -91,6 +98,8 @@ export type AdminWaiverSignatureItem = {
   emailError: string | null;
   guestEmailStatus: WaiverEmailStatus;
   guestEmailError: string | null;
+  signerEmailStatus: WaiverEmailStatus;
+  signerEmailError: string | null;
   bookingStart: string;
   bookingEnd: string;
   playerCount: number;
@@ -339,6 +348,18 @@ export function buildGuestWaiverCancelUrl(
   return `${baseUrl.replace(/\/$/, "")}/waiver/cancel/${signatureId}?${params.toString()}`;
 }
 
+// L'esito peggiore vince: un invio riuscito non deve mai coprire quello fallito.
+function worstEmailStatus(statuses: WaiverEmailStatus[]): WaiverEmailStatus | null {
+  if (statuses.length === 0) return null;
+  if (statuses.includes("FAILED")) return "FAILED";
+  if (statuses.includes("PENDING")) return "PENDING";
+  if (statuses.includes("SKIPPED")) return "SKIPPED";
+  return "SENT";
+}
+
+// L'esito della copia al referente non passa di qui: le select che alimentano il riassunto
+// prendono solo bookingRevision/emailStatus/status, e chi lo mostra (l'area admin) legge la riga
+// intera da listAdminWaiverSignatures.
 export function summarizeWaiverSignatures(input: {
   playerCount: number;
   waiverRevision: number;
@@ -351,17 +372,7 @@ export function summarizeWaiverSignatures(input: {
         (!("status" in signature) || signature.status === "ACTIVE"),
     ) ?? [];
   const signedCount = currentSignatures.length;
-  const statuses = currentSignatures.map((signature) => signature.emailStatus);
-  const emailStatus: WaiverEmailStatus | null =
-    statuses.length === 0
-      ? null
-      : statuses.includes("FAILED")
-        ? "FAILED"
-        : statuses.includes("PENDING")
-          ? "PENDING"
-          : statuses.includes("SKIPPED")
-            ? "SKIPPED"
-            : "SENT";
+  const emailStatus = worstEmailStatus(currentSignatures.map((signature) => signature.emailStatus));
 
   return {
     signedCount,
@@ -467,7 +478,18 @@ export async function createWaiverSignature(
   }
 }
 
-export async function sendWaiverSignatureEmail(signatureId: string) {
+function waiverMailLegFields(result: { status: WaiverEmailStatus; error?: string }) {
+  return {
+    status: result.status,
+    error: result.status === "FAILED" || result.status === "SKIPPED" ? result.error ?? null : null,
+    sentAt: result.status === "SENT" ? new Date() : null,
+  };
+}
+
+export async function sendWaiverSignatureEmail(
+  signatureId: string,
+  legs?: ReadonlyArray<WaiverMailLeg>,
+) {
   if (!appConfig.databaseConfigured) return;
 
   const signature = await prisma.waiverSignature.findUnique({
@@ -479,7 +501,7 @@ export async function sendWaiverSignatureEmail(signatureId: string) {
     throw new AppError("Firma waiver non trovata.", 404);
   }
 
-  const result = await sendWaiverEmail({
+  const results = await sendWaiverEmail({
     booking: signature.booking,
     signerName: signature.signerName,
     signerEmail: signature.signerEmail,
@@ -491,14 +513,73 @@ export async function sendWaiverSignatureEmail(signatureId: string) {
       signedAt: signature.signedAt,
     }),
     signerCopyEmail: signature.signerRole === "ORGANIZER" ? signature.signerEmail : undefined,
+    legs,
   });
+
+  // Una leg non richiesta non ha un esito nuovo: la sua colonna resta com'era.
+  const archive = results.archive ? waiverMailLegFields(results.archive) : null;
+  const signer = results.signer ? waiverMailLegFields(results.signer) : null;
 
   await prisma.waiverSignature.update({
     where: { id: signature.id },
     data: {
-      emailStatus: result.status,
-      emailError: result.status === "FAILED" || result.status === "SKIPPED" ? result.error ?? null : null,
-      emailSentAt: result.status === "SENT" ? new Date() : null,
+      ...(archive
+        ? { emailStatus: archive.status, emailError: archive.error, emailSentAt: archive.sentAt }
+        : {}),
+      ...(signer
+        ? {
+            signerEmailStatus: signer.status,
+            signerEmailError: signer.error,
+            signerEmailSentAt: signer.sentAt,
+          }
+        : {}),
+    },
+  });
+}
+
+// Alla creazione il referente riceverebbe due mail sue nello stesso istante: l'avviso di attesa
+// firme e la copia del proprio scarico. Qui l'avviso si porta il PDF allegato, cosi' ne resta
+// una sola. L'esito finisce nelle colonne della copia al firmatario perche' e' quella la mail
+// che ha assorbito: l'area admin e il reinvio continuano a leggere di li' se il referente ha
+// avuto il suo scarico. L'archivio legale resta un invio a se', con le sue colonne.
+export async function sendOrganizerPendingSignatureWithWaiver(input: {
+  signatureId: string;
+  booking: Booking;
+  signedCount: number;
+  manageUrl?: string;
+  guestWaiverUrl?: string;
+}) {
+  if (!appConfig.databaseConfigured) return;
+
+  const signature = await prisma.waiverSignature.findUnique({
+    where: { id: input.signatureId },
+  });
+
+  if (!signature) {
+    throw new AppError("Firma waiver non trovata.", 404);
+  }
+
+  const result = await sendOrganizerPendingSignatureEmail({
+    booking: input.booking,
+    signedCount: input.signedCount,
+    manageUrl: input.manageUrl,
+    guestWaiverUrl: input.guestWaiverUrl,
+    pdfBytes: signature.pdfBytes,
+    filename: waiverPdfFilename({
+      bookingId: signature.bookingId,
+      signerName: signature.signerName,
+      signedAt: signature.signedAt,
+    }),
+  });
+
+  const signer = waiverMailLegFields(result);
+
+  await prisma.waiverSignature.update({
+    where: { id: signature.id },
+    data: {
+      signerEmailStatus: signer.status,
+      signerEmailError: signer.error,
+      signerEmailSentAt: signer.sentAt,
     },
   });
 }
@@ -533,12 +614,14 @@ export async function sendGuestWaiverEmail(signatureId: string, cancelUrl?: stri
     }),
   });
 
+  const guest = waiverMailLegFields(result);
+
   await prisma.waiverSignature.update({
     where: { id: signature.id },
     data: {
-      guestEmailStatus: result.status,
-      guestEmailError: result.status === "FAILED" || result.status === "SKIPPED" ? result.error ?? null : null,
-      guestEmailSentAt: result.status === "SENT" ? new Date() : null,
+      guestEmailStatus: guest.status,
+      guestEmailError: guest.error,
+      guestEmailSentAt: guest.sentAt,
     },
   });
 }
@@ -814,11 +897,7 @@ export async function signGuestWaiver(
     ]);
 
     if (result.confirmedBooking) {
-      await syncConfirmedBooking({
-        booking: result.confirmedBooking,
-        baseUrl,
-        guestWaiverToken: token ?? undefined,
-      });
+      await syncConfirmedBooking({ booking: result.confirmedBooking });
     }
   });
   return getWaiverContext(bookingId, token);
@@ -885,7 +964,7 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
         // Dopo l'early-return: chi ha gia' rinunciato deve ricevere la risposta idempotente, non
         // un "la partita e' gia' iniziata" che gli racconta una storia diversa da quella vera.
         if (signature.status === "CANCELED") {
-          return { canceled: signature, revertedBooking: null };
+          return { canceled: signature, revertedBooking: null, signedCount: 0, withdrawnNow: false };
         }
   
         assertGuestCancelInTime(signature.booking);
@@ -936,7 +1015,7 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
         ).length;
   
         if (saved.booking.status !== "CONFIRMED" || signedCount >= saved.booking.playerCount) {
-          return { canceled: saved, revertedBooking: null };
+          return { canceled: saved, revertedBooking: null, signedCount, withdrawnNow: true };
         }
   
         const revertedBooking = await tx.booking.update({
@@ -969,28 +1048,43 @@ export async function cancelGuestWaiverSignature(signatureId: string, token: str
           },
         });
 
-        return { canceled: saved, revertedBooking, signedCount };
+        return { canceled: saved, revertedBooking, signedCount, withdrawnNow: true };
       },
       { isolationLevel: "Serializable" },
     ),
   );
 
-  if (result.revertedBooking) {
+  if (result.withdrawnNow) {
     const reverted = result.revertedBooking;
-    const signerName = result.canceled.signerName;
-    const signedCount = result.signedCount ?? 0;
+    const canceledBooking = result.canceled.booking;
+    const { signerName, signerEmail } = result.canceled;
+    const signedCount = result.signedCount;
 
     runAfterResponse(async () => {
-      const pending = await cancelOutlookEventForPendingBooking(reverted);
+      // Solo un revert da CONFIRMED ha un evento Outlook da ritirare, e va ritirato prima delle
+      // mail: altrimenti raccontano una prenotazione che in agenda risulta ancora confermata.
+      const booking = reverted ? await cancelOutlookEventForPendingBooking(reverted) : canceledBooking;
+
+      // Chi rinuncia resta con l'appuntamento in agenda se nessuno glielo conferma.
+      await sendGuestWithdrawalConfirmationEmail({ booking, signerName, signerEmail });
 
       // Senza questa mail il referente scopre la rinuncia solo dalla cancellazione Outlook, che
       // per giunta gli dice che la prenotazione e' annullata mentre invece sta solo scadendo.
       // Il link firma ospiti non e' allegabile: il token e' salvato solo come hash.
-      await sendOrganizerGuestWithdrewEmail({ booking: pending, signerName, signedCount });
+      await sendOrganizerGuestWithdrewEmail({ booking, signerName, signedCount });
     });
   }
 
   return getGuestWaiverCancelContext(signatureId, token);
+}
+
+function waiverEmailLegStatuses(
+  signature: Pick<WaiverSignature, "emailStatus" | "signerEmailStatus">,
+) {
+  return {
+    emailStatus: signature.emailStatus,
+    signerEmailStatus: signature.signerEmailStatus,
+  };
 }
 
 export async function retryWaiverEmail(signatureId: string, actor: Pick<User, "id" | "email">) {
@@ -998,12 +1092,40 @@ export async function retryWaiverEmail(signatureId: string, actor: Pick<User, "i
     throw new AppError("Archivio firme non disponibile in demo mode.", 503);
   }
 
-  const before = await prisma.waiverSignature.findUnique({ where: { id: signatureId } });
+  const before = await prisma.waiverSignature.findUnique({
+    where: { id: signatureId },
+    include: { booking: { include: { waiverSignatures: true } } },
+  });
   if (!before) {
     throw new AppError("Firma waiver non trovata.", 404);
   }
 
-  await sendWaiverSignatureEmail(signatureId);
+  // Solo le leg da recuperare: ritentare quella gia' riuscita manderebbe un doppione (di
+  // norma all'archivio) lasciando la mail mancante ancora mancante.
+  const legs = retriableWaiverEmailLegs(before);
+  if (legs.length === 0) {
+    throw new AppError("Le email di questa firma sono già state inviate.", 409);
+  }
+
+  // Dove l'avviso di attesa firme possiede la colonna della copia, la leg "signer" va reinviata
+  // con l'avviso, non col PDF nudo che sendWaiverEmail manderebbe.
+  const noticeOwnsSignerLeg = signerLegCarriesPendingNotice(before);
+  const mailLegs = noticeOwnsSignerLeg ? legs.filter((leg) => leg !== "signer") : legs;
+
+  if (mailLegs.length > 0) {
+    await sendWaiverSignatureEmail(signatureId, mailLegs);
+  }
+
+  if (noticeOwnsSignerLeg && legs.includes("signer")) {
+    // I link non sono ricostruibili (token salvati come hash) e rigenerarli qui brucerebbe
+    // quello che il referente ha gia' in mano nell'app: l'avviso parte senza, e il footer dice
+    // dove trovare il link firma ospiti.
+    await sendOrganizerPendingSignatureWithWaiver({
+      signatureId,
+      booking: before.booking,
+      signedCount: summarizeWaiverSignatures(before.booking).signedCount,
+    });
+  }
 
   const after = await prisma.waiverSignature.findUnique({ where: { id: signatureId } });
   await prisma.auditLog.create({
@@ -1013,8 +1135,8 @@ export async function retryWaiverEmail(signatureId: string, actor: Pick<User, "i
       action: "WAIVER_EMAIL_RETRIED",
       entityType: "WaiverSignature",
       entityId: signatureId,
-      before: before.emailStatus,
-      after: after?.emailStatus,
+      before: { legs, ...waiverEmailLegStatuses(before) },
+      after: after ? waiverEmailLegStatuses(after) : undefined,
     },
   });
 
@@ -1086,8 +1208,22 @@ export async function listAdminWaiverSignatures(input: {
     });
   }
 
+  // Il filtro guarda tutte le leg che la riga mostra davvero, non solo l'archivio: filtrare
+  // "FAILED" e' il gesto naturale per la triage dei reinvii, e con la sola emailStatus una copia
+  // al referente esplosa (archivio SENT, copia FAILED) restava invisibile proprio a chi la
+  // cercava. Ogni leg e' legata al ruolo che la usa: uno SKIPPED di guestEmailStatus su una riga
+  // referente non e' un guasto, e' una mail che non esiste, e allargherebbe il filtro a tutto.
+  if (input.status) {
+    andFilters.push({
+      OR: [
+        { emailStatus: input.status },
+        { signerRole: "ORGANIZER", signerEmailStatus: input.status },
+        { signerRole: "GUEST", guestEmailStatus: input.status },
+      ],
+    });
+  }
+
   const where: Prisma.WaiverSignatureWhereInput = {
-    ...(input.status ? { emailStatus: input.status } : {}),
     ...(input.role ? { signerRole: input.role } : {}),
     ...(andFilters.length ? { AND: andFilters } : {}),
   };
@@ -1124,6 +1260,8 @@ export async function listAdminWaiverSignatures(input: {
       emailError: signature.emailError,
       guestEmailStatus: signature.guestEmailStatus,
       guestEmailError: signature.guestEmailError,
+      signerEmailStatus: signature.signerEmailStatus,
+      signerEmailError: signature.signerEmailError,
       bookingStart: signature.booking.start.toISOString(),
       bookingEnd: signature.booking.end.toISOString(),
       playerCount: signature.booking.playerCount,
