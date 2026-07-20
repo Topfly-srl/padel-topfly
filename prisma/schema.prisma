@@ -123,6 +123,9 @@ model WaiverSignature {
   guestEmailStatus           WaiverEmailStatus @default(SKIPPED)
   guestEmailError            String?
   guestEmailSentAt           DateTime?
+  signerEmailStatus          WaiverEmailStatus @default(SKIPPED)
+  signerEmailError           String?
+  signerEmailSentAt          DateTime?
   cancelTokenHash            String?
   cancelTokenExpiresAt       DateTime?
   canceledAt                 DateTime?
@@ -141,6 +144,7 @@ model WaiverSignature {
   @@index([cancelTokenHash])
   @@index([emailStatus])
   @@index([guestEmailStatus])
+  @@index([signerEmailStatus])
   @@index([status])
 }
 

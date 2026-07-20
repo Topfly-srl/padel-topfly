@@ -28,7 +28,7 @@ import type {
   CurrentUser,
   MyBooking,
 } from "@/lib/types";
-import { computeGuestSeatCancelable } from "@/lib/waiver-service";
+import { computeGuestSeatCancelable, summarizeWaiverSignatures } from "@/lib/waiver-service";
 import type { WaiverEvidence, WaiverInput } from "@/lib/waiver-service";
 
 type DemoBooking = {
@@ -58,9 +58,11 @@ type DemoWaiverSignature = {
   bookingId: string;
   bookingRevision: number;
   status: "ACTIVE" | "CANCELED";
+  signerRole: "ORGANIZER" | "GUEST";
   signerName: string;
   signerEmail: string;
   emailStatus: WaiverEmailStatus;
+  signerEmailStatus: WaiverEmailStatus;
   cancelTokenHash: string | null;
   cancelTokenExpiresAt: Date | null;
   canceledAt: Date | null;
@@ -127,29 +129,11 @@ function buildGuestWaiverCancelUrl(baseUrl: string | undefined, signatureId: str
 }
 
 function demoWaiverSummary(booking: DemoBooking) {
-  const current = waiverSignatures.filter(
-    (signature) =>
-      signature.bookingId === booking.id &&
-      signature.bookingRevision === booking.waiverRevision &&
-      signature.status === "ACTIVE",
-  );
-  const statuses = current.map((signature) => signature.emailStatus);
-  const emailStatus: WaiverEmailStatus | null =
-    statuses.length === 0
-      ? null
-      : statuses.includes("FAILED")
-        ? "FAILED"
-        : statuses.includes("PENDING")
-          ? "PENDING"
-          : statuses.includes("SKIPPED")
-            ? "SKIPPED"
-            : "SENT";
-
-  return {
-    signedCount: current.length,
-    remainingCount: Math.max(0, booking.playerCount - current.length),
-    emailStatus,
-  };
+  return summarizeWaiverSignatures({
+    playerCount: booking.playerCount,
+    waiverRevision: booking.waiverRevision,
+    waiverSignatures: waiverSignatures.filter((signature) => signature.bookingId === booking.id),
+  });
 }
 
 function isDemoActiveBooking(booking: DemoBooking, now = new Date()) {
@@ -426,9 +410,11 @@ export async function demoCreateBooking(input: DemoCreateInput) {
     bookingId: booking.id,
     bookingRevision: booking.waiverRevision,
     status: "ACTIVE",
+    signerRole: "ORGANIZER",
     signerName: identity.organizerName,
     signerEmail: identity.organizerEmail,
     emailStatus: "SKIPPED",
+    signerEmailStatus: "SKIPPED",
     cancelTokenHash: null,
     cancelTokenExpiresAt: null,
     canceledAt: null,
@@ -688,9 +674,11 @@ export async function demoSignGuestWaiver(
     bookingId: booking.id,
     bookingRevision: booking.waiverRevision,
     status: "ACTIVE",
+    signerRole: "GUEST",
     signerName,
     signerEmail,
     emailStatus: "SKIPPED",
+    signerEmailStatus: "SKIPPED",
     cancelTokenHash: hashManageToken(cancelToken),
     cancelTokenExpiresAt: manageTokenExpiresAt(booking.end),
     canceledAt: null,
