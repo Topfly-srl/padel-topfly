@@ -1,6 +1,9 @@
 .next/
 node_modules/
 dist/
+# Client Prisma generato fuori da node_modules (generator "prisma-client", v7).
+# Rigenerato da `prisma generate` (pre-build/test); non va versionato.
+/src/generated/
 coverage/
 output/playwright/
 output/anteprima-email.html

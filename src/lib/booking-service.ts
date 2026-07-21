@@ -1,5 +1,5 @@
-import type { Booking, Prisma, WaiverEmailStatus } from "@prisma/client";
-import { BookingStatus, Prisma as PrismaNamespace } from "@prisma/client";
+import type { Booking, Prisma, WaiverEmailStatus } from "@/generated/prisma/client";
+import { BookingStatus, Prisma as PrismaNamespace } from "@/generated/prisma/client";
 import { runAfterResponse } from "@/lib/after-response";
 import { auditJson } from "@/lib/audit-sanitizer";
 import { AppError } from "@/lib/errors";

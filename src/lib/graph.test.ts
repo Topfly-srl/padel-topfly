@@ -1,4 +1,4 @@
-import type { Booking } from "@prisma/client";
+import type { Booking } from "@/generated/prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 function bookingFixture(overrides: Partial<Booking> = {}): Booking {

@@ -1,4 +1,4 @@
-import type { BookingStatus, OutlookSyncStatus, UserRole, WaiverEmailStatus } from "@prisma/client";
+import type { BookingStatus, OutlookSyncStatus, UserRole, WaiverEmailStatus } from "@/generated/prisma/client";
 
 export type CurrentUser = {
   id: string;

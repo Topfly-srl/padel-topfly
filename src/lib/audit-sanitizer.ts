@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 // Campi che non devono mai finire nel registro audit: hash di token gestione/rinuncia con le loro
 // scadenze, piu' i dettagli tecnici Outlook. La blacklist vive qui, condivisa da booking-service e

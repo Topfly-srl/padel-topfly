@@ -1,10 +1,15 @@
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  // Il pacchetto non ha "type": "module": generiamo CommonJS cosi' Next, i test e i
+  // *.mjs continuano a caricare il client senza dover flippare tutto il repo a ESM.
+  moduleFormat = "cjs"
 }
 
 datasource db {
+  // In v7 l'URL non vive piu' nello schema (prisma#28622): sta in prisma.config.ts.
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum UserRole {

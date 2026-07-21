@@ -1,4 +1,4 @@
-import type { WaiverEmailStatus } from "@prisma/client";
+import type { WaiverEmailStatus } from "@/generated/prisma/client";
 import {
   bookingPolicy,
   isAlignedToSlot,

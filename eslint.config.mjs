@@ -10,6 +10,8 @@ const eslintConfig = [
       "node_modules/**",
       "coverage/**",
       "next-env.d.ts",
+      // Client Prisma generato: file @ts-nocheck, non va lintato.
+      "src/generated/**",
     ],
   },
 ];

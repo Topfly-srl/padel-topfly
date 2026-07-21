@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { networkInterfaces } from "os";
-import { Prisma as PrismaNamespace } from "@prisma/client";
+import { Prisma as PrismaNamespace } from "@/generated/prisma/client";
 import type { NextRequest } from "next/server";
 import { appConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";

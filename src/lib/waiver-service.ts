@@ -7,7 +7,7 @@ import type {
   WaiverSignature,
   WaiverSignatureStatus,
   WaiverSignerRole,
-} from "@prisma/client";
+} from "@/generated/prisma/client";
 import { PNG } from "pngjs";
 import { runAfterResponse } from "@/lib/after-response";
 import { AppError } from "@/lib/errors";

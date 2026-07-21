@@ -30,10 +30,18 @@ ENV HOSTNAME=0.0.0.0
 
 COPY package.json package-lock.json ./
 COPY next.config.ts ./next.config.ts
+# In v7 la CLI legge schema/URL da prisma.config.ts: serve nel runner perche' l'entrypoint
+# fa `prisma migrate deploy`. dotenv resta in node_modules (e' una dependency) e in container
+# DATABASE_URL arriva come env var, quindi non serve un file .env.
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+# Il client Prisma v7 e' generato fuori da node_modules (src/generated/prisma). Il build Next lo
+# incorpora nei bundle .next, ma lo copiamo comunque nel runner come rete di sicurezza contro
+# l'errore "Cannot find module" a runtime, dato che l'app non usa output:'standalone'.
+COPY --from=builder /app/src/generated ./src/generated
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 
 RUN addgroup -S app && adduser -S app -G app \

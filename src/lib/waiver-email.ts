@@ -1,4 +1,4 @@
-import type { BookingStatus, WaiverEmailStatus, WaiverSignerRole } from "@prisma/client";
+import type { BookingStatus, WaiverEmailStatus, WaiverSignerRole } from "@/generated/prisma/client";
 
 // Il PDF dello scarico parte con due mail distinte: "archive" e' la copia verso l'archivio
 // legale, "signer" e' la copia al firmatario (solo il referente ne ha una). Tenerle separate

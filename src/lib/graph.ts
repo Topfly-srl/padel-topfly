@@ -1,4 +1,4 @@
-import type { Booking } from "@prisma/client";
+import type { Booking } from "@/generated/prisma/client";
 import { appConfig, hasGraphConfig } from "@/lib/config";
 import type { WaiverMailLeg } from "@/lib/waiver-email";
 

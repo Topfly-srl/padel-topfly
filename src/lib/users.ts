@@ -1,4 +1,4 @@
-import type { UserRole } from "@prisma/client";
+import type { UserRole } from "@/generated/prisma/client";
 import { appConfig, isAdminEmail } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import type { CurrentUser } from "@/lib/types";

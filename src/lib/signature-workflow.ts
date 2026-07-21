@@ -1,4 +1,4 @@
-import type { Booking, Prisma } from "@prisma/client";
+import type { Booking, Prisma } from "@/generated/prisma/client";
 import { runAfterResponse } from "@/lib/after-response";
 import { auditJson } from "@/lib/audit-sanitizer";
 import { appConfig } from "@/lib/config";

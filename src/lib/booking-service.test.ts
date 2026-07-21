@@ -1,4 +1,4 @@
-import { BookingStatus, OutlookSyncStatus } from "@prisma/client";
+import { BookingStatus, OutlookSyncStatus } from "@/generated/prisma/client";
 import { describe, expect, it } from "vitest";
 import { shouldRetryOutlookDelete } from "@/lib/booking-service";
 

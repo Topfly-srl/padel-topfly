@@ -1,4 +1,4 @@
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus } from "@/generated/prisma/client";
 
 export function bookingStatusLabel(status: BookingStatus) {
   if (status === "PENDING_SIGNATURES") return "In attesa firme";
