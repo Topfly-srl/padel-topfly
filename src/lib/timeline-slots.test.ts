@@ -113,6 +113,66 @@ describe("computeTimelineSlots", () => {
     expect(slots[3]).toMatchObject({ option: "10:45", booking: undefined, isSelected: false });
   });
 
+  it("aggiunge alla griglia gli slot fuori fascia quando sono occupati", () => {
+    // Prenotazione legacy 22:00-24:00, nata prima della fascia oraria: la griglia deve
+    // continuare a mostrarla come occupata, altrimenti sembra annullata.
+    const legacy = { id: "b-legacy", name: "Prenotazione fuori fascia" };
+    const gridOptions = bookingTimeOptions(8, 22);
+    const slots = computeTimelineSlots({
+      options: gridOptions,
+      selectedDate: day,
+      selectedTime: "10:00",
+      startMs: new Date(`${day}T10:00:00`).getTime(),
+      endMs: new Date(`${day}T11:00:00`).getTime(),
+      bookingRanges: [localRange(legacy, day, "22:00", "23:59")],
+      blockRanges: [],
+    });
+
+    const extras = slots.filter((slot) => !gridOptions.includes(slot.option));
+    expect(extras.map((slot) => slot.option)).toEqual([
+      "22:00", "22:15", "22:30", "22:45", "23:00", "23:15", "23:30", "23:45",
+    ]);
+    for (const slot of extras) {
+      expect(slot.booking).toBe(legacy);
+    }
+    // Ordine cronologico preservato: l'ultimo slot in fascia precede il primo extra.
+    const optionList = slots.map((slot) => slot.option);
+    expect(optionList.indexOf("21:45")).toBeLessThan(optionList.indexOf("22:00"));
+  });
+
+  it("non aggiunge slot fuori fascia liberi", () => {
+    const slots = computeTimelineSlots({
+      options: bookingTimeOptions(8, 22),
+      selectedDate: day,
+      selectedTime: "10:00",
+      startMs: new Date(`${day}T10:00:00`).getTime(),
+      endMs: new Date(`${day}T11:00:00`).getTime(),
+      bookingRanges: [],
+      blockRanges: [],
+    });
+
+    expect(slots[0].option).toBe("08:00");
+    expect(slots[slots.length - 1].option).toBe("21:45");
+  });
+
+  it("la propria prenotazione fuori fascia non genera slot extra in modifica", () => {
+    // In modifica i nuovi orari devono stare nella fascia: uno slot fuori fascia "libero"
+    // (perche' la propria prenotazione e' esclusa dai conflitti) sarebbe un invito falso.
+    const mine = { id: "b-mine", name: "La mia prenotazione" };
+    const slots = computeTimelineSlots({
+      options: bookingTimeOptions(8, 22),
+      selectedDate: day,
+      selectedTime: "10:00",
+      startMs: new Date(`${day}T10:00:00`).getTime(),
+      endMs: new Date(`${day}T11:00:00`).getTime(),
+      bookingRanges: [localRange(mine, day, "22:00", "23:59")],
+      blockRanges: [],
+      ignoreBookingId: "b-mine",
+    });
+
+    expect(slots[slots.length - 1].option).toBe("21:45");
+  });
+
   it("esclude la prenotazione indicata dai conflitti (parita' con manage-booking)", () => {
     const own = { id: "self", name: "La mia prenotazione" };
     const other = { id: "other", name: "Vincolo esterno" };
