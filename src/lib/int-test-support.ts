@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashManageToken, manageTokenExpiresAt } from "@/lib/manage-token";
 import { appConfig } from "@/lib/config";
+import { waitForAfterResponseTasks } from "@/lib/after-response";
 
 // La firma disegnata e gli slot futuri vivono in un fixture condiviso con l'harness di parita'
 // unit (src/lib/parity/fixtures.ts), senza dipendenze da Prisma. Qui li ri-esportiamo cosi' i
@@ -27,12 +28,11 @@ export async function resetDatabase() {
   );
 }
 
-// Gli step lenti (email Graph, sync Outlook) girano via runAfterResponse in fire-and-forget: fuori
-// da un request scope diventano `void safeTask()`. Senza Graph configurato le mail sono SKIPPED ma
-// il task fa comunque qualche scrittura best-effort sul DB. Diamo un tick perche' quelle scritture
-// atterrino prima del truncate del test successivo, cosi' niente scrive sotto i piedi.
-export async function settle(ms = 150) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+// Gli step lenti (email Graph, sync Outlook) girano via runAfterResponse in fire-and-forget: prima
+// di troncare il DB aspettiamo i task reali, non un timeout empirico che sotto carico puo' scadere
+// mentre una scrittura e' ancora in volo e contaminare il test successivo.
+export async function settle() {
+  await waitForAfterResponseTasks();
 }
 
 // Inserimento diretto di una firma "gia' fatta": serve dove il test deve partire da uno stato
