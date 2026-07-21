@@ -39,27 +39,4 @@ describe("app config", () => {
     expect(appConfig.isProduction).toBe(true);
     expect(appConfig.publicOrigin).toBe("https://padel.topflysolutions.com");
   });
-
-  it("accetta lo staging esplicito con auth dev e Graph disattivato", async () => {
-    vi.resetModules();
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("APP_ENV", "staging");
-    vi.stubEnv("APP_PUBLIC_ORIGIN", "http://localhost:8080");
-    vi.stubEnv("DATABASE_URL", "postgres://user:pass@postgres:5432/padel_staging");
-    vi.stubEnv("APP_ADMIN_EMAILS", "admin@topflysolutions.com");
-    vi.stubEnv("AUTH_DEV_MODE", "true");
-    vi.stubEnv("MICROSOFT_ENTRA_ID_ID", "");
-    vi.stubEnv("MICROSOFT_ENTRA_ID_SECRET", "");
-    vi.stubEnv("MICROSOFT_ENTRA_ID_TENANT_ID", "");
-    vi.stubEnv("MS_GRAPH_TENANT_ID", "");
-    vi.stubEnv("MS_GRAPH_CLIENT_ID", "");
-    vi.stubEnv("MS_GRAPH_CLIENT_SECRET", "");
-    vi.stubEnv("MS_GRAPH_MAILBOX", "");
-
-    const { appConfig } = await import("@/lib/config");
-
-    expect(appConfig.environmentName).toBe("staging");
-    expect(appConfig.isProduction).toBe(true);
-    expect(appConfig.authDevMode).toBe(true);
-  });
 });

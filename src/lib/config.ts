@@ -7,7 +7,7 @@ const optionalUrl = z.preprocess(
 );
 
 const envSchema = z.object({
-  APP_ENV: z.enum(["development", "staging", "production"]).optional(),
+  APP_ENV: z.enum(["development", "production"]).optional(),
   APP_ALLOWED_DOMAIN: z.string().default("azienda.it"),
   APP_ADMIN_EMAILS: z.string().default(""),
   APP_PUBLIC_ORIGIN: optionalUrl,
@@ -46,12 +46,7 @@ const isProductionDeployment =
 // Durante `next build` Next imposta NODE_ENV=production ma i segreti di runtime non ci sono
 // (e non devono esserci in CI): i controlli fail-fast valgono solo a runtime, non in build.
 const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
-// Lo staging usa la stessa immagine `next start` della produzione (quindi NODE_ENV=production),
-// ma resta isolato su loopback e deve poter usare auth dev senza credenziali Entra/Graph reali.
-// Il bypass richiede APP_ENV=staging esplicito: un next start senza APP_ENV continua a fallire
-// chiuso come produzione, evitando che una configurazione incompleta arrivi online per sbaglio.
-const enforceProductionEnv =
-  isProductionDeployment && env.APP_ENV !== "staging" && !isBuildPhase;
+const enforceProductionEnv = isProductionDeployment && !isBuildPhase;
 
 if (enforceProductionEnv && env.AUTH_DEV_MODE === "true") {
   throw new Error("AUTH_DEV_MODE non puo' essere attivo in produzione.");
