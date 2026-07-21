@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { sendGuestBookingCanceledEmail, sendOrganizerAutoCanceledEmail } from "@/lib/graph";
+import {
+  deleteOutlookEvent,
+  sendGuestBookingCanceledEmail,
+  sendOrganizerAutoCanceledEmail,
+} from "@/lib/graph";
 
 // processSignatureDeadlines gira solo col database configurato (in demo mode esce subito), quindi il
 // ramo di auto-annullo si esercita mockando prisma, la coda after-response e retryPrismaTransaction.
@@ -64,7 +68,10 @@ const now = new Date("2026-07-15T12:00:00.000Z");
 // Una pending scaduta con partita gia' iniziata (start <= now): l'annullo e' silenzioso, ma l'audit
 // va scritto lo stesso. La riga trasporta manageTokenHash e compagnia, che il sanitizzatore deve
 // togliere. outlookEventId null tiene il ramo silenzioso senza toccare Outlook.
-function sensitiveBooking(status: "PENDING_SIGNATURES" | "CANCELED") {
+function sensitiveBooking(
+  status: "PENDING_SIGNATURES" | "CANCELED",
+  outlookEventId: string | null = null,
+) {
   return {
     id: "booking_1",
     status,
@@ -76,7 +83,7 @@ function sensitiveBooking(status: "PENDING_SIGNATURES" | "CANCELED") {
     end: new Date(now.getTime() + 1_800_000),
     createdAt: new Date(now.getTime() - 3 * 3_600_000),
     autoCanceledAt: status === "CANCELED" ? now : null,
-    outlookEventId: null,
+    outlookEventId,
     outlookSyncStatus: "SKIPPED",
     outlookSyncError: "errore tecnico da non salvare",
     manageTokenHash: "hash-manage-da-non-salvare",
@@ -103,6 +110,7 @@ describe("audit auto-annullo firme", () => {
     h.update.mockReset();
     vi.mocked(sendOrganizerAutoCanceledEmail).mockReset();
     vi.mocked(sendGuestBookingCanceledEmail).mockReset();
+    vi.mocked(deleteOutlookEvent).mockReset();
 
     // Nessun candidato reminder; una sola pending scaduta da annullare.
     h.findMany.mockImplementation((args: { where: Record<string, unknown> }) =>
@@ -146,10 +154,27 @@ describe("audit auto-annullo firme", () => {
   // guardia signature-workflow.ts "if (result.booking.start <= now) { ...continue }": disattivandola
   // (facendo accodare sendOrganizerAutoCanceledEmail + notifyGuestsCanceled) l'asserzione fallisce.
   it("chiude in silenzio la partita gia' iniziata: nessuna mail di annullamento a posteriori", async () => {
+    const pendingWithEvent = sensitiveBooking("PENDING_SIGNATURES", "outlook-event-residuo");
+    const canceledWithEvent = sensitiveBooking("CANCELED", "outlook-event-residuo");
+    h.findMany.mockImplementation((args: { where: Record<string, unknown> }) =>
+      Promise.resolve("signatureReminderSentAt" in args.where ? [] : [pendingWithEvent]),
+    );
+    h.findUnique.mockResolvedValue(pendingWithEvent);
+    h.update.mockResolvedValue(canceledWithEvent);
+
     const result = await processSignatureDeadlines({ now });
     await flushAfterTasks();
 
     expect(result.canceled).toBe(1);
+    expect(h.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          outlookEventId: null,
+          outlookSyncStatus: "SKIPPED",
+        }),
+      }),
+    );
+    expect(deleteOutlookEvent).not.toHaveBeenCalled();
     expect(sendOrganizerAutoCanceledEmail).not.toHaveBeenCalled();
     expect(sendGuestBookingCanceledEmail).not.toHaveBeenCalled();
   });

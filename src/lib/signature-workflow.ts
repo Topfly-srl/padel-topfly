@@ -469,7 +469,20 @@ export async function processSignatureDeadlines(input: {
             data: {
               status: "CANCELED",
               autoCanceledAt: now,
-              outlookSyncStatus: current.outlookEventId ? current.outlookSyncStatus : "SKIPPED",
+              // Dopo l'inizio anche event/cancel invierebbe una mail Outlook a posteriori. In quel
+              // caso scolleghiamo l'eventuale evento residuo e registriamo che la sync e' stata
+              // saltata intenzionalmente; per le partite future resta il normale annullamento.
+              ...(current.start <= now
+                ? {
+                    outlookEventId: null,
+                    outlookSyncStatus: "SKIPPED" as const,
+                    outlookSyncError: null,
+                  }
+                : {
+                    outlookSyncStatus: current.outlookEventId
+                      ? current.outlookSyncStatus
+                      : "SKIPPED" as const,
+                  }),
             },
           });
 
@@ -493,9 +506,6 @@ export async function processSignatureDeadlines(input: {
     // La pratica va chiusa comunque, ma su una partita gia' iniziata l'avviso di annullamento
     // arriverebbe a cose fatte: la pending viene archiviata in silenzio, senza mail assurde.
     if (result.booking.start <= now) {
-      if (result.booking.outlookEventId) {
-        runAfterResponse(() => cancelOutlookEventForPendingBooking(result.booking));
-      }
       continue;
     }
 
