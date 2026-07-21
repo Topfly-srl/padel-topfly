@@ -113,7 +113,7 @@ describe("computeTimelineSlots", () => {
   });
 
   it("aggiunge alla griglia gli slot fuori fascia quando sono occupati", () => {
-    // Prenotazione legacy 22:00-24:00, nata prima della fascia oraria: la griglia deve
+    // Prenotazione legacy 22:00-23:59, nata prima della fascia oraria ridotta: la griglia deve
     // continuare a mostrarla come occupata, altrimenti sembra annullata.
     const legacy = { id: "b-legacy", name: "Prenotazione fuori fascia" };
     const gridOptions = bookingTimeOptions(8, 22);

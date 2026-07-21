@@ -7,6 +7,7 @@ import {
   dateTimeFromParts,
   localTime,
   networkErrorText,
+  pad,
   readApiError,
   type Notice,
 } from "@/lib/booking-ui";
@@ -28,6 +29,15 @@ export function AdminBlocksSection({
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("10:00");
   const [blockReason, setBlockReason] = useState("Manutenzione");
+
+  // Le option in ingresso sono gli INIZI slot (…, 23:45): come fine blocco serve lo stesso passo
+  // spostato di uno slot, altrimenti l'ultimo quarto d'ora (23:45-24:00) resterebbe imbloccabile.
+  // "24:00" e' ora ISO valida: dateTimeFromParts la converte nella mezzanotte del giorno dopo.
+  const endOptions = options.map((option) => {
+    const [hours, minutes] = option.split(":").map(Number);
+    const total = hours * 60 + minutes + 15;
+    return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+  });
 
   async function createBlock() {
     try {
@@ -90,7 +100,7 @@ export function AdminBlocksSection({
         <label>
           A
           <select value={blockEnd} onChange={(event) => setBlockEnd(event.target.value)}>
-            {options.map((option) => (
+            {endOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>

@@ -3,7 +3,7 @@
 import { Check, Clock3, Trash2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { CancelReasonSelect } from "@/components/cancel-reason-select";
 import { resolveCancelReason, type CancelReasonMode } from "@/lib/cancel-reason";
@@ -161,6 +161,22 @@ export function ManageBooking({
       }),
     [options, selectedDate, selectedTime, startMs, endMs, bookingRanges, blockRanges, booking?.id],
   );
+
+  // Con la griglia a giornata piena (96 slot da 00:00) l'orario della prenotazione puo' stare
+  // molto in basso: stesso auto-scroll del calendario pubblico, centrato sullo slot selezionato.
+  const timelineRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    const selected = timeline?.querySelector<HTMLElement>("[data-selected='true']");
+
+    if (!timeline || !selected) return;
+
+    timeline.scrollTop = Math.max(
+      0,
+      selected.offsetTop - timeline.offsetTop - timeline.clientHeight / 2 + selected.clientHeight / 2,
+    );
+  }, [timelineSlots]);
 
   useEffect(() => {
     startTransition(async () => {
@@ -345,6 +361,8 @@ export function ManageBooking({
                   compact
                   timelineClassName="timeline manage-timeline"
                   timelineAriaLabel="Orario di inizio"
+                  timelineRef={timelineRef}
+                  trackSelected
                   busyLabel={(item) => item.organizerName}
                   busyTitle={(item) => `Prenotato da ${item.organizerName}`}
                 />

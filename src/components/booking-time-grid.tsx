@@ -9,9 +9,10 @@ import type { AvailabilityBlock, AvailabilityBooking } from "@/lib/types";
 // differenze reali restano esplicite via prop:
 // - manage esclude la propria prenotazione dai conflitti (gestito a monte in computeTimelineSlots) e
 //   usa etichette/titoli diversi sugli slot occupati (busyLabel/busyTitle);
-// - solo il calendario pubblico marca gli slot "attesa firme" (markPending), traccia lo slot
-//   selezionato per lo scroll automatico (trackSelected + timelineRef) e mostra tutte le durate
-//   ammesse dalle impostazioni, mentre manage e' compatto e parte dalle durate di default.
+// - solo il calendario pubblico marca gli slot "attesa firme" (markPending) e mostra tutte le
+//   durate ammesse dalle impostazioni, mentre manage e' compatto e parte dalle durate di default;
+// - entrambi tracciano lo slot selezionato per lo scroll automatico (trackSelected + timelineRef):
+//   con la griglia a giornata piena l'orario scelto puo' stare molto in basso.
 export function BookingTimeGrid({
   durationOptions,
   duration,
