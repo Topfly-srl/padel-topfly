@@ -13,13 +13,20 @@ import {
   defaultOpeningHour,
 } from "@/lib/booking-constants";
 import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
-import { bookingTimeOptions } from "@/lib/timeline-slots";
+import {
+  dateTimeFromParts,
+  localDateTime,
+  pad,
+  readApiError,
+  type Notice,
+} from "@/lib/booking-ui";
+import {
+  bookingTimeOptions,
+  computeTimelineSlots,
+  type TimelineRange,
+} from "@/lib/timeline-slots";
 import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/types";
-
-type Notice = {
-  type: "success" | "error" | "info" | "warning";
-  text: string;
-};
+import { BookingTimeGrid } from "@/components/booking-time-grid";
 
 type AvailabilityResponse = {
   bookings: AvailabilityBooking[];
@@ -32,20 +39,12 @@ type AvailabilityResponse = {
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
 
-function pad(value: number) {
-  return value.toString().padStart(2, "0");
-}
-
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000);
-}
-
-function dateTimeFromParts(day: string, time: string) {
-  return new Date(`${day}T${time}:00`);
 }
 
 function rangeOverlaps(start: Date, end: Date, itemStart: string, itemEnd: string) {
@@ -56,23 +55,6 @@ function rangeOverlaps(start: Date, end: Date, itemStart: string, itemEnd: strin
 
 function minutesBetween(start: Date, end: Date) {
   return Math.round((end.getTime() - start.getTime()) / 60_000);
-}
-
-function localDateTime(date: Date) {
-  return new Intl.DateTimeFormat("it-IT", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function readApiError(response: Response) {
-  return response
-    .json()
-    .then((json: { error?: string }) => json.error ?? "Richiesta non riuscita.")
-    .catch(() => "Richiesta non riuscita.");
 }
 
 function cancellationSuccessText(status: string) {
@@ -142,6 +124,43 @@ export function ManageBooking({
 
     return null;
   }, [availability, booking, end, start]);
+
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  const bookingRanges = useMemo<Array<TimelineRange<AvailabilityBooking>>>(
+    () =>
+      (availability?.bookings ?? []).map((item) => ({
+        item,
+        startMs: new Date(item.start).getTime(),
+        endMs: new Date(item.end).getTime(),
+      })),
+    [availability?.bookings],
+  );
+  const blockRanges = useMemo<Array<TimelineRange<AvailabilityBlock>>>(
+    () =>
+      (availability?.blocks ?? []).map((item) => ({
+        item,
+        startMs: new Date(item.start).getTime(),
+        endMs: new Date(item.end).getTime(),
+      })),
+    [availability?.blocks],
+  );
+  // Stessa griglia del calendario pubblico, ma escludendo la propria prenotazione dai conflitti
+  // (ignoreBookingId): modificando i propri orari lo slot occupato da me non deve risultare occupato.
+  const timelineSlots = useMemo(
+    () =>
+      computeTimelineSlots({
+        options,
+        selectedDate,
+        selectedTime,
+        startMs,
+        endMs,
+        bookingRanges,
+        blockRanges,
+        ignoreBookingId: booking?.id,
+      }),
+    [options, selectedDate, selectedTime, startMs, endMs, bookingRanges, blockRanges, booking?.id],
+  );
 
   useEffect(() => {
     startTransition(async () => {
@@ -317,64 +336,18 @@ export function ManageBooking({
                   </label>
                 </div>
 
-                <div className="booking-controls compact-controls">
-                  <div>
-                    <div className="control-heading">
-                      <span>Durata</span>
-                    </div>
-                    <div className="duration-row" role="group" aria-label="Durata prenotazione">
-                      {bookingDurationOptions.map((minutes) => (
-                        <button
-                          aria-pressed={duration === minutes}
-                          className={`duration-chip ${duration === minutes ? "active" : ""}`}
-                          key={minutes}
-                          onClick={() => setDuration(minutes)}
-                          type="button"
-                        >
-                          {minutes}m
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="control-heading timeline-heading">
-                    <span>Orario di inizio</span>
-                  </div>
-                </div>
-
-                <div className="timeline manage-timeline" role="group" aria-label="Orario di inizio">
-                  {options.map((option) => {
-                    const slotStart = dateTimeFromParts(selectedDate, option);
-                    const slotEnd = addMinutes(slotStart, 15);
-                    const conflictingBooking = availability?.bookings.find(
-                      (item) => item.id !== booking.id && rangeOverlaps(slotStart, slotEnd, item.start, item.end),
-                    );
-                    const conflictingBlock = availability?.blocks.find((item) =>
-                      rangeOverlaps(slotStart, slotEnd, item.start, item.end),
-                    );
-                    const isSelected = rangeOverlaps(slotStart, slotEnd, start.toISOString(), end.toISOString());
-                    const isSelectedStart = option === selectedTime;
-                    const disabled = Boolean(conflictingBooking || conflictingBlock);
-
-                    return (
-                      <button
-                        aria-pressed={isSelectedStart}
-                        className={`time-slot ${conflictingBooking ? "busy" : ""} ${
-                          conflictingBlock ? "blocked" : ""
-                        } ${isSelectedStart ? "selected-start" : isSelected ? "selected-range" : ""}`}
-                        disabled={disabled}
-                        key={option}
-                        onClick={() => setSelectedTime(option)}
-                        title={conflictingBooking ? `Prenotato da ${conflictingBooking.organizerName}` : conflictingBlock?.reason}
-                        type="button"
-                      >
-                        <span>{option}</span>
-                        {conflictingBooking ? <small>{conflictingBooking.organizerName}</small> : null}
-                        {conflictingBlock ? <small>{conflictingBlock.reason}</small> : null}
-                      </button>
-                    );
-                  })}
-                </div>
+                <BookingTimeGrid
+                  durationOptions={bookingDurationOptions}
+                  duration={duration}
+                  onDurationChange={setDuration}
+                  slots={timelineSlots}
+                  onSelectTime={setSelectedTime}
+                  compact
+                  timelineClassName="timeline manage-timeline"
+                  timelineAriaLabel="Orario di inizio"
+                  busyLabel={(item) => item.organizerName}
+                  busyTitle={(item) => `Prenotato da ${item.organizerName}`}
+                />
 
                 {selectionConflict ? <div className="notice error" role="alert" aria-live="assertive">{selectionConflict}</div> : null}
                 {notice ? (

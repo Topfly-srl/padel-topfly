@@ -4,15 +4,10 @@ import {
   CalendarDays,
   Check,
   Clock3,
-  Copy,
-  Download,
   Edit3,
   FileText,
-  Lock,
   LogOut,
   MailWarning,
-  RotateCcw,
-  Shield,
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
@@ -24,15 +19,24 @@ import {
   defaultClosingHour,
   defaultOpeningHour,
 } from "@/lib/booking-constants";
-import { auditActionLabel, bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
+import { bookingStatusLabel } from "@/lib/booking-copy";
+import {
+  dateTimeFromParts,
+  errorText,
+  localTime,
+  networkErrorText,
+  pad,
+  readApiError,
+  syncLabel,
+  type Notice,
+} from "@/lib/booking-ui";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import {
   bookingTimeOptions,
+  computeTimelineSlots,
   findOverlappingTimelineItem,
-  rangeOverlapsMs,
   type TimelineRange,
 } from "@/lib/timeline-slots";
-import { retriableWaiverEmailLegs, type WaiverMailLeg } from "@/lib/waiver-email";
 import type { BookingInitialState } from "@/lib/booking-initial-state";
 import type {
   AdminStats,
@@ -43,8 +47,11 @@ import type {
   CurrentUser,
   MyBooking,
 } from "@/lib/types";
-import { auditActions } from "@/lib/types";
+import { AdminPanel } from "@/components/admin/admin-panel";
+import { type AdminWaiverItem } from "@/components/admin/admin-waivers-section";
+import { BookingTimeGrid } from "@/components/booking-time-grid";
 import { GuestLinkPanel } from "@/components/guest-link-panel";
+import { MyBookingsSection } from "@/components/my-bookings-section";
 import { PendingSignaturePanel } from "@/components/pending-signature-panel";
 
 type AvailabilityResponse = {
@@ -65,52 +72,18 @@ type AvailabilityResponse = {
   blocks: AvailabilityBlock[];
 };
 
-type Notice = {
-  type: "success" | "error" | "info" | "warning";
-  text: string;
-};
-
 type GuestWaiverLinks = Record<string, string>;
-
-type AdminWaiverItem = {
-  id: string;
-  bookingId: string;
-  bookingRevision: number;
-  signerRole: "ORGANIZER" | "GUEST";
-  signerName: string;
-  signerEmail: string;
-  signedAt: string;
-  status: "ACTIVE" | "CANCELED";
-  emailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
-  emailError: string | null;
-  guestEmailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
-  guestEmailError: string | null;
-  signerEmailStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
-  signerEmailError: string | null;
-  bookingStart: string;
-  bookingEnd: string;
-  playerCount: number;
-};
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
 const guestWaiverLinksStorageKey = "topfly-padel.guest-waiver-links.v1";
 const adminWaiverPageSize = 50;
 const adminAuditPageSize = 40;
 
-function statsWeekLabel(weekStart: string) {
-  return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" }).format(
-    dateTimeFromParts(weekStart, "00:00"),
-  );
-}
 const fallbackInitialState: BookingInitialState = {
   date: "1970-01-01",
   time: "18:00",
   dateKeys: ["1970-01-01"],
 };
-function pad(value: number) {
-  return value.toString().padStart(2, "0");
-}
-
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
@@ -127,31 +100,6 @@ function durationLabel(minutes: number) {
   if (minutes === 60) return "1 ora";
   if (minutes % 60 === 0) return `${minutes / 60} ore`;
   return `${minutes} min`;
-}
-
-function localTime(date: Date) {
-  return new Intl.DateTimeFormat("it-IT", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function localDateTime(date: Date) {
-  return new Intl.DateTimeFormat("it-IT", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function localDay(date: Date) {
-  return new Intl.DateTimeFormat("it-IT", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-  }).format(date);
 }
 
 function localSummaryDay(date: Date) {
@@ -173,54 +121,12 @@ function humanDay(date: Date, today: string, tomorrow: string) {
   }).format(date);
 }
 
-function dateTimeFromParts(day: string, time: string) {
-  return new Date(`${day}T${time}:00`);
-}
-
 function rangeMatches(start: Date, end: Date, itemStart: string, itemEnd: string) {
   return start.getTime() === new Date(itemStart).getTime() && end.getTime() === new Date(itemEnd).getTime();
 }
 
-async function readApiError(response: Response) {
-  const json = (await response.json().catch(() => null)) as { error?: string } | null;
-  return json?.error ?? "Richiesta non riuscita.";
-}
-
-function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
-// Mostrato quando fetch lancia (rete assente), non quando la risposta e' un errore applicativo.
-const networkErrorText = "Rete non disponibile. Controlla la connessione e riprova.";
-
-function syncLabel(status: string, bookingStatus?: string) {
-  const isCanceled = bookingStatus === "CANCELED";
-  const isPendingSignatures = bookingStatus === "PENDING_SIGNATURES";
-
-  if (isPendingSignatures) {
-    return null;
-  }
-
-  if (status === "SYNCED") {
-    return isCanceled ? "Cancellazione Outlook inviata" : "Invito Outlook inviato";
-  }
-  if (status === "FAILED") {
-    return isCanceled ? "Cancellazione Outlook non riuscita" : "Email non inviata";
-  }
-  if (status === "PENDING") {
-    return isCanceled ? "Cancellazione Outlook in preparazione" : "Invito Outlook in preparazione";
-  }
-  return null;
-}
-
 function isActiveBooking(booking: Pick<AvailabilityBooking, "status">) {
   return booking.status === "CONFIRMED" || booking.status === "PENDING_SIGNATURES";
-}
-
-function bookingStatusTone(status: AvailabilityBooking["status"]) {
-  if (status === "PENDING_SIGNATURES") return "warning";
-  if (status === "CONFIRMED") return "success";
-  return "neutral";
 }
 
 function bookingSuccessText(status: string) {
@@ -233,33 +139,6 @@ function cancellationSuccessText(status: string) {
   if (status === "SYNCED") return "Prenotazione annullata. Cancellazione Outlook inviata.";
   if (status === "FAILED") return "Prenotazione annullata. Cancellazione Outlook non riuscita.";
   return "Prenotazione annullata.";
-}
-
-function waiverEmailStatusLabel(status: AdminWaiverItem["emailStatus"]) {
-  if (status === "SENT") return "Inviata";
-  if (status === "FAILED") return "Da reinviare";
-  if (status === "SKIPPED") return "Non configurata";
-  return "In coda";
-}
-
-function waiverEmailStatusTone(status: AdminWaiverItem["emailStatus"]) {
-  if (status === "SENT") return "success";
-  if (status === "FAILED") return "danger";
-  if (status === "SKIPPED") return "neutral";
-  return "warning";
-}
-
-function waiverRetryLabel(legs: WaiverMailLeg[]) {
-  if (legs.length > 1) return "Reinvia PDF Direzione e copia referente";
-  return legs[0] === "signer" ? "Reinvia copia al referente" : "Reinvia PDF Direzione";
-}
-
-function waiverSignatureStatusLabel(status: AdminWaiverItem["status"]) {
-  return status === "ACTIVE" ? "Attiva" : "Rinunciata";
-}
-
-function waiverSignatureStatusTone(status: AdminWaiverItem["status"]) {
-  return status === "ACTIVE" ? "success" : "neutral";
 }
 
 function waiverDeliveryCopy(status: AdminWaiverItem["emailStatus"] | null) {
@@ -361,9 +240,6 @@ export function BookingApp({
   const [adminWaiverQuery, setAdminWaiverQuery] = useState("");
   const [adminWaiverNextCursor, setAdminWaiverNextCursor] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
-  const [blockStart, setBlockStart] = useState("09:00");
-  const [blockEnd, setBlockEnd] = useState("10:00");
-  const [blockReason, setBlockReason] = useState("Manutenzione");
   const [isAvailabilityLoading, setIsAvailabilityLoading] = useState(!initialAvailability);
   const [isMyBookingsLoading, setIsMyBookingsLoading] = useState(false);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
@@ -425,26 +301,15 @@ export function BookingApp({
   );
   const timelineSlots = useMemo(
     () =>
-      options.map((option) => {
-        const slotStart = dateTimeFromParts(selectedDate, option);
-        const slotStartMs = slotStart.getTime();
-        const slotEndMs = slotStartMs + 15 * 60_000;
-        const booking = findOverlappingTimelineItem(
-          bookingRanges,
-          slotStartMs,
-          slotEndMs,
-          editingBookingId,
-        );
-        const block = findOverlappingTimelineItem(blockRanges, slotStartMs, slotEndMs);
-        const isSelected = rangeOverlapsMs(slotStartMs, slotEndMs, startMs, endMs);
-
-        return {
-          option,
-          booking,
-          block,
-          isSelected,
-          isSelectedStart: option === selectedTime,
-        };
+      computeTimelineSlots({
+        options,
+        selectedDate,
+        selectedTime,
+        startMs,
+        endMs,
+        bookingRanges,
+        blockRanges,
+        ignoreBookingId: editingBookingId,
       }),
     [blockRanges, bookingRanges, editingBookingId, endMs, options, selectedDate, selectedTime, startMs],
   );
@@ -991,50 +856,6 @@ export function BookingApp({
     setNotice({ type: "info", text: "Modifica gli orari e salva." });
   }
 
-  async function createBlock() {
-    try {
-      const response = await fetch(appPath("/api/admin/blocks"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          start: dateTimeFromParts(selectedDate, blockStart).toISOString(),
-          end: dateTimeFromParts(selectedDate, blockEnd).toISOString(),
-          reason: blockReason,
-        }),
-      });
-
-      if (!response.ok) {
-        setNotice({ type: "error", text: await readApiError(response) });
-        return;
-      }
-
-      setNotice({ type: "success", text: "Blocco admin creato." });
-      await refresh();
-    } catch {
-      setNotice({ type: "error", text: networkErrorText });
-    }
-  }
-
-  async function deleteBlock(id: string) {
-    if (!window.confirm("Vuoi rimuovere questo blocco admin?")) {
-      return;
-    }
-
-    try {
-      const response = await fetch(appPath(`/api/admin/blocks/${id}`), { method: "DELETE" });
-
-      if (!response.ok) {
-        setNotice({ type: "error", text: await readApiError(response) });
-        return;
-      }
-
-      setNotice({ type: "info", text: "Blocco rimosso." });
-      await refresh();
-    } catch {
-      setNotice({ type: "error", text: networkErrorText });
-    }
-  }
-
   async function retryWaiverEmail(signatureId: string) {
     try {
       const response = await fetch(appPath(`/api/admin/waivers/${signatureId}/retry-email`), {
@@ -1137,59 +958,21 @@ export function BookingApp({
               {isAvailabilityBusy ? <span className="loading-pill">Aggiorno</span> : null}
             </div>
 
-            <div className="booking-controls">
-              <div>
-                <div className="control-heading">
-                  <span>Durata</span>
-                </div>
-                <div className="duration-row" role="group" aria-label="Durata prenotazione">
-                  {durationOptions.map((minutes) => (
-                    <button
-                      className={`duration-chip ${duration === minutes ? "active" : ""}`}
-                      key={minutes}
-                      onClick={() => setDuration(minutes)}
-                      aria-pressed={duration === minutes}
-                      type="button"
-                    >
-                      {minutes}m
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="control-heading timeline-heading">
-                <span>Orario di inizio</span>
-              </div>
-            </div>
-
-            <div className="timeline" role="group" aria-label="Disponibilita del giorno" ref={timelineRef}>
-              {timelineSlots.map(({ option, booking, block, isSelected, isSelectedStart }) => {
-                return (
-                  <button
-                    className={`time-slot ${booking ? "busy" : ""} ${
-                      booking?.status === "PENDING_SIGNATURES" ? "pending-signatures" : ""
-                    } ${block ? "blocked" : ""} ${
-                      isSelectedStart ? "selected-start" : isSelected ? "selected-range" : ""
-                    }`}
-                    data-selected={isSelected ? "true" : undefined}
-                    disabled={Boolean(booking || block)}
-                    key={option}
-                    onClick={() => setSelectedTime(option)}
-                    aria-pressed={isSelectedStart}
-                    type="button"
-                    title={booking ? `${bookingStatusLabel(booking.status)} - ${booking.organizerName}` : block?.reason}
-                  >
-                    <span>{option}</span>
-                    {booking ? (
-                      <small>
-                        {booking.status === "PENDING_SIGNATURES" ? "Attesa firme" : booking.organizerName}
-                      </small>
-                    ) : null}
-                    {block ? <small>{block.reason}</small> : null}
-                  </button>
-                );
-              })}
-            </div>
+            <BookingTimeGrid
+              durationOptions={durationOptions}
+              duration={duration}
+              onDurationChange={setDuration}
+              slots={timelineSlots}
+              onSelectTime={setSelectedTime}
+              timelineAriaLabel="Disponibilita del giorno"
+              timelineRef={timelineRef}
+              markPending
+              trackSelected
+              busyLabel={(booking) =>
+                booking.status === "PENDING_SIGNATURES" ? "Attesa firme" : booking.organizerName
+              }
+              busyTitle={(booking) => `${bookingStatusLabel(booking.status)} - ${booking.organizerName}`}
+            />
           </section>
         </div>
 
@@ -1355,460 +1138,48 @@ export function BookingApp({
             ) : null}
           </section>
 
-          <section className="panel">
-            <div className="section-title spread">
-              <span>Le mie prenotazioni</span>
-              {isMyBookingsLoading ? (
-                <span className="loading-pill">Aggiorno</span>
-              ) : (
-                <span className="count-pill">{activeMyBookingCount}</span>
-              )}
-            </div>
-            <div className="booking-list">
-              {activeMyBookings.length ? (
-                activeMyBookings.map((booking) => {
-                  const guestLink = booking.guestWaiverUrl ?? guestWaiverLinks[booking.id];
-
-                  return (
-                    <article
-                      className={`booking-item compact ${booking.status.toLowerCase()} ${
-                        selectedOwnBooking?.id === booking.id ? "selected-booking" : ""
-                      }`}
-                      key={booking.id}
-                    >
-                      <div>
-                        <strong>
-                          {localDay(new Date(booking.start))}, {localTime(new Date(booking.start))} -{" "}
-                          {localTime(new Date(booking.end))}
-                        </strong>
-                        <small>
-                          <span className={`status-badge ${bookingStatusTone(booking.status)}`}>
-                            {bookingStatusLabel(booking.status)}
-                          </span>
-                          {syncLabel(booking.outlookSyncStatus, booking.status)
-                            ? ` · ${syncLabel(booking.outlookSyncStatus, booking.status)}`
-                            : ""}
-                        </small>
-                        <small>
-                          Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
-                        </small>
-                        {booking.status === "PENDING_SIGNATURES" ? (
-                          <small>{deadlineCopy(booking.signatureDeadlineAt)}</small>
-                        ) : null}
-                      </div>
-                      <div className="item-actions">
-                        {guestLink ? (
-                          <button
-                            className="mini-button"
-                            onClick={() => copyGuestWaiverLink(guestLink)}
-                            type="button"
-                            aria-label="Copia link firma ospiti"
-                            title="Copia link firma ospiti"
-                          >
-                            <Copy size={15} />
-                          </button>
-                        ) : null}
-                        <button
-                          className="mini-button"
-                          onClick={() => editBooking(booking)}
-                          type="button"
-                          aria-label="Modifica"
-                          title="Modifica"
-                        >
-                          <Edit3 size={15} />
-                        </button>
-                        <button
-                          className="mini-button danger"
-                          onClick={() => cancelBooking(booking)}
-                          type="button"
-                          aria-label="Cancella"
-                          title="Cancella"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })
-              ) : (
-                <p className="empty-state">Nessuna prenotazione attiva salvata su questo dispositivo.</p>
-              )}
-            </div>
-          </section>
+          <MyBookingsSection
+            bookings={activeMyBookings}
+            count={activeMyBookingCount}
+            isLoading={isMyBookingsLoading}
+            guestWaiverLinks={guestWaiverLinks}
+            selectedBookingId={selectedOwnBooking?.id ?? null}
+            onCopyGuestLink={copyGuestWaiverLink}
+            onEdit={editBooking}
+            onCancel={cancelBooking}
+          />
 
           {isAdmin ? (
-            <section className="panel admin-panel">
-              <div className="section-title">
-                <Shield size={18} />
-                <span>Admin</span>
-                {isAdminLoading ? <span className="loading-pill">Aggiorno</span> : null}
-              </div>
-
-              <details>
-                <summary>Blocchi admin</summary>
-                <div className="selector-row compact">
-                  <label>
-                    Da
-                    <select value={blockStart} onChange={(event) => setBlockStart(event.target.value)}>
-                      {options.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    A
-                    <select value={blockEnd} onChange={(event) => setBlockEnd(event.target.value)}>
-                      {options.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <label className="stack-label">
-                  Motivo
-                  <input
-                    value={blockReason}
-                    onChange={(event) => setBlockReason(event.target.value)}
-                  />
-                </label>
-                <button className="ghost-button full-width" onClick={createBlock} type="button">
-                  <Lock size={16} />
-                  Blocca fascia
-                </button>
-
-                {dayBlocks.length ? (
-                  <div className="booking-list">
-                    {dayBlocks.map((block) => (
-                      <article className="booking-item blocked-item" key={block.id}>
-                        <div>
-                          <strong>
-                            {localTime(new Date(block.start))} - {localTime(new Date(block.end))}
-                          </strong>
-                          <span>{block.reason}</span>
-                        </div>
-                        <button
-                          className="mini-button danger"
-                          onClick={() => deleteBlock(block.id)}
-                          type="button"
-                          aria-label="Rimuovi blocco"
-                          title="Rimuovi blocco"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
-              </details>
-
-              <details>
-                <summary>Prenotazioni del giorno</summary>
-                <div className="booking-list">
-                  {dayBookings.map((booking) => (
-                    <article className="booking-item" key={booking.id}>
-                      <div>
-                        <strong>{booking.organizerName}</strong>
-                        <span>
-                          {localTime(new Date(booking.start))} - {localTime(new Date(booking.end))}
-                        </span>
-                        <small>
-                          <span className={`status-badge ${bookingStatusTone(booking.status)}`}>
-                            {bookingStatusLabel(booking.status)}
-                          </span>{" "}
-                          Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
-                          {booking.waiverEmailStatus === "FAILED" ? " · email PDF da reinviare" : ""}
-                        </small>
-                        {booking.status === "PENDING_SIGNATURES" ? (
-                          <small className="sync-warning-text">
-                            Non usare il campo · {deadlineCopy(booking.signatureDeadlineAt)}
-                          </small>
-                        ) : (
-                          <small className="copy-state success">Campo utilizzabile</small>
-                        )}
-                      </div>
-                      <div className="item-actions">
-                        <button
-                          className="mini-button"
-                          onClick={() => editBooking(booking)}
-                          type="button"
-                          aria-label={`Modifica prenotazione di ${booking.organizerName}`}
-                          title="Modifica prenotazione"
-                        >
-                          <Edit3 size={15} />
-                        </button>
-                        <button
-                          className="mini-button danger"
-                          onClick={() => cancelBooking(booking)}
-                          type="button"
-                          aria-label={`Cancella prenotazione di ${booking.organizerName}`}
-                          title="Cancella prenotazione"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </details>
-
-              <details>
-                <summary>
-                  Scarichi responsabilita {isAdminWaiversLoading ? <span className="loading-pill">Aggiorno</span> : null}
-                </summary>
-                <div className="admin-filter-row">
-                  <label>
-                    Stato email PDF
-                    <select
-                      value={adminWaiverStatusFilter}
-                      onChange={(event) => {
-                        setAdminWaiverStatusFilter(event.target.value as AdminWaiverItem["emailStatus"] | "ALL");
-                      }}
-                    >
-                      <option value="ALL">Tutti</option>
-                      <option value="FAILED">Da reinviare</option>
-                      <option value="PENDING">In coda</option>
-                      <option value="SENT">Inviata</option>
-                      <option value="SKIPPED">Non configurata</option>
-                    </select>
-                  </label>
-                  <label>
-                    Ruolo
-                    <select
-                      value={adminWaiverRoleFilter}
-                      onChange={(event) =>
-                        setAdminWaiverRoleFilter(event.target.value as AdminWaiverItem["signerRole"] | "ALL")
-                      }
-                    >
-                      <option value="ALL">Tutti</option>
-                      <option value="ORGANIZER">Referente</option>
-                      <option value="GUEST">Ospite</option>
-                    </select>
-                  </label>
-                  <label>
-                    Cerca
-                    <input
-                      value={adminWaiverQuery}
-                      onChange={(event) => setAdminWaiverQuery(event.target.value)}
-                      placeholder="Nome o email"
-                    />
-                  </label>
-                  {isAdminWaiversLoading ? (
-                    <span className="loading-pill">Aggiorno</span>
-                  ) : (
-                    <span className="count-pill">{adminWaivers.length}</span>
-                  )}
-                </div>
-                <div className="booking-list">
-                  {adminWaivers.length ? (
-                    <>
-                      {adminWaivers.map((waiver) => {
-                        const retryLegs = retriableWaiverEmailLegs(waiver);
-
-                        return (
-                          <article className="booking-item" key={waiver.id}>
-                            <div>
-                              <strong>{waiver.signerName}</strong>
-                              <span>
-                                {waiver.signerRole === "ORGANIZER" ? "Referente" : "Ospite"} -{" "}
-                                {localDay(new Date(waiver.bookingStart))}, {localTime(new Date(waiver.bookingStart))} -{" "}
-                                {localTime(new Date(waiver.bookingEnd))}
-                              </span>
-                              <small>
-                                <span className={`status-badge ${waiverSignatureStatusTone(waiver.status)}`}>
-                                  Firma {waiverSignatureStatusLabel(waiver.status)}
-                                </span>{" "}
-                                <span className={`status-badge ${waiverEmailStatusTone(waiver.emailStatus)}`}>
-                                  PDF Direzione {waiverEmailStatusLabel(waiver.emailStatus)}
-                                </span>{" "}
-                                {waiver.signerRole === "ORGANIZER" ? (
-                                  <span className={`status-badge ${waiverEmailStatusTone(waiver.signerEmailStatus)}`}>
-                                    Copia referente {waiverEmailStatusLabel(waiver.signerEmailStatus)}
-                                  </span>
-                                ) : (
-                                  <span className={`status-badge ${waiverEmailStatusTone(waiver.guestEmailStatus)}`}>
-                                    Email ospite {waiverEmailStatusLabel(waiver.guestEmailStatus)}
-                                  </span>
-                                )}
-                                {waiver.emailError ? ` - PDF: ${waiver.emailError.slice(0, 80)}` : ""}
-                                {waiver.signerEmailError ? ` - Referente: ${waiver.signerEmailError.slice(0, 80)}` : ""}
-                                {waiver.guestEmailError ? ` - Ospite: ${waiver.guestEmailError.slice(0, 80)}` : ""}
-                              </small>
-                            </div>
-                            <div className="item-actions">
-                              <a
-                                className="mini-button"
-                                href={appPath(`/api/admin/waivers/${waiver.id}/pdf`)}
-                                aria-label={`Scarica PDF di ${waiver.signerName}`}
-                                title="Scarica PDF"
-                              >
-                                <Download size={15} />
-                              </a>
-                              {retryLegs.length ? (
-                                <button
-                                  className="mini-button"
-                                  onClick={() => retryWaiverEmail(waiver.id)}
-                                  type="button"
-                                  aria-label={`${waiverRetryLabel(retryLegs)} di ${waiver.signerName}`}
-                                  title={waiverRetryLabel(retryLegs)}
-                                >
-                                  <RotateCcw size={15} />
-                                </button>
-                              ) : null}
-                            </div>
-                          </article>
-                        );
-                      })}
-                      {adminWaiverNextCursor ? (
-                        <button
-                          className="ghost-button full-width"
-                          disabled={isAdminWaiversLoading}
-                          onClick={loadMoreAdminWaivers}
-                          type="button"
-                        >
-                          Mostra altri
-                        </button>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="empty-state">Nessuno scarico corrisponde al filtro selezionato.</p>
-                  )}
-                </div>
-              </details>
-
-              <details>
-                <summary>
-                  Statistiche {isStatsLoading ? <span className="loading-pill">Aggiorno</span> : null}
-                </summary>
-                {stats ? (
-                  <div className="stats-grid">
-                    <div className="stat-block">
-                      <span className="stat-heading">Totale prenotazioni</span>
-                      <strong className="stat-total">{stats.totalBookings}</strong>
-                    </div>
-
-                    <div className="stat-block">
-                      <span className="stat-heading">Per stato</span>
-                      {stats.byStatus.map((entry) => (
-                        <div className="stat-line" key={entry.status}>
-                          <span>{bookingStatusLabel(entry.status)}</span>
-                          <strong>{entry.count}</strong>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="stat-block">
-                      <span className="stat-heading">Ultime 8 settimane</span>
-                      {stats.perWeek.map((entry) => (
-                        <div className="stat-line" key={entry.weekStart}>
-                          <span>Sett. {statsWeekLabel(entry.weekStart)}</span>
-                          <strong>{entry.count}</strong>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="stat-block">
-                      <span className="stat-heading">Per fascia oraria</span>
-                      {stats.perStartHour.length ? (
-                        stats.perStartHour.map((entry) => (
-                          <div className="stat-line" key={entry.hour}>
-                            <span>{pad(entry.hour)}:00</span>
-                            <strong>{entry.count}</strong>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="empty-state">Nessuna prenotazione registrata.</p>
-                      )}
-                    </div>
-
-                    <div className="stat-block">
-                      <span className="stat-heading">Annullamenti</span>
-                      <div className="stat-line">
-                        <span>Automatici (firme mancanti)</span>
-                        <strong>
-                          {stats.cancellations.auto} · {stats.cancellations.autoPercent}%
-                        </strong>
-                      </div>
-                      <div className="stat-line">
-                        <span>Manuali</span>
-                        <strong>
-                          {stats.cancellations.manual} · {stats.cancellations.manualPercent}%
-                        </strong>
-                      </div>
-                      {stats.cancellations.reasons.map((entry) => (
-                        <div className="stat-line stat-line-sub" key={entry.reason}>
-                          <span>{entry.reason}</span>
-                          <strong>{entry.count}</strong>
-                        </div>
-                      ))}
-                      {stats.cancellations.manualWithoutReason ? (
-                        <div className="stat-line stat-line-sub">
-                          <span>Senza causale</span>
-                          <strong>{stats.cancellations.manualWithoutReason}</strong>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : isStatsLoading ? null : (
-                  <p className="empty-state">Statistiche non disponibili.</p>
-                )}
-              </details>
-
-              <details>
-                <summary>Storico recente {isAuditLoading ? <span className="loading-pill">Aggiorno</span> : null}</summary>
-                <div className="admin-filter-row">
-                  <label>
-                    Azione
-                    <select
-                      value={auditActionFilter}
-                      onChange={(event) => setAuditActionFilter(event.target.value as AuditAction | "ALL")}
-                    >
-                      <option value="ALL">Tutte</option>
-                      {auditActions.map((action) => (
-                        <option key={action} value={action}>
-                          {auditActionLabel(action)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {isAuditLoading ? (
-                    <span className="loading-pill">Aggiorno</span>
-                  ) : (
-                    <span className="count-pill">{audit.length}</span>
-                  )}
-                </div>
-                <div className="audit-list">
-                  {audit.length ? (
-                    <>
-                      {audit.map((item) => (
-                        <div className="audit-row" key={item.id}>
-                          <span>{auditActionLabel(item.action)}</span>
-                          <small>
-                            {item.actorEmail} - {localDateTime(new Date(item.createdAt))}
-                          </small>
-                          {item.cancelReason ? <small>Causale: {item.cancelReason}</small> : null}
-                        </div>
-                      ))}
-                      {auditNextCursor ? (
-                        <button
-                          className="ghost-button full-width"
-                          disabled={isAuditLoading}
-                          onClick={loadMoreAudit}
-                          type="button"
-                        >
-                          Mostra altri
-                        </button>
-                      ) : null}
-                    </>
-                  ) : isAuditLoading ? null : (
-                    <p className="empty-state">Nessuna attività recente registrata.</p>
-                  )}
-                </div>
-              </details>
-            </section>
+            <AdminPanel
+              isAdminLoading={isAdminLoading}
+              options={options}
+              selectedDate={selectedDate}
+              dayBlocks={dayBlocks}
+              onRefresh={refresh}
+              setNotice={setNotice}
+              dayBookings={dayBookings}
+              onEditBooking={editBooking}
+              onCancelBooking={cancelBooking}
+              adminWaivers={adminWaivers}
+              adminWaiverStatusFilter={adminWaiverStatusFilter}
+              onWaiverStatusFilterChange={setAdminWaiverStatusFilter}
+              adminWaiverRoleFilter={adminWaiverRoleFilter}
+              onWaiverRoleFilterChange={setAdminWaiverRoleFilter}
+              adminWaiverQuery={adminWaiverQuery}
+              onWaiverQueryChange={setAdminWaiverQuery}
+              isAdminWaiversLoading={isAdminWaiversLoading}
+              adminWaiverNextCursor={adminWaiverNextCursor}
+              onLoadMoreWaivers={loadMoreAdminWaivers}
+              onRetryWaiver={retryWaiverEmail}
+              stats={stats}
+              isStatsLoading={isStatsLoading}
+              audit={audit}
+              auditActionFilter={auditActionFilter}
+              onAuditActionFilterChange={setAuditActionFilter}
+              isAuditLoading={isAuditLoading}
+              auditNextCursor={auditNextCursor}
+              onLoadMoreAudit={loadMoreAudit}
+            />
           ) : null}
         </aside>
       </section>
