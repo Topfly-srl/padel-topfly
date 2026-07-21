@@ -14,11 +14,7 @@ import Image from "next/image";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
-import {
-  bookingDurationOptions,
-  defaultClosingHour,
-  defaultOpeningHour,
-} from "@/lib/booking-constants";
+import { bookingDurationOptions } from "@/lib/booking-constants";
 import { bookingStatusLabel } from "@/lib/booking-copy";
 import {
   dateTimeFromParts,
@@ -64,8 +60,6 @@ type AvailabilityResponse = {
     maxFutureBookings: number;
     durationOptions: readonly number[];
     durationPresets: readonly number[];
-    openingHour: number;
-    closingHour: number;
     allowedDomain: string;
   };
   bookings: AvailabilityBooking[];
@@ -76,6 +70,8 @@ type GuestWaiverLinks = Record<string, string>;
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
 const guestWaiverLinksStorageKey = "topfly-padel.guest-waiver-links.v1";
+// La griglia oraria copre sempre l'intera giornata: e' una costante, non dipende da impostazioni.
+const options = bookingTimeOptions();
 const adminWaiverPageSize = 50;
 const adminAuditPageSize = 40;
 
@@ -253,12 +249,6 @@ export function BookingApp({
     [initialState.dateKeys],
   );
 
-  const openingHour = availability?.settings.openingHour ?? defaultOpeningHour;
-  const closingHour = availability?.settings.closingHour ?? defaultClosingHour;
-  const options = useMemo(
-    () => bookingTimeOptions(openingHour, closingHour),
-    [openingHour, closingHour],
-  );
   const currentAvailability = availability?.date === selectedDate ? availability : null;
   const isAvailabilityBusy = isAvailabilityLoading || availability?.date !== selectedDate;
   const isAdminLoading = isAuditLoading || isStatsLoading || isAdminWaiversLoading;
@@ -311,7 +301,7 @@ export function BookingApp({
         blockRanges,
         ignoreBookingId: editingBookingId,
       }),
-    [blockRanges, bookingRanges, editingBookingId, endMs, options, selectedDate, selectedTime, startMs],
+    [blockRanges, bookingRanges, editingBookingId, endMs, selectedDate, selectedTime, startMs],
   );
 
   const selectedOwnBooking = useMemo(

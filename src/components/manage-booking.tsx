@@ -7,11 +7,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { CancelReasonSelect } from "@/components/cancel-reason-select";
 import { resolveCancelReason, type CancelReasonMode } from "@/lib/cancel-reason";
-import {
-  bookingDurationOptions,
-  defaultClosingHour,
-  defaultOpeningHour,
-} from "@/lib/booking-constants";
+import { bookingDurationOptions } from "@/lib/booking-constants";
 import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
 import {
   dateTimeFromParts,
@@ -31,13 +27,11 @@ import { BookingTimeGrid } from "@/components/booking-time-grid";
 type AvailabilityResponse = {
   bookings: AvailabilityBooking[];
   blocks: AvailabilityBlock[];
-  settings?: {
-    openingHour: number;
-    closingHour: number;
-  };
 };
 
 const tokenStorageKey = "topfly-padel.tokens.v1";
+// La griglia oraria copre sempre l'intera giornata: e' una costante, non dipende da impostazioni.
+const options = bookingTimeOptions();
 
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -100,12 +94,6 @@ export function ManageBooking({
   const [cancelReasonMode, setCancelReasonMode] = useState<CancelReasonMode>("");
   const [cancelReasonText, setCancelReasonText] = useState("");
   const [isPending, startTransition] = useTransition();
-  const openingHour = availability?.settings?.openingHour ?? defaultOpeningHour;
-  const closingHour = availability?.settings?.closingHour ?? defaultClosingHour;
-  const options = useMemo(
-    () => bookingTimeOptions(openingHour, closingHour),
-    [openingHour, closingHour],
-  );
   const start = useMemo(
     () => dateTimeFromParts(selectedDate, selectedTime),
     [selectedDate, selectedTime],
@@ -159,7 +147,7 @@ export function ManageBooking({
         blockRanges,
         ignoreBookingId: booking?.id,
       }),
-    [options, selectedDate, selectedTime, startMs, endMs, bookingRanges, blockRanges, booking?.id],
+    [selectedDate, selectedTime, startMs, endMs, bookingRanges, blockRanges, booking?.id],
   );
 
   // Con la griglia a giornata piena (96 slot da 00:00) l'orario della prenotazione puo' stare

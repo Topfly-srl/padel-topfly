@@ -375,7 +375,7 @@ async function validateNoConflicts(
     end: Date;
     organizerEmail: string;
     ignoreBookingId?: string;
-    enforceOpeningHours?: boolean;
+    enforceEndOfDay?: boolean;
   },
 ) {
   const now = new Date();
@@ -419,7 +419,7 @@ async function validateNoConflicts(
     start: input.start,
     end: input.end,
     futureBookingCount,
-    enforceOpeningHours: input.enforceOpeningHours,
+    enforceEndOfDay: input.enforceEndOfDay,
   });
 
   if (overlappingBookings.length > 0) {
@@ -773,9 +773,9 @@ export async function updateBooking(
             end: nextEnd,
             organizerEmail: booking.organizerEmail,
             ignoreBookingId: booking.id,
-            // Solo lo spostamento su un nuovo slot va vincolato alla fascia: una prenotazione
-            // gia' fuori fascia resta modificabile finche' non si cambia l'orario.
-            enforceOpeningHours: timeChanged,
+            // Solo lo spostamento su un nuovo slot va vincolato alla mezzanotte: una prenotazione
+            // esistente resta modificabile finche' non si cambia l'orario.
+            enforceEndOfDay: timeChanged,
           });
         }
 

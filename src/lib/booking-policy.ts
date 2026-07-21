@@ -9,9 +9,6 @@ export const bookingPolicy = {
   maxDurationMinutes: 120,
   maxAdvanceDays: 14,
   maxFutureBookings: 2,
-  // Fascia di apertura in ora locale del fuso configurato (default 0-24, override via env).
-  openingHour: appConfig.openingHour,
-  closingHour: appConfig.closingHour,
   durationOptions: bookingDurationOptions,
   durationPresets: bookingDurationOptions,
 } as const;
@@ -21,17 +18,14 @@ export type BookingValidationInput = {
   end: Date;
   now?: Date;
   futureBookingCount?: number;
-  // Le prenotazioni gia' esistenti fuori fascia restano gestibili: la modifica che non tocca
-  // lo slot passa false per non rifiutare uno slot legittimo scelto prima della regola.
-  enforceOpeningHours?: boolean;
+  // La griglia e' giornaliera: una partita deve chiudersi entro la mezzanotte locale del giorno
+  // in cui inizia. La modifica che non tocca lo slot passa false per non rifiutare un orario
+  // legittimo gia' esistente.
+  enforceEndOfDay?: boolean;
 };
 
-function formatHourLabel(hour: number) {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
-
-// Minuti trascorsi dalla mezzanotte locale (fuso configurato): serve a confrontare inizio e fine
-// con la fascia di apertura senza farsi ingannare dall'orario UTC sottostante.
+// Minuti trascorsi dalla mezzanotte locale (fuso configurato): serve a confrontare la fine della
+// partita con la mezzanotte senza farsi ingannare dall'orario UTC sottostante.
 function localMinutesOfDay(date: Date) {
   const [hours, minutes] = formatInTimeZone(date, appConfig.timeZone, "HH:mm")
     .split(":")
@@ -106,23 +100,13 @@ export function validateBookingPolicy(input: BookingValidationInput) {
     errors.push("Inizio e fine devono essere arrotondati a 15 minuti.");
   }
 
-  if (input.enforceOpeningHours !== false) {
-    const openingMinutes = bookingPolicy.openingHour * 60;
-    const closingMinutes = bookingPolicy.closingHour * 60;
-    const startMinutes = localMinutesOfDay(input.start);
-    // La fine e' inizio locale + durata: cosi' resta coerente anche a cavallo della mezzanotte
-    // senza dover gestire l'avvolgimento del giorno.
-    const endMinutes = startMinutes + duration;
+  if (input.enforceEndOfDay !== false) {
+    // La fine e' inizio locale + durata: cosi' lo sforamento della mezzanotte si vede anche
+    // senza dover gestire l'avvolgimento del giorno (le 24:00 esatte restano valide).
+    const endMinutes = localMinutesOfDay(input.start) + duration;
 
-    if (startMinutes < openingMinutes || endMinutes > closingMinutes) {
-      // Con la fascia a giornata piena (00-24) l'unica violazione possibile e' sforare la
-      // mezzanotte: "prenotabile dalle 00:00 alle 24:00" suonerebbe come un controsenso.
-      const fullDayBand = openingMinutes === 0 && closingMinutes === 24 * 60;
-      errors.push(
-        fullDayBand
-          ? "La prenotazione deve terminare entro la mezzanotte."
-          : `Il campo è prenotabile dalle ${formatHourLabel(bookingPolicy.openingHour)} alle ${formatHourLabel(bookingPolicy.closingHour)}.`,
-      );
+    if (endMinutes > 24 * 60) {
+      errors.push("La prenotazione deve terminare entro la mezzanotte.");
     }
   }
 

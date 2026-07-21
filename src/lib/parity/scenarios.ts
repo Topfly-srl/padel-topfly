@@ -7,14 +7,13 @@ import type {
   WaiverInput,
 } from "@/lib/waiver-service";
 import { appConfig } from "@/lib/config";
-import { bookingPolicy } from "@/lib/booking-policy";
 import { waiverRegulationPath } from "@/lib/waiver-pdf";
 import {
+  acrossMidnightSlot,
   buildWaiverInput,
   futureSlot,
   hoursFromNowSlot,
   misalignedSlot,
-  outOfHoursSlot,
   pastStartedSlot,
 } from "@/lib/parity/fixtures";
 
@@ -92,19 +91,9 @@ function createInput(overrides: Partial<ParityCreateInput> & Pick<ParityCreateIn
   };
 }
 
-// Etichetta oraria come la produce la booking policy (padding a due cifre + ":00"): il messaggio
-// di fascia oraria viene ricostruito dalla stessa config che usano entrambi gli attuatori, cosi'
-// l'attesa condivisa resta corretta anche se le ore di apertura vengono cambiate via env.
-function hourLabel(hour: number) {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
-
-// Stesso bivio della booking policy: con la giornata piena (default 00-24) il messaggio parla di
-// mezzanotte, con una fascia ridotta via env riporta gli orari di apertura.
-const outOfHoursMessage =
-  bookingPolicy.openingHour === 0 && bookingPolicy.closingHour === 24
-    ? "La prenotazione deve terminare entro la mezzanotte."
-    : `Il campo è prenotabile dalle ${hourLabel(bookingPolicy.openingHour)} alle ${hourLabel(bookingPolicy.closingHour)}.`;
+// L'unico vincolo orario rimasto: la partita deve chiudersi entro la mezzanotte del giorno in
+// cui inizia (la fascia oraria di apertura e' stata rimossa: il campo e' prenotabile 00-24).
+const acrossMidnightMessage = "La prenotazione deve terminare entro la mezzanotte.";
 
 // Il contratto di parita' sugli errori e' il MESSAGGIO esatto, non solo il fatto che si sollevi
 // un'eccezione: una divergenza silenziosa spesso e' proprio un messaggio diverso o un errore in
@@ -206,9 +195,9 @@ export function registerCreateBookingParity(driver: ParityDriver) {
       await settle();
     });
 
-    it("rifiuta uno slot fuori dalla fascia di apertura", async () => {
-      const slot = outOfHoursSlot(1);
-      await expectRejection(driver.createBooking(createInput(slot)), outOfHoursMessage);
+    it("rifiuta una partita che sfora la mezzanotte", async () => {
+      const slot = acrossMidnightSlot(1);
+      await expectRejection(driver.createBooking(createInput(slot)), acrossMidnightMessage);
 
       await settle();
     });

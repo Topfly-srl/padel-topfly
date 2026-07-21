@@ -301,7 +301,7 @@ function assertDemoBookingAllowed(
   start: Date,
   end: Date,
   ignoreBookingId?: string,
-  enforceOpeningHours = true,
+  enforceEndOfDay = true,
 ) {
   demoProcessDeadlines();
   const futureBookingCount = bookings.filter(
@@ -316,7 +316,7 @@ function assertDemoBookingAllowed(
     start,
     end,
     futureBookingCount,
-    enforceOpeningHours,
+    enforceEndOfDay,
   });
 
   if (
@@ -528,8 +528,8 @@ export async function demoUpdateBooking(
   const guestWaiverToken = requiresFreshWaivers ? createManageToken() : undefined;
 
   if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
-    // Come in produzione: la fascia vincola solo lo spostamento su un nuovo slot, cosi' una
-    // prenotazione gia' fuori fascia resta modificabile finche' non si cambia l'orario.
+    // Come in produzione: il vincolo della mezzanotte vale solo per lo spostamento su un nuovo
+    // slot, cosi' una prenotazione esistente resta modificabile finche' non si cambia l'orario.
     assertDemoBookingAllowed(booking.organizerEmail, nextStart, nextEnd, booking.id, timeChanged);
   }
 

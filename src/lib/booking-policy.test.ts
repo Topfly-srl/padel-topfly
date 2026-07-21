@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { bookingDurationOptions } from "@/lib/booking-constants";
 import {
   bookingPolicy,
@@ -9,8 +9,8 @@ import {
 
 const now = new Date("2026-06-03T10:00:00.000Z");
 // Fuso Europe/Rome in giugno = CEST (UTC+2): la mezzanotte locale corrisponde alle 22:00Z del
-// giorno prima. Con la fascia di default a giornata piena (00-24) l'unica violazione possibile
-// e' una prenotazione che sfora la mezzanotte.
+// giorno prima. Il campo e' prenotabile tutto il giorno: l'unico vincolo orario e' che la
+// partita finisca entro la mezzanotte.
 const midnightMessage = "La prenotazione deve terminare entro la mezzanotte.";
 
 describe("booking policy", () => {
@@ -48,8 +48,8 @@ describe("booking policy", () => {
   });
 
   it("accetta il quattordicesimo giorno locale", () => {
-    // Ultimo slot dentro la fascia di apertura del 14o giorno locale (21:45-22:00 a Roma):
-    // il confine del giorno resta coperto dal test gemello sul rifiuto oltre la mezzanotte.
+    // Ultimo slot del 14o giorno locale (21:45-22:00 a Roma): il confine del giorno resta
+    // coperto dal test gemello sul rifiuto oltre la mezzanotte.
     const errors = validateBookingPolicy({
       start: new Date("2026-06-17T19:45:00.000Z"),
       end: new Date("2026-06-17T20:00:00.000Z"),
@@ -121,7 +121,7 @@ describe("booking policy", () => {
   );
 });
 
-describe("fascia oraria di apertura (default: giornata piena 00-24)", () => {
+describe("chiusura entro la mezzanotte", () => {
   it("accetta una prenotazione che inizia a mezzanotte (00:00)", () => {
     // 00:00-01:00 locali del 4 giugno = 22:00Z-23:00Z del 3 giugno.
     const errors = validateBookingPolicy({
@@ -181,42 +181,7 @@ describe("fascia oraria di apertura (default: giornata piena 00-24)", () => {
     expect(validateBookingPolicy(acrossMidnight)).toContain(midnightMessage);
     // ...ma una modifica che non tocca lo slot salta il controllo e non rompe nulla.
     expect(
-      validateBookingPolicy({ ...acrossMidnight, enforceOpeningHours: false }),
+      validateBookingPolicy({ ...acrossMidnight, enforceEndOfDay: false }),
     ).toEqual([]);
-  });
-});
-
-describe("fascia oraria configurabile via env", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  it("rispetta APP_OPENING_HOUR / APP_CLOSING_HOUR negli override", async () => {
-    vi.resetModules();
-    vi.stubEnv("APP_OPENING_HOUR", "10");
-    vi.stubEnv("APP_CLOSING_HOUR", "12");
-
-    const { validateBookingPolicy: validateWithOverride } = await import(
-      "@/lib/booking-policy"
-    );
-
-    // 08:00 locali (06:00Z) ora e' fuori fascia perche' l'apertura e' alle 10:00.
-    const beforeOpening = validateWithOverride({
-      start: new Date("2026-06-04T06:00:00.000Z"),
-      end: new Date("2026-06-04T07:00:00.000Z"),
-      now,
-      futureBookingCount: 0,
-    });
-    expect(beforeOpening).toContain("Il campo è prenotabile dalle 10:00 alle 12:00.");
-
-    // 10:00 locali (08:00Z) rientra nella fascia sovrascritta.
-    const withinOverride = validateWithOverride({
-      start: new Date("2026-06-04T08:00:00.000Z"),
-      end: new Date("2026-06-04T09:00:00.000Z"),
-      now,
-      futureBookingCount: 0,
-    });
-    expect(withinOverride).toEqual([]);
   });
 });
