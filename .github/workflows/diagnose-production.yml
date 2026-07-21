@@ -73,10 +73,6 @@ jobs:
             psql -U padel -d padel_topfly -c "SELECT \"entityId\", \"actorEmail\", \"createdAt\" FROM \"AuditLog\" WHERE action = 'BOOKING_AUTO_CANCELED_SIGNATURES' AND \"createdAt\" > now() - interval '7 days' ORDER BY \"createdAt\" DESC LIMIT 30;" < /dev/null
           sudo docker compose -f docker-compose.production.yml exec -T postgres \
             psql -U padel -d padel_topfly -c "SELECT id, start, \"createdAt\", \"signatureDeadlineAt\", \"autoCanceledAt\", \"cancelReason\" FROM \"Booking\" WHERE status = 'CANCELED' AND \"updatedAt\" > now() - interval '7 days' ORDER BY \"updatedAt\" DESC LIMIT 20;" < /dev/null
-          sudo docker compose -f docker-compose.production.yml exec -T postgres \
-            psql -U padel -d padel_topfly -c "SELECT id, \"signatureConfirmedAt\", \"updatedAt\" FROM \"Booking\" WHERE id IN ('cmrp9j2n8004kn72b8is0as9a','cmrp7xmqm0043n72bxzktjd31','cmrlyufvo0000n72bsfzlut22');" < /dev/null
-          sudo docker compose -f docker-compose.production.yml exec -T postgres \
-            psql -U padel -d padel_topfly -c "SELECT \"entityId\", action, left(\"actorEmail\",3)||'***' AS actor, \"createdAt\" FROM \"AuditLog\" WHERE \"entityId\" IN ('cmrp9j2n8004kn72b8is0as9a','cmrp7xmqm0043n72bxzktjd31','cmrlyufvo0000n72bsfzlut22') ORDER BY \"createdAt\";" < /dev/null
           echo "::endgroup::"
           sudo docker compose -f docker-compose.production.yml ps
           echo "::group::app logs"
