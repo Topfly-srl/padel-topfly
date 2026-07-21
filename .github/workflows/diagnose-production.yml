@@ -68,6 +68,12 @@ jobs:
             echo "::warning::APP_WAIVER_RECIPIENT_EMAIL non allineato a padel@topflysolutions.com in .env.production"
           fi
           echo "::endgroup::"
+          echo "::group::db checks (nessun dato personale)"
+          sudo docker compose -f docker-compose.production.yml exec -T postgres \
+            psql -U padel -d padel_topfly -c "SELECT \"entityId\", \"actorEmail\", \"createdAt\" FROM \"AuditLog\" WHERE action = 'BOOKING_AUTO_CANCELED_SIGNATURES' AND \"createdAt\" > now() - interval '7 days' ORDER BY \"createdAt\" DESC LIMIT 30;"
+          sudo docker compose -f docker-compose.production.yml exec -T postgres \
+            psql -U padel -d padel_topfly -c "SELECT id, start, \"createdAt\", \"signatureDeadlineAt\", \"autoCanceledAt\", \"cancelReason\" FROM \"Booking\" WHERE status = 'CANCELED' AND \"updatedAt\" > now() - interval '7 days' ORDER BY \"updatedAt\" DESC LIMIT 20;"
+          echo "::endgroup::"
           sudo docker compose -f docker-compose.production.yml ps
           echo "::group::app logs"
           sudo docker compose -f docker-compose.production.yml logs app --tail=200
