@@ -99,7 +99,12 @@ function hourLabel(hour: number) {
   return `${String(hour).padStart(2, "0")}:00`;
 }
 
-const outOfHoursMessage = `Il campo è prenotabile dalle ${hourLabel(bookingPolicy.openingHour)} alle ${hourLabel(bookingPolicy.closingHour)}.`;
+// Stesso bivio della booking policy: con la giornata piena (default 00-24) il messaggio parla di
+// mezzanotte, con una fascia ridotta via env riporta gli orari di apertura.
+const outOfHoursMessage =
+  bookingPolicy.openingHour === 0 && bookingPolicy.closingHour === 24
+    ? "La prenotazione deve terminare entro la mezzanotte."
+    : `Il campo è prenotabile dalle ${hourLabel(bookingPolicy.openingHour)} alle ${hourLabel(bookingPolicy.closingHour)}.`;
 
 // Il contratto di parita' sugli errori e' il MESSAGGIO esatto, non solo il fatto che si sollevi
 // un'eccezione: una divergenza silenziosa spesso e' proprio un messaggio diverso o un errore in

@@ -69,16 +69,15 @@ describe("timeline slots", () => {
     expect(findOverlappingTimelineItem(ranges, shiftedStart, shiftedEnd, current.id)).toBe(other);
   });
 
-  it("genera gli slot solo dentro la fascia di apertura di default (08:00-22:00)", () => {
+  it("genera gli slot su tutta la giornata di default (00:00-23:45)", () => {
     const options = bookingTimeOptions();
 
-    expect(options[0]).toBe("08:00");
-    // Ultimo inizio possibile: uno slot da 15 minuti deve chiudersi entro le 22:00.
-    expect(options.at(-1)).toBe("21:45");
-    expect(options).not.toContain("07:45");
-    expect(options).not.toContain("22:00");
-    // Dalle 08:00 alle 21:45 a passi da 15 minuti sono 56 slot.
-    expect(options).toHaveLength(56);
+    expect(options[0]).toBe("00:00");
+    // Ultimo inizio possibile: uno slot da 15 minuti deve chiudersi entro la mezzanotte.
+    expect(options.at(-1)).toBe("23:45");
+    expect(options).not.toContain("24:00");
+    // Dalle 00:00 alle 23:45 a passi da 15 minuti sono 96 slot.
+    expect(options).toHaveLength(96);
   });
 
   it("rispetta una fascia personalizzata", () => {

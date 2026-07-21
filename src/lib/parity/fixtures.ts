@@ -76,13 +76,15 @@ export function futureSlot(offsetDays = 1, durationMinutes = 60) {
   return { start, end };
 }
 
-// Uno slot fuori dalla fascia di apertura: le 04:00 UTC cadono prima delle 08:00 locali sia in ora
-// solare sia legale (Europe/Rome), quindi la policy lo rifiuta con il messaggio di fascia oraria.
-// Resta allineato e futuro, cosi' l'UNICO errore atteso e' quello della fascia.
-export function outOfHoursSlot(offsetDays = 1, durationMinutes = 60) {
+// Uno slot che viola la fascia oraria: con il default a giornata piena (00-24) l'unico modo e'
+// sforare la mezzanotte locale. Le 21:15 UTC cadono alle 23:15 locali in ora legale e alle 22:15
+// in ora solare (Europe/Rome): con 120 minuti la fine supera la mezzanotte in entrambi i regimi
+// (e resta oltre la chiusura anche con una fascia ridotta via env). Resta allineato, futuro e con
+// durata valida, cosi' l'UNICO errore atteso e' quello della fascia oraria.
+export function outOfHoursSlot(offsetDays = 1, durationMinutes = 120) {
   const start = new Date();
   start.setUTCDate(start.getUTCDate() + offsetDays);
-  start.setUTCHours(4, 0, 0, 0);
+  start.setUTCHours(21, 15, 0, 0);
   const end = new Date(start.getTime() + durationMinutes * 60_000);
   return { start, end };
 }

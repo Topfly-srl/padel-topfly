@@ -8,8 +8,10 @@ import {
 } from "@/lib/booking-policy";
 
 const now = new Date("2026-06-03T10:00:00.000Z");
-// Fuso Europe/Rome in giugno = CEST (UTC+2): 08:00 locali corrispondono alle 06:00Z.
-const openingBandMessage = "Il campo è prenotabile dalle 08:00 alle 22:00.";
+// Fuso Europe/Rome in giugno = CEST (UTC+2): la mezzanotte locale corrisponde alle 22:00Z del
+// giorno prima. Con la fascia di default a giornata piena (00-24) l'unica violazione possibile
+// e' una prenotazione che sfora la mezzanotte.
+const midnightMessage = "La prenotazione deve terminare entro la mezzanotte.";
 
 describe("booking policy", () => {
   it("accetta una prenotazione valida da 60 minuti", () => {
@@ -119,11 +121,12 @@ describe("booking policy", () => {
   );
 });
 
-describe("fascia oraria di apertura", () => {
-  it("accetta una prenotazione che inizia esattamente all'apertura (08:00)", () => {
+describe("fascia oraria di apertura (default: giornata piena 00-24)", () => {
+  it("accetta una prenotazione che inizia a mezzanotte (00:00)", () => {
+    // 00:00-01:00 locali del 4 giugno = 22:00Z-23:00Z del 3 giugno.
     const errors = validateBookingPolicy({
-      start: new Date("2026-06-04T06:00:00.000Z"),
-      end: new Date("2026-06-04T07:00:00.000Z"),
+      start: new Date("2026-06-03T22:00:00.000Z"),
+      end: new Date("2026-06-03T23:00:00.000Z"),
       now,
       futureBookingCount: 0,
     });
@@ -131,52 +134,54 @@ describe("fascia oraria di apertura", () => {
     expect(errors).toEqual([]);
   });
 
-  it("rifiuta una prenotazione che inizia prima dell'apertura (07:45)", () => {
+  it("accetta una prenotazione notturna nel cuore della notte (03:00-04:00)", () => {
     const errors = validateBookingPolicy({
-      start: new Date("2026-06-04T05:45:00.000Z"),
-      end: new Date("2026-06-04T06:45:00.000Z"),
-      now,
-      futureBookingCount: 0,
-    });
-
-    expect(errors).toContain(openingBandMessage);
-  });
-
-  it("accetta una prenotazione che termina esattamente alla chiusura (22:00)", () => {
-    const errors = validateBookingPolicy({
-      start: new Date("2026-06-04T19:00:00.000Z"),
-      end: new Date("2026-06-04T20:00:00.000Z"),
-      now,
-      futureBookingCount: 0,
-    });
-
-    expect(errors).toEqual([]);
-  });
-
-  it("rifiuta una prenotazione che termina dopo la chiusura (22:15)", () => {
-    const errors = validateBookingPolicy({
-      start: new Date("2026-06-04T19:15:00.000Z"),
-      end: new Date("2026-06-04T20:15:00.000Z"),
-      now,
-      futureBookingCount: 0,
-    });
-
-    expect(errors).toContain(openingBandMessage);
-  });
-
-  it("lascia gestibile una prenotazione esistente fuori fascia quando l'orario non cambia", () => {
-    const outOfBand = {
       start: new Date("2026-06-04T01:00:00.000Z"),
       end: new Date("2026-06-04T02:00:00.000Z"),
       now,
       futureBookingCount: 0,
+    });
+
+    expect(errors).toEqual([]);
+  });
+
+  it("accetta una prenotazione che termina esattamente a mezzanotte (22:00-00:00)", () => {
+    // Lo slot classico 22:00-24:00 locali = 20:00Z-22:00Z.
+    const errors = validateBookingPolicy({
+      start: new Date("2026-06-04T20:00:00.000Z"),
+      end: new Date("2026-06-04T22:00:00.000Z"),
+      now,
+      futureBookingCount: 0,
+    });
+
+    expect(errors).toEqual([]);
+  });
+
+  it("rifiuta una prenotazione che sfora la mezzanotte (23:00-01:00)", () => {
+    // Durata 120 valida e orari allineati: l'UNICO errore atteso e' lo sforamento.
+    const errors = validateBookingPolicy({
+      start: new Date("2026-06-04T21:00:00.000Z"),
+      end: new Date("2026-06-04T23:00:00.000Z"),
+      now,
+      futureBookingCount: 0,
+    });
+
+    expect(errors).toEqual([midnightMessage]);
+  });
+
+  it("lascia gestibile una prenotazione esistente che sfora quando l'orario non cambia", () => {
+    const acrossMidnight = {
+      start: new Date("2026-06-04T21:00:00.000Z"),
+      end: new Date("2026-06-04T23:00:00.000Z"),
+      now,
+      futureBookingCount: 0,
     };
 
-    // Con il vincolo attivo la stessa fascia (03:00-04:00 locali) sarebbe rifiutata...
-    expect(validateBookingPolicy(outOfBand)).toContain(openingBandMessage);
+    // Con il vincolo attivo lo sforamento della mezzanotte sarebbe rifiutato...
+    expect(validateBookingPolicy(acrossMidnight)).toContain(midnightMessage);
     // ...ma una modifica che non tocca lo slot salta il controllo e non rompe nulla.
     expect(
-      validateBookingPolicy({ ...outOfBand, enforceOpeningHours: false }),
+      validateBookingPolicy({ ...acrossMidnight, enforceOpeningHours: false }),
     ).toEqual([]);
   });
 });

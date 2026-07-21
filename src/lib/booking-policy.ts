@@ -9,7 +9,7 @@ export const bookingPolicy = {
   maxDurationMinutes: 120,
   maxAdvanceDays: 14,
   maxFutureBookings: 2,
-  // Fascia di apertura in ora locale del fuso configurato (default 8-22, override via env).
+  // Fascia di apertura in ora locale del fuso configurato (default 0-24, override via env).
   openingHour: appConfig.openingHour,
   closingHour: appConfig.closingHour,
   durationOptions: bookingDurationOptions,
@@ -115,8 +115,13 @@ export function validateBookingPolicy(input: BookingValidationInput) {
     const endMinutes = startMinutes + duration;
 
     if (startMinutes < openingMinutes || endMinutes > closingMinutes) {
+      // Con la fascia a giornata piena (00-24) l'unica violazione possibile e' sforare la
+      // mezzanotte: "prenotabile dalle 00:00 alle 24:00" suonerebbe come un controsenso.
+      const fullDayBand = openingMinutes === 0 && closingMinutes === 24 * 60;
       errors.push(
-        `Il campo è prenotabile dalle ${formatHourLabel(bookingPolicy.openingHour)} alle ${formatHourLabel(bookingPolicy.closingHour)}.`,
+        fullDayBand
+          ? "La prenotazione deve terminare entro la mezzanotte."
+          : `Il campo è prenotabile dalle ${formatHourLabel(bookingPolicy.openingHour)} alle ${formatHourLabel(bookingPolicy.closingHour)}.`,
       );
     }
   }
