@@ -65,6 +65,56 @@ DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma v
 
 Per modifiche UI, verifica anche browser mobile/desktop quando possibile.
 
+## Parita' Demo/Prod (Rete Anti-Divergenza)
+
+Il codice ha due gemelli per gli stessi flussi di prenotazione: i **service Prisma**
+(`booking-service.ts`, `waiver-service.ts`, `signature-workflow.ts`) usati con `DATABASE_URL`, e il
+**demo in-memory** (`demo-store.ts`) usato senza database e da TUTTI i test unit. Le funzioni
+pubbliche instradano su uno o l'altro in base a `appConfig.databaseConfigured`. Storicamente il demo
+e' divergito 6+ volte in silenzio dal comportamento reale (lead del reminder, deadline di
+sostituzione, guardie su partite iniziate, ordine dei check, sanitizzazione audit, invariante di
+spostamento): ogni divergenza dava test verdi su un comportamento falso.
+
+La rete che lo impedisce e' l'**harness di parita' (strategia B)** in `src/lib/parity/`:
+
+- `scenarios.ts` contiene gli scenari condivisi. Ogni scenario asserisce gli esiti UNA VOLTA SOLA
+  (stato, etichetta nome, conteggi, presenza/assenza email, ordinamento, messaggi d'errore) contro
+  un `Parity*Driver` astratto.
+- Ogni flusso ha due file driver che passano lo STESSO scenario a due attuatori:
+  - `*.test.ts` (progetto **unit**) instrada sulle funzioni `demo*` di `demo-store.ts`.
+  - `*.int.test.ts` (progetto **integration**) instrada sulle funzioni pubbliche dei service, che con
+    `DATABASE_URL` girano su Postgres.
+- Poiche' le attese vivono una volta sola, un cambio di comportamento che tocchi un'attesa rompe
+  SUBITO il lato che non e' stato allineato: se cambi il service ma non il demo, diventa rosso il
+  progetto unit; se cambi il demo ma non il service, diventa rosso il progetto integration. La
+  divergenza silenziosa non e' piu' possibile. (Verificato col mutation check: una modifica applicata
+  a un solo lato del processo scadenze rende rosso l'altro lato.)
+
+### Come Aggiungere Un Flusso Nuovo Senza Ricreare Il Problema
+
+1. In `scenarios.ts` definisci un tipo `Parity<Flusso>Driver` con le operazioni del flusso (le
+   funzioni che l'app usa davvero) piu' i soli helper di setup/lettura di stato che servono ai test
+   (`seed*`, `read*Snapshot`), a specchio sui due lati.
+2. Scrivi una `register<Flusso>Parity(driver)` che asserisce solo cio' che DEVE coincidere ed e'
+   deterministico. NON asserire id, token, timestamp assoluti, ne' `waiverEmailStatus` (l'emailStatus
+   della firma organizzatore puo' legittimamente differire tra demo `SKIPPED` e Prisma).
+3. Aggiungi due file driver: quello unit (funzioni `demo*`) e quello int (funzioni pubbliche +
+   `resetDatabase`/`settle`/`teardown` da `int-test-support.ts`, con `await driver.settle()` a fine
+   scenario per attendere i task fire-and-forget prima del truncate).
+4. Se un comportamento e' asimmetrico per costruzione (throttle opportunistico e heartbeat, che il
+   demo non ha; ordine di `listBookings`; code diverse di un messaggio d'errore), NON forzarlo nel
+   contratto: documentalo come esclusione in `scenarios.ts` e coprilo con un test dedicato del lato
+   Prisma.
+5. Esegui `npm test` (unit) e `npm run test:integration` (Postgres): entrambi devono restare verdi.
+
+### Regola D'Oro
+
+Prima di cambiare un comportamento di prenotazione, cambialo su ENTRAMBI i gemelli e/o aggiorna
+l'attesa condivisa in `scenarios.ts`. Se una funzione pubblica di `demo-store.ts` non e' ne' delega a
+logica gia' condivisa (`booking-policy`, `signature-workflow`, `admin-stats`, `waiver-*`) ne' coperta
+da uno scenario di parita', e' un buco: chiudilo aggiungendo lo scenario, non fidandoti della copia a
+mano.
+
 ## Deploy
 
 - Il deploy automatico parte su push `main` se `PRODUCTION_AUTO_DEPLOY=true`.

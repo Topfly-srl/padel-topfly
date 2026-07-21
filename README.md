@@ -92,6 +92,23 @@ npm audit --omit=dev
 DATABASE_URL='postgresql://padel:padel@localhost:5432/padel_topfly' npx prisma validate
 ```
 
+`npm test` gira il progetto `unit` (demo in-memory, senza DB). I test di integrazione girano contro
+un Postgres vero:
+
+```bash
+npm run test:integration
+```
+
+### Test Di Parita' Demo/Prod
+
+I flussi di prenotazione hanno due implementazioni gemelle: i service Prisma (con `DATABASE_URL`) e il
+demo in-memory (`src/lib/demo-store.ts`, usato senza DB e da tutti i test unit). Per evitare che i due
+gemelli divergano in silenzio, gli scenari condivisi in `src/lib/parity/scenarios.ts` girano sia sul
+demo (progetto `unit`) sia sui service su Postgres (progetto `integration`) e asseriscono gli stessi
+esiti. Prima di cambiare un comportamento di prenotazione, aggiornalo su entrambi i gemelli e/o
+sull'attesa condivisa: chi non si allinea diventa rosso subito. Dettagli e procedura per aggiungere un
+flusso nuovo in `AGENTS.md`, sezione "Parita' Demo/Prod".
+
 ### Anteprima Email
 
 `npm run preview:emails` rende con dati finti tutte le email di `src/lib/graph.ts` in

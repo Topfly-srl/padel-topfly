@@ -42,6 +42,7 @@ import type {
 } from "@/lib/types";
 import { computeGuestSeatCancelable, summarizeWaiverSignatures } from "@/lib/waiver-service";
 import type { WaiverEvidence, WaiverInput } from "@/lib/waiver-service";
+import { waiverRegulationPath } from "@/lib/waiver-pdf";
 
 type DemoBooking = {
   id: string;
@@ -157,7 +158,14 @@ function isDemoActiveBooking(booking: DemoBooking, now = new Date()) {
   );
 }
 
-function demoProcessDeadlines(now = new Date()) {
+// Gemello in-memory dell'orchestrazione del cron scadenze (processSignatureDeadlines). Gira in testa
+// a quasi ogni funzione pubblica del demo (pulizia opportunistica immediata: nessun throttle, che in
+// memoria non risparmierebbe nulla e romperebbe solo il determinismo) e viene anche invocato in modo
+// diretto dall'harness di parita' passando un `now` fisso, cosi' l'esito (quanti sollecitati, quanti
+// chiusi, quali stati) si confronta con quello di processSignatureDeadlines su Postgres. Restituisce
+// i conteggi come la twin Prisma; i chiamanti interni li ignorano. NON esiste il battito ne' la
+// potatura audit: quelli vivono solo sul cron reale (heartbeat solo dalla route cron).
+export function demoProcessDeadlines(now = new Date()) {
   let reminded = 0;
   let canceled = 0;
   for (const booking of bookings) {
@@ -192,6 +200,8 @@ function demoProcessDeadlines(now = new Date()) {
   if (reminded + canceled > 0) {
     addAudit("system", "SIGNATURE_DEADLINES_RUN", "System");
   }
+
+  return { reminded, canceled };
 }
 
 function addAudit(
@@ -706,7 +716,10 @@ export async function demoGetWaiverContext(bookingId: string, token: string | nu
       status: booking.status,
       signatureDeadlineAt: booking.signatureDeadlineAt?.toISOString() ?? null,
       documentVersion: appConfig.waiver.documentVersion,
-      regulationUrl: "/legal/regolamento-padel-topfly-v1.pdf",
+      // Stesso percorso regolamento della twin Prisma (getWaiverContext): delegato alla costante
+      // condivisa invece di riscrivere la stringa, cosi' un cambio del percorso non lascia indietro
+      // il demo. La parita' su getWaiverContext lo verifica comunque dall'esterno.
+      regulationUrl: waiverRegulationPath,
     },
   };
 }
@@ -880,6 +893,278 @@ export async function demoCancelGuestWaiverSignature(signatureId: string, token:
   }
 
   return demoCancelContext(signature);
+}
+
+// Seed diretto per l'harness di parita' sui flussi firma: costruisce una prenotazione con la firma
+// dell'organizzatore gia' presente e, se richiesto, una firma ospite annullabile, restituendo i
+// token IN CHIARO (guest waiver e rinuncia) — che il flusso reale salva solo come hash e non
+// espone mai. E' il gemello in-memory di prisma.booking.create + insertSignature usati dal lato
+// integrazione: serve SOLO ai test, per portare i due attuatori allo stesso stato di partenza (una
+// pending con la finestra gia' chiusa, o una CONFIRMED con un posto ospite da rinunciare) che le
+// funzioni pubbliche non sanno costruire (la create rifiuta il passato e non restituisce il token
+// di rinuncia). NON e' usato dal codice di produzione.
+export function demoSeedGuestBooking(input: {
+  start: Date;
+  end: Date;
+  status?: "PENDING_SIGNATURES" | "CONFIRMED";
+  signatureDeadlineAt?: Date | null;
+  playerCount?: number;
+  withGuestSignature?: boolean;
+  organizerName?: string;
+  organizerEmail?: string;
+  guestName?: string;
+  guestEmail?: string;
+}) {
+  const now = new Date();
+  const status = input.status ?? "CONFIRMED";
+  const playerCount = input.playerCount ?? 2;
+  const organizerName = normalizePersonName(input.organizerName ?? "Luca Bianchi");
+  const organizerEmail = normalizeEmail(input.organizerEmail ?? "luca.bianchi@example.com");
+  const guestWaiverToken = createManageToken();
+  const bookingId = id("booking");
+
+  bookings.push({
+    id: bookingId,
+    start: input.start,
+    end: input.end,
+    status,
+    organizerEmail,
+    organizerName,
+    manageTokenHash: null,
+    manageTokenExpiresAt: null,
+    playerCount,
+    waiverRevision: 1,
+    signatureDeadlineAt: input.signatureDeadlineAt ?? null,
+    signatureWindowStartedAt: now,
+    signatureReminderSentAt: null,
+    signatureConfirmedAt: status === "CONFIRMED" ? now : null,
+    autoCanceledAt: null,
+    cancelReason: null,
+    guestWaiverTokenHash: hashManageToken(guestWaiverToken),
+    guestWaiverTokenExpiresAt: manageTokenExpiresAt(input.end),
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  waiverSignatures.push({
+    id: id("waiver"),
+    bookingId,
+    bookingRevision: 1,
+    status: "ACTIVE",
+    signerRole: "ORGANIZER",
+    signerName: organizerName,
+    signerEmail: organizerEmail,
+    emailStatus: "SENT",
+    signerEmailStatus: "SENT",
+    cancelTokenHash: null,
+    cancelTokenExpiresAt: null,
+    canceledAt: null,
+    signedAt: now,
+  });
+
+  let signatureId: string | undefined;
+  let cancelToken: string | undefined;
+  if (input.withGuestSignature) {
+    cancelToken = createManageToken();
+    signatureId = id("waiver");
+    waiverSignatures.push({
+      id: signatureId,
+      bookingId,
+      bookingRevision: 1,
+      status: "ACTIVE",
+      signerRole: "GUEST",
+      signerName: normalizePersonName(input.guestName ?? "Marco Verdi"),
+      signerEmail: normalizeEmail(input.guestEmail ?? "marco.verdi@example.com"),
+      emailStatus: "SENT",
+      signerEmailStatus: "SKIPPED",
+      cancelTokenHash: hashManageToken(cancelToken),
+      cancelTokenExpiresAt: manageTokenExpiresAt(input.end),
+      canceledAt: null,
+      signedAt: now,
+    });
+  }
+
+  return { bookingId, guestWaiverToken, signatureId, cancelToken };
+}
+
+// Seed diretto per l'harness di parita' sui flussi di GESTIONE (update/cancel): costruisce una
+// prenotazione con la firma dell'organizzatore gia' presente e un manage token IN CHIARO — che il
+// flusso reale salva solo come hash e non espone mai — cosi' il referente puo' esercitare
+// update/cancel su uno stato che la create pubblica non sa costruire (una partita gia' iniziata: la
+// create rifiuta il passato e non restituisce il token). E' il gemello in-memory di
+// prisma.booking.create + insertSignature usati dal lato integrazione: serve SOLO ai test, per
+// portare i due attuatori allo stesso stato di partenza. NON e' usato dal codice di produzione.
+export function demoSeedManagedBooking(input: {
+  start: Date;
+  end: Date;
+  status?: "PENDING_SIGNATURES" | "CONFIRMED";
+  playerCount?: number;
+  withGuestSignature?: boolean;
+  signatureDeadlineAt?: Date | null;
+  organizerName?: string;
+  organizerEmail?: string;
+}) {
+  const now = new Date();
+  const status = input.status ?? "CONFIRMED";
+  const playerCount = input.playerCount ?? 2;
+  const organizerName = normalizePersonName(input.organizerName ?? "Luca Bianchi");
+  const organizerEmail = normalizeEmail(input.organizerEmail ?? "luca.bianchi@example.com");
+  const manageToken = createManageToken();
+  const guestWaiverToken = createManageToken();
+  const bookingId = id("booking");
+
+  bookings.push({
+    id: bookingId,
+    start: input.start,
+    end: input.end,
+    status,
+    organizerEmail,
+    organizerName,
+    manageTokenHash: hashManageToken(manageToken),
+    manageTokenExpiresAt: manageTokenExpiresAt(input.end),
+    playerCount,
+    waiverRevision: 1,
+    signatureDeadlineAt: input.signatureDeadlineAt ?? null,
+    signatureWindowStartedAt: now,
+    signatureReminderSentAt: null,
+    signatureConfirmedAt: status === "CONFIRMED" ? now : null,
+    autoCanceledAt: null,
+    cancelReason: null,
+    guestWaiverTokenHash: hashManageToken(guestWaiverToken),
+    guestWaiverTokenExpiresAt: manageTokenExpiresAt(input.end),
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  waiverSignatures.push({
+    id: id("waiver"),
+    bookingId,
+    bookingRevision: 1,
+    status: "ACTIVE",
+    signerRole: "ORGANIZER",
+    signerName: organizerName,
+    signerEmail: organizerEmail,
+    emailStatus: "SENT",
+    signerEmailStatus: "SENT",
+    cancelTokenHash: null,
+    cancelTokenExpiresAt: null,
+    canceledAt: null,
+    signedAt: now,
+  });
+
+  if (input.withGuestSignature) {
+    waiverSignatures.push({
+      id: id("waiver"),
+      bookingId,
+      bookingRevision: 1,
+      status: "ACTIVE",
+      signerRole: "GUEST",
+      signerName: normalizePersonName("Marco Verdi"),
+      signerEmail: normalizeEmail("marco.verdi@example.com"),
+      emailStatus: "SENT",
+      signerEmailStatus: "SKIPPED",
+      cancelTokenHash: null,
+      cancelTokenExpiresAt: null,
+      canceledAt: null,
+      signedAt: now,
+    });
+  }
+
+  return { bookingId, manageToken, guestWaiverToken };
+}
+
+// Lettura diretta di stato e scadenza firme di una prenotazione: gemello in-memory di
+// prisma.booking.findUnique, serve all'harness di parita' per verificare la finestra di
+// sostituzione dopo una rinuncia senza passare dalla disponibilita' (che dipende dalla chiave del
+// giorno). NON usato dal codice di produzione.
+export function demoReadBookingSnapshot(bookingId: string) {
+  const booking = bookings.find((item) => item.id === bookingId);
+  if (!booking) return null;
+  return {
+    status: booking.status,
+    signatureDeadlineMs: booking.signatureDeadlineAt?.getTime() ?? null,
+  };
+}
+
+// Seed diretto per l'harness di parita' sul PROCESSO SCADENZE: costruisce una pending (o CONFIRMED)
+// con scadenza, finestra e stato sollecito scelti a mano e un numero preciso di firme ACTIVE, cosi'
+// il cron in memoria e quello Prisma partono dallo stesso terreno. E' il gemello in-memory di
+// prisma.booking.create + insertSignature usati dal lato integrazione (createBookingRow): serve SOLO
+// ai test, per costruire stati che la create pubblica non sa produrre (deadline gia' passata, firme
+// preesistenti, sollecito gia' inviato). NON e' usato dal codice di produzione.
+export function demoSeedPendingBooking(input: {
+  start: Date;
+  end?: Date;
+  signatureDeadlineAt: Date | null;
+  signatureWindowStartedAt?: Date | null;
+  signatureReminderSentAt?: Date | null;
+  status?: "PENDING_SIGNATURES" | "CONFIRMED";
+  playerCount?: number;
+  signedCount?: number;
+}) {
+  const now = new Date();
+  const end = input.end ?? new Date(input.start.getTime() + 60 * 60_000);
+  const status = input.status ?? "PENDING_SIGNATURES";
+  const playerCount = input.playerCount ?? 2;
+  const bookingId = id("booking");
+
+  bookings.push({
+    id: bookingId,
+    start: input.start,
+    end,
+    status,
+    organizerEmail: normalizeEmail(`org-${Math.random().toString(36).slice(2)}@example.com`),
+    organizerName: "Mario Rossi",
+    manageTokenHash: null,
+    manageTokenExpiresAt: null,
+    playerCount,
+    waiverRevision: 1,
+    signatureDeadlineAt: input.signatureDeadlineAt,
+    signatureWindowStartedAt: input.signatureWindowStartedAt ?? null,
+    signatureReminderSentAt: input.signatureReminderSentAt ?? null,
+    signatureConfirmedAt: status === "CONFIRMED" ? now : null,
+    autoCanceledAt: null,
+    cancelReason: null,
+    guestWaiverTokenHash: null,
+    guestWaiverTokenExpiresAt: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const signedCount = input.signedCount ?? 0;
+  for (let index = 0; index < signedCount; index += 1) {
+    waiverSignatures.push({
+      id: id("waiver"),
+      bookingId,
+      bookingRevision: 1,
+      status: "ACTIVE",
+      signerRole: index === 0 ? "ORGANIZER" : "GUEST",
+      signerName: `Firmatario ${index + 1}`,
+      signerEmail: normalizeEmail(`signer-${index}-${Math.random().toString(36).slice(2)}@example.com`),
+      emailStatus: "SENT",
+      signerEmailStatus: index === 0 ? "SENT" : "SKIPPED",
+      cancelTokenHash: null,
+      cancelTokenExpiresAt: null,
+      canceledAt: null,
+      signedAt: now,
+    });
+  }
+
+  return { bookingId };
+}
+
+// Lettura diretta dell'esito del processo scadenze su una prenotazione: gemello in-memory di
+// prisma.booking.findUnique per l'harness di parita' del cron. Espone solo cio' che DEVE coincidere
+// tra i due lati (stato finale, sollecito inviato, chiusura automatica), non i timestamp assoluti.
+// NON usato dal codice di produzione.
+export function demoReadDeadlineSnapshot(bookingId: string) {
+  const booking = bookings.find((item) => item.id === bookingId);
+  if (!booking) return null;
+  return {
+    status: booking.status,
+    reminderSent: booking.signatureReminderSentAt !== null,
+    autoCanceled: booking.autoCanceledAt !== null,
+  };
 }
 
 export function demoReset() {
