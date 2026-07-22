@@ -174,3 +174,31 @@ Sul commit finale precedente al solo report:
 7. Commit documentale che contiene questo report.
 
 Il file `PROMPT-CODEX.md` è rimasto non tracciato e non è incluso in alcun commit.
+
+## Aggiornamento post-review (21 luglio 2026, dopo il merge)
+
+Verifica incrociata indipendente (10 verificatori) e intervento sui residui, nello stesso giro
+di commit che integra questo report:
+
+- **B1 (audit)** — riclassificato: non è un difetto. Il registro audit è interno, visibile solo
+  agli admin, e il suo scopo è l'accountability (chi ha fatto cosa); i dati sensibili delle firme
+  (data di nascita, immagine, PDF) non vi entrano mai. Il pezzo genuino dell'invariante — niente
+  PII nei log CI — era B6, già corretto.
+- **B2 (gara update/annullo)** — CORRETTO: lettura+decisioni pretendono ora che la riga sia
+  ancora quella dello snapshot (guardia `updateMany` su stato e `updatedAt`, 409 "modificata nel
+  frattempo"); il referente non può più riattivare una prenotazione annullata (409 dedicato, la
+  riattivazione resta solo admin); annullo idempotente senza audit/mail doppi. Test:
+  `booking-concurrency.int.test.ts` + scenari di parità dedicati.
+- **B3 (fuso orario client)** — CORRETTO: tutti i parse/format client passano per
+  `fromZonedTime`/`formatInTimeZone` col fuso configurato (`settings.timeZone` +
+  `defaultTimeZone`), pagine server passano `appConfig.timeZone`, `ENV TZ` nel runtime come
+  difesa in profondità. La suite unit gira verde anche con `TZ=America/New_York`. Limite noto
+  accettato: le due notti/anno di cambio ora tra le 02:00 e le 03:00.
+- **B4 (idempotenza Graph)** — CORRETTO: scritture di sync guardate sullo stato CONFIRMED,
+  compensazione dell'evento creato su stato stantio (con commento coerente allo stato reale) e
+  orfano persistito sui campi Outlook se anche la compensazione fallisce; `transactionId`
+  deterministico sulla creazione evento (rinnovato a ogni riconferma via `signatureConfirmedAt`).
+- **B5 (finestra sostituzione)** — riclassificato: comportamento voluto e coperto da test; le 2
+  ore sono un minimo garantito, mai un taglio della scadenza standard.
+- **M1/M2/B6/B7** — confermati corretti dopo revisione (con rinforzi ai test).
+- Conteggi test dopo questo giro: vedere l'esito CI del commit che integra l'aggiornamento.
