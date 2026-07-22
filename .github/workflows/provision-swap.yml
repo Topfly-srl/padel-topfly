@@ -1,0 +1,97 @@
+name: Provision Swap
+
+# Aggiunge (in modo idempotente) 2 GB di swap persistente sul box Lightsail da 1 GB RAM. Senza
+# swap la build di produzione (next build) esaurisce la memoria e congela l'intera istanza: e'
+# gia' successo dopo un reboot che aveva perso lo swap non persistito. Procedura del runbook
+# (docs/aws-deploy.md). Lanciare a mano dopo un reboot se `free -h` non mostra piu' lo swap.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  swap:
+    name: Ensure persistent swap
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate configuration
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in LIGHTSAIL_HOST LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: ${name}"
+              missing=1
+            fi
+          done
+
+          exit "${missing}"
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${LIGHTSAIL_SSH_PRIVATE_KEY}" > ~/.ssh/lightsail_deploy_key
+          printf '%s\n' "${LIGHTSAIL_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/lightsail_deploy_key ~/.ssh/known_hosts
+
+      - name: Ensure swap over SSH
+        shell: bash
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+
+          SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
+
+          ssh -i ~/.ssh/lightsail_deploy_key \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o ConnectTimeout=20 \
+            "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          echo "== memoria PRIMA =="
+          free -h
+          sudo swapon --show || true
+
+          if sudo swapon --show | grep -q '/swapfile'; then
+            echo "Swap /swapfile gia' attivo: nulla da fare."
+          else
+            if [ ! -f /swapfile ]; then
+              echo "Creo /swapfile da 2 GB..."
+              sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+            fi
+            sudo swapon /swapfile
+            echo "Swap attivato."
+          fi
+
+          # Persistenza al reboot: la riga va aggiunta una sola volta (era la causa del blocco:
+          # swap presente ma non persistito, perso al riavvio).
+          if grep -q '^/swapfile ' /etc/fstab; then
+            echo "fstab: riga swap gia' presente."
+          else
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+            echo "fstab: riga swap aggiunta."
+          fi
+
+          echo "== memoria DOPO =="
+          free -h
+          sudo swapon --show
+          REMOTE
