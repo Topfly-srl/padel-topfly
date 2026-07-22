@@ -14,16 +14,17 @@ import Image from "next/image";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
-import { bookingDurationOptions } from "@/lib/booking-constants";
+import { bookingDurationOptions, defaultTimeZone } from "@/lib/booking-constants";
 import { bookingStatusLabel } from "@/lib/booking-copy";
 import {
   dateTimeFromParts,
+  dayKeyInTimeZone,
   errorText,
   localTime,
   networkErrorText,
-  pad,
   readApiError,
   syncLabel,
+  timeKeyInTimeZone,
   type Notice,
 } from "@/lib/booking-ui";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
@@ -61,6 +62,7 @@ type AvailabilityResponse = {
     durationOptions: readonly number[];
     durationPresets: readonly number[];
     allowedDomain: string;
+    timeZone: string;
   };
   bookings: AvailabilityBooking[];
   blocks: AvailabilityBlock[];
@@ -80,9 +82,6 @@ const fallbackInitialState: BookingInitialState = {
   time: "18:00",
   dateKeys: ["1970-01-01"],
 };
-function dateKey(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000);
@@ -98,22 +97,24 @@ function durationLabel(minutes: number) {
   return `${minutes} min`;
 }
 
-function localSummaryDay(date: Date) {
+function localSummaryDay(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "long",
     day: "2-digit",
     month: "long",
+    timeZone,
   }).format(date);
 }
 
-function humanDay(date: Date, today: string, tomorrow: string) {
-  const key = dateKey(date);
+function humanDay(date: Date, today: string, tomorrow: string, timeZone: string) {
+  const key = dayKeyInTimeZone(date, timeZone);
 
   if (key === today) return "Oggi";
   if (key === tomorrow) return "Domani";
 
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "short",
+    timeZone,
   }).format(date);
 }
 
@@ -243,10 +244,14 @@ export function BookingApp({
   const [isAdminWaiversLoading, setIsAdminWaiversLoading] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
+  // Fuso del campo: arriva dall'availability (anche di un giorno diverso da quello selezionato,
+  // il valore e' lo stesso); il fallback copre solo il primissimo render senza dati.
+  const timeZone = availability?.settings.timeZone ?? defaultTimeZone;
+
   const dates = useMemo(
     () =>
-      initialState.dateKeys.map((key) => dateTimeFromParts(key, "00:00")),
-    [initialState.dateKeys],
+      initialState.dateKeys.map((key) => dateTimeFromParts(key, "00:00", timeZone)),
+    [initialState.dateKeys, timeZone],
   );
 
   const currentAvailability = availability?.date === selectedDate ? availability : null;
@@ -254,8 +259,8 @@ export function BookingApp({
   const isAdminLoading = isAuditLoading || isStatsLoading || isAdminWaiversLoading;
   const durationOptions = currentAvailability?.settings.durationOptions ?? bookingDurationOptions;
   const start = useMemo(
-    () => dateTimeFromParts(selectedDate, selectedTime),
-    [selectedDate, selectedTime],
+    () => dateTimeFromParts(selectedDate, selectedTime, timeZone),
+    [selectedDate, selectedTime, timeZone],
   );
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
 
@@ -295,13 +300,14 @@ export function BookingApp({
         options,
         selectedDate,
         selectedTime,
+        timeZone,
         startMs,
         endMs,
         bookingRanges,
         blockRanges,
         ignoreBookingId: editingBookingId,
       }),
-    [blockRanges, bookingRanges, editingBookingId, endMs, selectedDate, selectedTime, startMs],
+    [blockRanges, bookingRanges, editingBookingId, endMs, selectedDate, selectedTime, startMs, timeZone],
   );
 
   const selectedOwnBooking = useMemo(
@@ -838,8 +844,8 @@ export function BookingApp({
     const bookingStart = new Date(booking.start);
     const bookingEnd = new Date(booking.end);
 
-    setSelectedDate(dateKey(bookingStart));
-    setSelectedTime(`${pad(bookingStart.getHours())}:${pad(bookingStart.getMinutes())}`);
+    setSelectedDate(dayKeyInTimeZone(bookingStart, timeZone));
+    setSelectedTime(timeKeyInTimeZone(bookingStart, timeZone));
     setDuration(minutesBetween(bookingStart, bookingEnd));
     setEditingBookingId(booking.id);
     setEditingToken(manageToken ?? null);
@@ -922,7 +928,7 @@ export function BookingApp({
             </div>
             <div className="date-strip" role="group" aria-label="Giorni disponibili">
               {dates.map((date) => {
-                const key = dateKey(date);
+                const key = dayKeyInTimeZone(date, timeZone);
                 return (
                   <button
                     className={`date-chip ${key === selectedDate ? "active" : ""}`}
@@ -931,8 +937,8 @@ export function BookingApp({
                     aria-pressed={key === selectedDate}
                     type="button"
                   >
-                    <span>{humanDay(date, initialState.dateKeys[0], initialState.dateKeys[1])}</span>
-                    <strong>{new Intl.DateTimeFormat("it-IT", { day: "2-digit" }).format(date)}</strong>
+                    <span>{humanDay(date, initialState.dateKeys[0], initialState.dateKeys[1], timeZone)}</span>
+                    <strong>{new Intl.DateTimeFormat("it-IT", { day: "2-digit", timeZone }).format(date)}</strong>
                   </button>
                 );
               })}
@@ -992,7 +998,7 @@ export function BookingApp({
                         : bookingStatusLabel(selectedOwnBooking.status)}
                     </h2>
                     <p>
-                      {localSummaryDay(start)} · {localTime(start)} - {localTime(end)}
+                      {localSummaryDay(start, timeZone)} · {localTime(start, timeZone)} - {localTime(end, timeZone)}
                     </p>
                     {selectedOwnBooking.status !== "PENDING_SIGNATURES" && selectedOwnSyncText ? (
                       <small className={selectedOwnSyncFailed ? "sync-warning-text" : undefined}>
@@ -1012,6 +1018,7 @@ export function BookingApp({
                   <PendingSignaturePanel
                     missingSignatures={selectedOwnMissingSignatures}
                     signatureDeadlineAt={selectedOwnBooking.signatureDeadlineAt}
+                    timeZone={timeZone}
                     guestWaiverLink={selectedOwnGuestWaiverLink ?? null}
                     linkCopied={
                       selectedOwnGuestWaiverLink
@@ -1074,14 +1081,14 @@ export function BookingApp({
                 <div className="summary-top">
                   <div>
                     <p className="muted-label">Riepilogo</p>
-                    <h2>{selectionConflict ? "Slot non disponibile" : localSummaryDay(start)}</h2>
+                    <h2>{selectionConflict ? "Slot non disponibile" : localSummaryDay(start, timeZone)}</h2>
                   </div>
                   {selectionConflict ? null : <span className="summary-duration">{durationLabel(duration)}</span>}
                 </div>
                 <p className="summary-time">
                   {selectionConflict
-                    ? `${localSummaryDay(start)} · ${localTime(start)} - ${localTime(end)}`
-                    : `${localTime(start)} - ${localTime(end)}`}
+                    ? `${localSummaryDay(start, timeZone)} · ${localTime(start, timeZone)} - ${localTime(end, timeZone)}`
+                    : `${localTime(start, timeZone)} - ${localTime(end, timeZone)}`}
                 </p>
 
                 {selectionConflict ? (
@@ -1132,6 +1139,7 @@ export function BookingApp({
             bookings={activeMyBookings}
             count={activeMyBookingCount}
             isLoading={isMyBookingsLoading}
+            timeZone={timeZone}
             guestWaiverLinks={guestWaiverLinks}
             selectedBookingId={selectedOwnBooking?.id ?? null}
             onCopyGuestLink={copyGuestWaiverLink}
@@ -1144,6 +1152,7 @@ export function BookingApp({
               isAdminLoading={isAdminLoading}
               options={options}
               selectedDate={selectedDate}
+              timeZone={timeZone}
               dayBlocks={dayBlocks}
               onRefresh={refresh}
               setNotice={setNotice}

@@ -529,6 +529,7 @@ export async function getAvailability(dateValue: string | null, viewer?: Availab
     settings: {
       ...bookingPolicy,
       allowedDomain: appConfig.allowedDomain,
+      timeZone: appConfig.timeZone,
     },
     bookings: bookings.map((booking) => ({
       ...serializeBooking(booking),

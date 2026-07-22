@@ -4,18 +4,21 @@ import { bookingStatusLabel } from "@/lib/booking-copy";
 import { dateTimeFromParts, pad } from "@/lib/booking-ui";
 import type { AdminStats } from "@/lib/types";
 
-function statsWeekLabel(weekStart: string) {
-  return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" }).format(
-    dateTimeFromParts(weekStart, "00:00"),
+function statsWeekLabel(weekStart: string, timeZone: string) {
+  return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short", timeZone }).format(
+    dateTimeFromParts(weekStart, "00:00", timeZone),
   );
 }
 
 export function AdminStatsSection({
   stats,
   isStatsLoading,
+  timeZone,
 }: {
   stats: AdminStats | null;
   isStatsLoading: boolean;
+  // Fuso del campo: le settimane delle statistiche sono chiavi "di parete" calcolate dal server.
+  timeZone: string;
 }) {
   return (
     <details>
@@ -43,7 +46,7 @@ export function AdminStatsSection({
             <span className="stat-heading">Ultime 8 settimane</span>
             {stats.perWeek.map((entry) => (
               <div className="stat-line" key={entry.weekStart}>
-                <span>Sett. {statsWeekLabel(entry.weekStart)}</span>
+                <span>Sett. {statsWeekLabel(entry.weekStart, timeZone)}</span>
                 <strong>{entry.count}</strong>
               </div>
             ))}

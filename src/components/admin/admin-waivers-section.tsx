@@ -54,6 +54,7 @@ function waiverSignatureStatusTone(status: AdminWaiverItem["status"]) {
 
 export function AdminWaiversSection({
   adminWaivers,
+  timeZone,
   adminWaiverStatusFilter,
   onStatusFilterChange,
   adminWaiverRoleFilter,
@@ -66,6 +67,8 @@ export function AdminWaiversSection({
   onRetry,
 }: {
   adminWaivers: AdminWaiverItem[];
+  // Fuso del campo: gli orari delle prenotazioni firmate sono "di parete", non del dispositivo.
+  timeZone: string;
   adminWaiverStatusFilter: AdminWaiverItem["emailStatus"] | "ALL";
   onStatusFilterChange: (value: AdminWaiverItem["emailStatus"] | "ALL") => void;
   adminWaiverRoleFilter: AdminWaiverItem["signerRole"] | "ALL";
@@ -137,8 +140,8 @@ export function AdminWaiversSection({
                     <strong>{waiver.signerName}</strong>
                     <span>
                       {waiver.signerRole === "ORGANIZER" ? "Referente" : "Ospite"} -{" "}
-                      {localDay(new Date(waiver.bookingStart))}, {localTime(new Date(waiver.bookingStart))} -{" "}
-                      {localTime(new Date(waiver.bookingEnd))}
+                      {localDay(new Date(waiver.bookingStart), timeZone)}, {localTime(new Date(waiver.bookingStart), timeZone)} -{" "}
+                      {localTime(new Date(waiver.bookingEnd), timeZone)}
                     </span>
                     <small>
                       <span className={`status-badge ${waiverSignatureStatusTone(waiver.status)}`}>

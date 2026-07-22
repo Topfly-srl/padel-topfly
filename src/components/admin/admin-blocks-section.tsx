@@ -16,12 +16,15 @@ import type { AvailabilityBlock } from "@/lib/types";
 export function AdminBlocksSection({
   options,
   selectedDate,
+  timeZone,
   dayBlocks,
   onRefresh,
   setNotice,
 }: {
   options: string[];
   selectedDate: string;
+  // Fuso del campo: gli orari dei blocchi sono "di parete", non del dispositivo dell'admin.
+  timeZone: string;
   dayBlocks: AvailabilityBlock[];
   onRefresh: () => Promise<void>;
   setNotice: (notice: Notice) => void;
@@ -32,7 +35,7 @@ export function AdminBlocksSection({
 
   // Le option in ingresso sono gli INIZI slot (…, 23:45): come fine blocco serve lo stesso passo
   // spostato di uno slot, altrimenti l'ultimo quarto d'ora (23:45-24:00) resterebbe imbloccabile.
-  // "24:00" e' ora ISO valida: dateTimeFromParts la converte nella mezzanotte del giorno dopo.
+  // "24:00" e' un caso speciale che dateTimeFromParts normalizza nella mezzanotte del giorno dopo.
   const endOptions = options.map((option) => {
     const [hours, minutes] = option.split(":").map(Number);
     const total = hours * 60 + minutes + 15;
@@ -45,8 +48,8 @@ export function AdminBlocksSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          start: dateTimeFromParts(selectedDate, blockStart).toISOString(),
-          end: dateTimeFromParts(selectedDate, blockEnd).toISOString(),
+          start: dateTimeFromParts(selectedDate, blockStart, timeZone).toISOString(),
+          end: dateTimeFromParts(selectedDate, blockEnd, timeZone).toISOString(),
           reason: blockReason,
         }),
       });
@@ -126,7 +129,7 @@ export function AdminBlocksSection({
             <article className="booking-item blocked-item" key={block.id}>
               <div>
                 <strong>
-                  {localTime(new Date(block.start))} - {localTime(new Date(block.end))}
+                  {localTime(new Date(block.start), timeZone)} - {localTime(new Date(block.end), timeZone)}
                 </strong>
                 <span>{block.reason}</span>
               </div>

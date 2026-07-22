@@ -6,6 +6,7 @@ import { auditActions, type AuditAction, type AuditItem } from "@/lib/types";
 
 export function AdminAuditSection({
   audit,
+  timeZone,
   auditActionFilter,
   onAuditActionFilterChange,
   isAuditLoading,
@@ -13,6 +14,8 @@ export function AdminAuditSection({
   onLoadMore,
 }: {
   audit: AuditItem[];
+  // Fuso del campo: anche i timestamp dello storico si leggono nell'ora di parete del campo.
+  timeZone: string;
   auditActionFilter: AuditAction | "ALL";
   onAuditActionFilterChange: (value: AuditAction | "ALL") => void;
   isAuditLoading: boolean;
@@ -50,7 +53,7 @@ export function AdminAuditSection({
               <div className="audit-row" key={item.id}>
                 <span>{auditActionLabel(item.action)}</span>
                 <small>
-                  {item.actorEmail} - {localDateTime(new Date(item.createdAt))}
+                  {item.actorEmail} - {localDateTime(new Date(item.createdAt), timeZone)}
                 </small>
                 {item.cancelReason ? <small>Causale: {item.cancelReason}</small> : null}
               </div>

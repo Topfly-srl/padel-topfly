@@ -7,13 +7,14 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { appPath } from "@/lib/app-path";
 import { CancelReasonSelect } from "@/components/cancel-reason-select";
 import { resolveCancelReason, type CancelReasonMode } from "@/lib/cancel-reason";
-import { bookingDurationOptions } from "@/lib/booking-constants";
+import { bookingDurationOptions, defaultTimeZone } from "@/lib/booking-constants";
 import { bookingStatusLabel, deadlineCopy } from "@/lib/booking-copy";
 import {
   dateTimeFromParts,
+  dayKeyInTimeZone,
   localDateTime,
-  pad,
   readApiError,
+  timeKeyInTimeZone,
   type Notice,
 } from "@/lib/booking-ui";
 import {
@@ -25,6 +26,7 @@ import type { AvailabilityBlock, AvailabilityBooking, MyBooking } from "@/lib/ty
 import { BookingTimeGrid } from "@/components/booking-time-grid";
 
 type AvailabilityResponse = {
+  settings: { timeZone: string };
   bookings: AvailabilityBooking[];
   blocks: AvailabilityBlock[];
 };
@@ -32,10 +34,6 @@ type AvailabilityResponse = {
 const tokenStorageKey = "topfly-padel.tokens.v1";
 // La griglia oraria copre sempre l'intera giornata: e' una costante, non dipende da impostazioni.
 const options = bookingTimeOptions();
-
-function dateKey(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000);
@@ -79,14 +77,18 @@ function rememberToken(token: string) {
 export function ManageBooking({
   bookingId,
   manageToken,
+  timeZone: serverTimeZone = defaultTimeZone,
 }: {
   bookingId: string;
   manageToken: string;
+  // Fuso configurato, passato dalla pagina server: per le prenotazioni non attive l'availability
+  // non viene mai richiesta, quindi il fuso deve arrivare da qui e non dal fallback statico.
+  timeZone?: string;
 }) {
   const [booking, setBooking] = useState<MyBooking | null>(null);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [selectedDate, setSelectedDate] = useState(dateKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() => dayKeyInTimeZone(new Date(), serverTimeZone));
   const [selectedTime, setSelectedTime] = useState("18:00");
   const [duration, setDuration] = useState(60);
   const [isSaving, setIsSaving] = useState(false);
@@ -94,9 +96,12 @@ export function ManageBooking({
   const [cancelReasonMode, setCancelReasonMode] = useState<CancelReasonMode>("");
   const [cancelReasonText, setCancelReasonText] = useState("");
   const [isPending, startTransition] = useTransition();
+  // Fuso del campo: la pagina server lo passa gia' configurato (serverTimeZone), l'availability
+  // lo conferma. Sono la stessa stringa per costruzione, quindi nessun riallineo necessario.
+  const timeZone = availability?.settings.timeZone ?? serverTimeZone;
   const start = useMemo(
-    () => dateTimeFromParts(selectedDate, selectedTime),
-    [selectedDate, selectedTime],
+    () => dateTimeFromParts(selectedDate, selectedTime, timeZone),
+    [selectedDate, selectedTime, timeZone],
   );
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
   const selectionConflict = useMemo(() => {
@@ -141,13 +146,14 @@ export function ManageBooking({
         options,
         selectedDate,
         selectedTime,
+        timeZone,
         startMs,
         endMs,
         bookingRanges,
         blockRanges,
         ignoreBookingId: booking?.id,
       }),
-    [selectedDate, selectedTime, startMs, endMs, bookingRanges, blockRanges, booking?.id],
+    [selectedDate, selectedTime, timeZone, startMs, endMs, bookingRanges, blockRanges, booking?.id],
   );
 
   // Con la griglia a giornata piena (96 slot da 00:00) l'orario della prenotazione puo' stare
@@ -190,12 +196,14 @@ export function ManageBooking({
       const bookingStart = new Date(found.start);
       const bookingEnd = new Date(found.end);
       setBooking(found);
-      setSelectedDate(dateKey(bookingStart));
-      setSelectedTime(`${pad(bookingStart.getHours())}:${pad(bookingStart.getMinutes())}`);
+      // Il fuso configurato arriva gia' dal server (serverTimeZone), quindi il posizionamento
+      // e' definitivo anche prima che l'availability risponda.
+      setSelectedDate(dayKeyInTimeZone(bookingStart, serverTimeZone));
+      setSelectedTime(timeKeyInTimeZone(bookingStart, serverTimeZone));
       setDuration(minutesBetween(bookingStart, bookingEnd));
       rememberToken(manageToken);
     });
-  }, [bookingId, manageToken]);
+  }, [bookingId, manageToken, serverTimeZone]);
 
   useEffect(() => {
     if (!booking || !isActiveBooking(booking)) return;
@@ -308,13 +316,13 @@ export function ManageBooking({
             <h1>{isActiveBooking(booking) ? "Gestisci il tuo slot" : "Prenotazione annullata"}</h1>
             <div className="manage-current">
               <span>{bookingStatusLabel(booking.status)}</span>
-              <strong>{localDateTime(new Date(booking.start))}</strong>
-              <small>{localDateTime(new Date(booking.end))}</small>
+              <strong>{localDateTime(new Date(booking.start), timeZone)}</strong>
+              <small>{localDateTime(new Date(booking.end), timeZone)}</small>
               <small>
                 Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
               </small>
               {booking.status === "PENDING_SIGNATURES" ? (
-                <small>{deadlineCopy(booking.signatureDeadlineAt)}</small>
+                <small>{deadlineCopy(booking.signatureDeadlineAt, timeZone)}</small>
               ) : null}
               {booking.status === "CANCELED" && booking.cancelReason ? (
                 <small>Motivo annullamento: {booking.cancelReason}</small>

@@ -30,6 +30,7 @@ export default async function BookPage({ searchParams }: BookPageProps) {
       duration={safeDuration(query.duration)}
       selectedDate={selectedDate}
       selectedTime={selectedTime}
+      timeZone={appConfig.timeZone}
     />
   );
 }

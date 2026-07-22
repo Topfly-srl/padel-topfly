@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { appPath } from "@/lib/app-path";
 import { birthDateInputToIsoDate } from "@/lib/birth-date-input";
+import { dateTimeFromParts, localTime } from "@/lib/booking-ui";
 import { isValidEmail, normalizeEmailInput } from "@/lib/email";
 import { buildShortGuestWaiverLink } from "@/lib/guest-waiver-link";
 import { PendingSignaturePanel } from "@/components/pending-signature-panel";
@@ -56,22 +57,12 @@ function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000);
 }
 
-function dateTimeFromParts(day: string, time: string) {
-  return new Date(`${day}T${time}:00`);
-}
-
-function localTime(date: Date) {
-  return new Intl.DateTimeFormat("it-IT", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function localSummaryDay(date: Date) {
+function localSummaryDay(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "long",
     day: "2-digit",
     month: "long",
+    timeZone,
   }).format(date);
 }
 
@@ -152,11 +143,15 @@ export function BookingCheckout({
   selectedTime,
   duration,
   allowedDomain,
+  timeZone,
 }: {
   selectedDate: string;
   selectedTime: string;
   duration: number;
   allowedDomain: string;
+  // Fuso del campo, passato dalla pagina server (appConfig.timeZone): il checkout non carica
+  // l'availability, ma gli orari restano "di parete" e non devono seguire il dispositivo.
+  timeZone: string;
 }) {
   const [organizerName, setOrganizerName] = useState("");
   const [organizerEmail, setOrganizerEmail] = useState("");
@@ -174,7 +169,10 @@ export function BookingCheckout({
   const organizerNameErrorId = useId();
   const organizerEmailErrorId = useId();
 
-  const start = useMemo(() => dateTimeFromParts(selectedDate, selectedTime), [selectedDate, selectedTime]);
+  const start = useMemo(
+    () => dateTimeFromParts(selectedDate, selectedTime, timeZone),
+    [selectedDate, selectedTime, timeZone],
+  );
   const end = useMemo(() => addMinutes(start, duration), [duration, start]);
   const normalizedOrganizerName = normalizeName(organizerName);
   const normalizedOrganizerEmail = normalizeEmailInput(organizerEmail);
@@ -356,11 +354,11 @@ export function BookingCheckout({
               <CalendarDays size={15} />
               Prenotazione
             </span>
-            <h2>{localSummaryDay(start)}</h2>
+            <h2>{localSummaryDay(start, timeZone)}</h2>
             <div className="checkout-meta">
               <span>
                 <Clock3 size={15} />
-                {localTime(start)} - {localTime(end)}
+                {localTime(start, timeZone)} - {localTime(end, timeZone)}
               </span>
               <span>
                 <Users size={15} />
@@ -417,7 +415,7 @@ export function BookingCheckout({
                   </span>
                   <div>
                     <h2>Prenotazione confermata</h2>
-                    <p>{localTime(start)} - {localTime(end)}</p>
+                    <p>{localTime(start, timeZone)} - {localTime(end, timeZone)}</p>
                   </div>
                 </div>
 
@@ -436,6 +434,7 @@ export function BookingCheckout({
               <PendingSignaturePanel
                 missingSignatures={pendingMissingSignatures}
                 signatureDeadlineAt={createdBooking.signatureDeadlineAt}
+                timeZone={timeZone}
                 guestWaiverLink={createdBooking.guestWaiverUrl ?? null}
                 linkCopied={copiedGuestWaiverLink}
                 onCopyLink={copyGuestWaiverLink}

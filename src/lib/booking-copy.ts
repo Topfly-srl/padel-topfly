@@ -45,18 +45,21 @@ export function availabilityOrganizerLabel(name: string, viewerRole?: string | n
   return viewerRole === "ADMIN" ? name : publicOrganizerLabel(name);
 }
 
-export function bookingDateTime(date: Date) {
+// La scadenza va mostrata nell'ora di parete del campo (fuso esplicito), non in quella del
+// dispositivo: un ospite con il telefono su un fuso estero leggerebbe un'ora sbagliata.
+export function bookingDateTime(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "short",
     day: "2-digit",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 
-export function deadlineCopy(value: string | null) {
+export function deadlineCopy(value: string | null, timeZone: string) {
   return value
-    ? `Scadenza firme: ${bookingDateTime(new Date(value))}`
+    ? `Scadenza firme: ${bookingDateTime(new Date(value), timeZone)}`
     : "Completa le firme prima dell'orario di gioco.";
 }

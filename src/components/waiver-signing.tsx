@@ -49,20 +49,22 @@ const emptyWaiverForm: WaiverFormValue = {
   signatureImageDataUrl: "",
 };
 
-function localDateTime(date: Date) {
+function localDateTime(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "long",
     day: "2-digit",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 
-function localTime(date: Date) {
+function localTime(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 
@@ -87,9 +89,13 @@ function friendlyLoadError(message: string) {
 export function WaiverSigning({
   bookingId,
   token,
+  timeZone,
 }: {
   bookingId: string;
   token: string;
+  // Fuso del campo, passato dalla pagina server (appConfig.timeZone): l'ospite puo' firmare da
+  // un dispositivo con qualunque fuso, ma gli orari della partita restano "di parete".
+  timeZone: string;
 }) {
   const [waiver, setWaiver] = useState<WaiverContext | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -283,11 +289,11 @@ export function WaiverSigning({
                 <p className="muted-label">Accesso campo</p>
                 <h2>Firma accesso campo</h2>
                 <p>
-                  {localDateTime(bookingStart)} - {localTime(bookingEnd)}
+                  {localDateTime(bookingStart, timeZone)} - {localTime(bookingEnd, timeZone)}
                 </p>
                 <small>Referente: {waiver.booking.organizerName}</small>
                 {waiver.booking.status === "PENDING_SIGNATURES" ? (
-                  <small>{deadlineCopy(waiver.booking.signatureDeadlineAt)}</small>
+                  <small>{deadlineCopy(waiver.booking.signatureDeadlineAt, timeZone)}</small>
                 ) : null}
               </div>
               <span className="count-pill">

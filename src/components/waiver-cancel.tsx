@@ -31,20 +31,22 @@ type Notice = {
   text: string;
 };
 
-function localDateTime(date: Date) {
+function localDateTime(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     weekday: "long",
     day: "2-digit",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 
-function localTime(date: Date) {
+function localTime(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 
@@ -56,9 +58,13 @@ async function readApiError(response: Response) {
 export function WaiverCancel({
   signatureId,
   token,
+  timeZone,
 }: {
   signatureId: string;
   token: string;
+  // Fuso del campo, passato dalla pagina server (appConfig.timeZone): gli orari della partita
+  // restano "di parete" anche per chi rinuncia da un dispositivo su un altro fuso.
+  timeZone: string;
 }) {
   const [cancelContext, setCancelContext] = useState<CancelContext | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -156,7 +162,7 @@ export function WaiverCancel({
                 <p className="muted-label">Accesso campo</p>
                 <h2>{isCanceled ? "Posto già liberato" : "Vuoi rinunciare al posto?"}</h2>
                 <p>
-                  {localDateTime(bookingStart)} - {localTime(bookingEnd)}
+                  {localDateTime(bookingStart, timeZone)} - {localTime(bookingEnd, timeZone)}
                 </p>
                 <small>Referente: {cancelContext.booking.organizerName}</small>
               </div>

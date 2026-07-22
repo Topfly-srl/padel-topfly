@@ -1,3 +1,4 @@
+import { fromZonedTime } from "date-fns-tz";
 import { describe, expect, it } from "vitest";
 import {
   bookingTimeOptions,
@@ -7,6 +8,11 @@ import {
   timeSlotClassName,
   type TimelineRange,
 } from "@/lib/timeline-slots";
+
+// Fuso del campo usato in tutta la suite: gli orari attesi vengono costruiti con fromZonedTime
+// sullo stesso fuso passato a computeTimelineSlots, cosi' i test sono INDIPENDENTI dal fuso della
+// macchina (girano identici anche con TZ=America/New_York).
+const timeZone = "Europe/Rome";
 
 type TestItem = {
   id: string;
@@ -21,13 +27,17 @@ function range(item: TestItem, start: string, end: string): TimelineRange<TestIt
   };
 }
 
-// Le fasce della griglia usano la stessa lettura oraria "locale" di computeTimelineSlots
-// (`YYYY-MM-DDTHH:MM:00`, senza Z), cosi' il test resta stabile qualunque sia il fuso della macchina.
+// Le fasce della griglia usano la stessa lettura "ora di parete" di computeTimelineSlots
+// (`YYYY-MM-DDTHH:MM:00` nel fuso del campo), cosi' attese e calcolo condividono la conversione.
+function wallClockMs(day: string, time: string) {
+  return fromZonedTime(`${day}T${time}:00`, timeZone).getTime();
+}
+
 function localRange(item: TestItem, day: string, startTime: string, endTime: string): TimelineRange<TestItem> {
   return {
     item,
-    startMs: new Date(`${day}T${startTime}:00`).getTime(),
-    endMs: new Date(`${day}T${endTime}:00`).getTime(),
+    startMs: wallClockMs(day, startTime),
+    endMs: wallClockMs(day, endTime),
   };
 }
 
@@ -99,8 +109,9 @@ describe("computeTimelineSlots", () => {
       options,
       selectedDate: day,
       selectedTime: "10:15",
-      startMs: new Date(`${day}T10:15:00`).getTime(),
-      endMs: new Date(`${day}T10:45:00`).getTime(),
+      timeZone,
+      startMs: wallClockMs(day, "10:15"),
+      endMs: wallClockMs(day, "10:45"),
       bookingRanges: [localRange(booked, day, "10:00", "10:30")],
       blockRanges: [],
     });
@@ -119,8 +130,9 @@ describe("computeTimelineSlots", () => {
       options: bookingTimeOptions(),
       selectedDate: day,
       selectedTime: "10:00",
-      startMs: new Date(`${day}T10:00:00`).getTime(),
-      endMs: new Date(`${day}T11:00:00`).getTime(),
+      timeZone,
+      startMs: wallClockMs(day, "10:00"),
+      endMs: wallClockMs(day, "11:00"),
       bookingRanges: [localRange(evening, day, "22:00", "23:59")],
       blockRanges: [],
     });
@@ -147,8 +159,9 @@ describe("computeTimelineSlots", () => {
       options,
       selectedDate: day,
       selectedTime: "10:00",
-      startMs: new Date(`${day}T10:00:00`).getTime(),
-      endMs: new Date(`${day}T10:30:00`).getTime(),
+      timeZone,
+      startMs: wallClockMs(day, "10:00"),
+      endMs: wallClockMs(day, "10:30"),
       bookingRanges: ranges,
       blockRanges: [],
     });
@@ -156,8 +169,9 @@ describe("computeTimelineSlots", () => {
       options,
       selectedDate: day,
       selectedTime: "10:00",
-      startMs: new Date(`${day}T10:00:00`).getTime(),
-      endMs: new Date(`${day}T10:30:00`).getTime(),
+      timeZone,
+      startMs: wallClockMs(day, "10:00"),
+      endMs: wallClockMs(day, "10:30"),
       bookingRanges: ranges,
       blockRanges: [],
       ignoreBookingId: own.id,
@@ -176,14 +190,38 @@ describe("computeTimelineSlots", () => {
       options,
       selectedDate: day,
       selectedTime: "09:00",
-      startMs: new Date(`${day}T09:00:00`).getTime(),
-      endMs: new Date(`${day}T09:15:00`).getTime(),
+      timeZone,
+      startMs: wallClockMs(day, "09:00"),
+      endMs: wallClockMs(day, "09:15"),
       bookingRanges: [],
       blockRanges: [localRange(block, day, "10:00", "10:15")],
     });
 
     expect(slots[0]).toMatchObject({ option: "10:00", block, booking: undefined });
     expect(slots[1].block).toBeUndefined();
+  });
+
+  it("ancora gli slot al fuso del campo, non a quello del processo", () => {
+    // Prova regina dell'indipendenza dal dispositivo: il 3 luglio 2026 Roma e' UTC+2, quindi lo
+    // slot di parete 10:00 inizia alle 08:00Z. L'atteso e' un istante ASSOLUTO (Date.UTC): se
+    // computeTimelineSlots usasse il fuso del processo, il test fallirebbe appena TZ != Rome.
+    const slots = computeTimelineSlots({
+      options: ["10:00"],
+      selectedDate: day,
+      selectedTime: "10:00",
+      timeZone,
+      startMs: wallClockMs(day, "10:00"),
+      endMs: wallClockMs(day, "10:15"),
+      bookingRanges: [
+        { item: { id: "utc" }, startMs: Date.UTC(2026, 6, 3, 8, 0), endMs: Date.UTC(2026, 6, 3, 8, 15) },
+      ],
+      blockRanges: [],
+    });
+
+    expect(wallClockMs(day, "10:00")).toBe(Date.UTC(2026, 6, 3, 8, 0));
+    // La prenotazione espressa direttamente in UTC copre lo slot di parete 10:00-10:15.
+    expect(slots[0].booking).toEqual({ id: "utc" });
+    expect(slots[0].isSelected).toBe(true);
   });
 });
 

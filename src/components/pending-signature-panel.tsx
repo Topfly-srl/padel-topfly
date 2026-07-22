@@ -11,27 +11,31 @@ type PendingSignatureFootnote = {
 type PendingSignaturePanelProps = {
   missingSignatures: number;
   signatureDeadlineAt: string | null;
+  // Fuso del campo: la scadenza e' un'ora "di parete", non deve seguire il fuso del dispositivo.
+  timeZone: string;
   guestWaiverLink: string | null;
   linkCopied: boolean;
   onCopyLink: (link: string) => void;
   footnote: PendingSignatureFootnote | null;
 };
 
-function localTime(date: Date) {
+function localTime(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("it-IT", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 
-function localDeadlineDateTime(date: Date) {
+function localDeadlineDateTime(date: Date, timeZone: string) {
   const day = new Intl.DateTimeFormat("it-IT", {
     weekday: "long",
     day: "2-digit",
     month: "long",
+    timeZone,
   }).format(date);
 
-  return `${day} alle ${localTime(date)}`;
+  return `${day} alle ${localTime(date, timeZone)}`;
 }
 
 function missingSignatureTitle(count: number) {
@@ -41,6 +45,7 @@ function missingSignatureTitle(count: number) {
 export function PendingSignaturePanel({
   missingSignatures,
   signatureDeadlineAt,
+  timeZone,
   guestWaiverLink,
   linkCopied,
   onCopyLink,
@@ -57,7 +62,7 @@ export function PendingSignaturePanel({
           <strong>{missingSignatureTitle(missingSignatures)}</strong>
           <p className="pending-signature-deadline">
             {signatureDeadlineAt
-              ? `Scadenza: ${localDeadlineDateTime(new Date(signatureDeadlineAt))}.`
+              ? `Scadenza: ${localDeadlineDateTime(new Date(signatureDeadlineAt), timeZone)}.`
               : "Scadenza: prima dell'orario di gioco."}
           </p>
         </div>

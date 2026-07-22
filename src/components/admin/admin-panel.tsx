@@ -27,6 +27,7 @@ export function AdminPanel({
   isAdminLoading,
   options,
   selectedDate,
+  timeZone,
   dayBlocks,
   onRefresh,
   setNotice,
@@ -56,6 +57,8 @@ export function AdminPanel({
   isAdminLoading: boolean;
   options: string[];
   selectedDate: string;
+  // Fuso del campo (da booking-app): tutte le sotto-sezioni formattano orari "di parete".
+  timeZone: string;
   dayBlocks: AvailabilityBlock[];
   onRefresh: () => Promise<void>;
   setNotice: (notice: Notice) => void;
@@ -93,6 +96,7 @@ export function AdminPanel({
       <AdminBlocksSection
         options={options}
         selectedDate={selectedDate}
+        timeZone={timeZone}
         dayBlocks={dayBlocks}
         onRefresh={onRefresh}
         setNotice={setNotice}
@@ -100,12 +104,14 @@ export function AdminPanel({
 
       <AdminDayBookingsSection
         dayBookings={dayBookings}
+        timeZone={timeZone}
         onEditBooking={onEditBooking}
         onCancelBooking={onCancelBooking}
       />
 
       <AdminWaiversSection
         adminWaivers={adminWaivers}
+        timeZone={timeZone}
         adminWaiverStatusFilter={adminWaiverStatusFilter}
         onStatusFilterChange={onWaiverStatusFilterChange}
         adminWaiverRoleFilter={adminWaiverRoleFilter}
@@ -118,10 +124,11 @@ export function AdminPanel({
         onRetry={onRetryWaiver}
       />
 
-      <AdminStatsSection stats={stats} isStatsLoading={isStatsLoading} />
+      <AdminStatsSection stats={stats} isStatsLoading={isStatsLoading} timeZone={timeZone} />
 
       <AdminAuditSection
         audit={audit}
+        timeZone={timeZone}
         auditActionFilter={auditActionFilter}
         onAuditActionFilterChange={onAuditActionFilterChange}
         isAuditLoading={isAuditLoading}

@@ -364,6 +364,7 @@ export async function demoGetAvailability(
     settings: {
       ...bookingPolicy,
       allowedDomain: appConfig.allowedDomain,
+      timeZone: appConfig.timeZone,
     },
     bookings: bookings
       .filter(

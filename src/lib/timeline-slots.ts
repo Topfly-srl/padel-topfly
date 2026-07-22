@@ -1,3 +1,5 @@
+import { fromZonedTime } from "date-fns-tz";
+
 export type TimelineRange<T extends { id: string }> = {
   item: T;
   startMs: number;
@@ -53,10 +55,14 @@ export type TimelineSlot<B extends { id: string }, K extends { id: string }> = {
 // oggetti Date): stessa logica, due copie che potevano divergere in silenzio. Ora e' un solo helper.
 // L'esclusione di una prenotazione (ignoreBookingId) copre sia la modifica in corso su booking-app
 // sia il "escludi me stessa dai conflitti" di manage-booking.
+// Le option sono orari "di parete" del campo: la conversione in istanti passa per il fuso
+// configurato (timeZone), mai per quello del dispositivo, cosi' la griglia resta identica anche
+// per chi apre l'app con il telefono impostato su un fuso estero.
 export function computeTimelineSlots<B extends { id: string }, K extends { id: string }>({
   options,
   selectedDate,
   selectedTime,
+  timeZone,
   startMs,
   endMs,
   bookingRanges,
@@ -67,6 +73,7 @@ export function computeTimelineSlots<B extends { id: string }, K extends { id: s
   options: readonly string[];
   selectedDate: string;
   selectedTime: string;
+  timeZone: string;
   startMs: number;
   endMs: number;
   bookingRanges: Array<TimelineRange<B>>;
@@ -75,7 +82,7 @@ export function computeTimelineSlots<B extends { id: string }, K extends { id: s
   slotMinutes?: number;
 }): Array<TimelineSlot<B, K>> {
   return options.map((option) => {
-    const slotStartMs = new Date(`${selectedDate}T${option}:00`).getTime();
+    const slotStartMs = fromZonedTime(`${selectedDate}T${option}:00`, timeZone).getTime();
     const slotEndMs = slotStartMs + slotMinutes * 60_000;
     const booking = findOverlappingTimelineItem(bookingRanges, slotStartMs, slotEndMs, ignoreBookingId);
     const block = findOverlappingTimelineItem(blockRanges, slotStartMs, slotEndMs);

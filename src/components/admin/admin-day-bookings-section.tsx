@@ -7,10 +7,13 @@ import type { AvailabilityBooking } from "@/lib/types";
 
 export function AdminDayBookingsSection({
   dayBookings,
+  timeZone,
   onEditBooking,
   onCancelBooking,
 }: {
   dayBookings: AvailabilityBooking[];
+  // Fuso del campo: gli orari mostrati sono "di parete", non del dispositivo dell'admin.
+  timeZone: string;
   onEditBooking: (booking: AvailabilityBooking) => void;
   onCancelBooking: (booking: AvailabilityBooking) => void;
 }) {
@@ -23,7 +26,7 @@ export function AdminDayBookingsSection({
             <div>
               <strong>{booking.organizerName}</strong>
               <span>
-                {localTime(new Date(booking.start))} - {localTime(new Date(booking.end))}
+                {localTime(new Date(booking.start), timeZone)} - {localTime(new Date(booking.end), timeZone)}
               </span>
               <small>
                 <span className={`status-badge ${bookingStatusTone(booking.status)}`}>
@@ -34,7 +37,7 @@ export function AdminDayBookingsSection({
               </small>
               {booking.status === "PENDING_SIGNATURES" ? (
                 <small className="sync-warning-text">
-                  Non usare il campo · {deadlineCopy(booking.signatureDeadlineAt)}
+                  Non usare il campo · {deadlineCopy(booking.signatureDeadlineAt, timeZone)}
                 </small>
               ) : (
                 <small className="copy-state success">Campo utilizzabile</small>

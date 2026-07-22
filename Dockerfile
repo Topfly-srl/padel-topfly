@@ -27,6 +27,10 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# Fuso del campo anche nel runtime: difesa in profondita' (i parse/format applicativi passano
+# tutti per fromZonedTime/formatInTimeZone col fuso esplicito) e timestamp dei log leggibili
+# nell'ora del club invece che in UTC.
+ENV TZ=Europe/Rome
 
 COPY package.json package-lock.json ./
 COPY next.config.ts ./next.config.ts

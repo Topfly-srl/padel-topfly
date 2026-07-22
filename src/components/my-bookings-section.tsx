@@ -12,6 +12,7 @@ export function MyBookingsSection({
   bookings,
   count,
   isLoading,
+  timeZone,
   guestWaiverLinks,
   selectedBookingId,
   onCopyGuestLink,
@@ -21,6 +22,8 @@ export function MyBookingsSection({
   bookings: MyBooking[];
   count: number;
   isLoading: boolean;
+  // Fuso del campo (da booking-app): gli orari mostrati sono "di parete", non del dispositivo.
+  timeZone: string;
   guestWaiverLinks: Record<string, string>;
   selectedBookingId: string | null;
   onCopyGuestLink: (link: string) => void;
@@ -51,8 +54,8 @@ export function MyBookingsSection({
               >
                 <div>
                   <strong>
-                    {localDay(new Date(booking.start))}, {localTime(new Date(booking.start))} -{" "}
-                    {localTime(new Date(booking.end))}
+                    {localDay(new Date(booking.start), timeZone)}, {localTime(new Date(booking.start), timeZone)} -{" "}
+                    {localTime(new Date(booking.end), timeZone)}
                   </strong>
                   <small>
                     <span className={`status-badge ${bookingStatusTone(booking.status)}`}>
@@ -66,7 +69,7 @@ export function MyBookingsSection({
                     Firme scarico: {booking.waiverSignedCount}/{booking.playerCount}
                   </small>
                   {booking.status === "PENDING_SIGNATURES" ? (
-                    <small>{deadlineCopy(booking.signatureDeadlineAt)}</small>
+                    <small>{deadlineCopy(booking.signatureDeadlineAt, timeZone)}</small>
                   ) : null}
                 </div>
                 <div className="item-actions">
