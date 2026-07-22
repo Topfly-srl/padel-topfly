@@ -77,6 +77,12 @@ jobs:
             fi
           done
           echo "::endgroup::"
+          echo "::group::TEMP email status ultima prenotazione (nessun dato personale)"
+          sudo docker compose -f docker-compose.production.yml exec -T postgres \
+            psql -U padel -d padel_topfly -c "SELECT b.id, b.status, b.\"outlookSyncStatus\", left(coalesce(b.\"outlookSyncError\",''),40) AS outlook_err, b.\"createdAt\" FROM \"Booking\" b ORDER BY b.\"createdAt\" DESC LIMIT 3;" < /dev/null
+          sudo docker compose -f docker-compose.production.yml exec -T postgres \
+            psql -U padel -d padel_topfly -c "SELECT w.\"signerRole\", w.\"emailStatus\", w.\"signerEmailStatus\", w.\"guestEmailStatus\", w.\"createdAt\" FROM \"WaiverSignature\" w ORDER BY w.\"createdAt\" DESC LIMIT 4;" < /dev/null
+          echo "::endgroup::"
           echo "::group::db checks (nessun dato personale)"
           sudo docker compose -f docker-compose.production.yml exec -T postgres \
             psql -U padel -d padel_topfly -c "SELECT date_trunc('day', \"createdAt\") AS day, count(*) AS auto_canceled FROM \"AuditLog\" WHERE action = 'BOOKING_AUTO_CANCELED_SIGNATURES' AND \"createdAt\" > now() - interval '7 days' GROUP BY 1 ORDER BY 1 DESC;" < /dev/null
