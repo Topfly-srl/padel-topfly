@@ -1114,7 +1114,16 @@ export async function createOutlookEvent(
   try {
     const response = await graphFetch(mailboxPath("/calendar/events"), {
       method: "POST",
-      body: JSON.stringify(eventPayload(booking, organizer, manageUrl)),
+      body: JSON.stringify({
+        ...eventPayload(booking, organizer, manageUrl),
+        // Chiave di idempotenza Graph, valida SOLO in creazione (in PATCH e' read-only): se il
+        // POST riesce ma la risposta si perde e qualcuno ritenta, Graph riconosce la stessa
+        // transactionId e non crea un secondo evento. Stabile per la stessa conferma logica
+        // (id + revisione firme + istante di conferma), diversa per una riconferma successiva.
+        transactionId: `padel-${booking.id}-r${booking.waiverRevision}-${(
+          booking.signatureConfirmedAt ?? booking.createdAt
+        ).getTime()}`,
+      }),
     });
     const json = (await response.json()) as { id?: string };
 

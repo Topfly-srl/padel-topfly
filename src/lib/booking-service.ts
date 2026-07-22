@@ -200,14 +200,41 @@ async function syncBooking(booking: Booking, manageToken?: string, baseUrl?: str
   const manageUrl = buildManageUrl(baseUrl, booking.id, manageToken);
   const result = await updateOutlookEvent(booking, bookingOrganizer(booking), manageUrl);
 
-  return prisma.booking.update({
-    where: { id: booking.id },
+  // Task post-risposta su snapshot: la scrittura pretende che la prenotazione sia ancora
+  // CONFIRMED (syncBooking parte solo da li'). Se nel frattempo e' stata annullata, un evento
+  // creato ex novo dal fallback di updateOutlookEvent va compensato, non registrato.
+  const guard = await prisma.booking.updateMany({
+    where: { id: booking.id, status: "CONFIRMED" },
     data: {
       outlookEventId: result.eventId ?? booking.outlookEventId,
       outlookSyncStatus: result.status,
       outlookSyncError: result.error ?? null,
     },
   });
+
+  if (guard.count === 0 && result.eventId && result.eventId !== booking.outlookEventId) {
+    // Stessa compensazione di syncConfirmedBooking: commento coerente allo stato reale e, se
+    // anche la compensazione fallisce, l'id orfano resta tracciato sulla riga (soli campi
+    // Outlook) cosi' i percorsi idempotenti di cancellazione possono ritentare.
+    const current = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    const cleanup = await deleteOutlookEvent(
+      { ...current, outlookEventId: result.eventId },
+      current.status === "PENDING_SIGNATURES" ? "pending" : "canceled",
+    );
+
+    if (cleanup.status === "FAILED") {
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          outlookEventId: result.eventId,
+          outlookSyncStatus: "FAILED",
+          outlookSyncError: cleanup.error ?? null,
+        },
+      });
+    }
+  }
+
+  return prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
 }
 
 async function markOutlookDeleted(booking: Booking) {
@@ -239,8 +266,11 @@ function uniqueGuestSigners(signatures: GuestSignatureForNotice[]) {
 
 async function activeGuestSignersForBooking(
   booking: Pick<Booking, "id" | "waiverRevision">,
+  // Dentro una transazione va passato il client tx: leggere con `prisma` da dentro una
+  // serializable vanificherebbe la coerenza tra guardia di stato e lista da avvisare.
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<GuestSignatureForNotice[]> {
-  const signatures = await prisma.waiverSignature.findMany({
+  const signatures = await db.waiverSignature.findMany({
     where: {
       bookingId: booking.id,
       bookingRevision: booking.waiverRevision,
@@ -720,6 +750,13 @@ export async function updateBooking(
     throw new AppError("Usa il comando cancella per annullare la prenotazione.", 403);
   }
 
+  // Una prenotazione annullata non e' "riattivabile" dal referente: senza questo rifiuto un tab
+  // rimasto aperto sulla pagina di gestione potrebbe salvare uno spostamento e farla risorgere
+  // con una nuova scadenza firme. La riattivazione resta un gesto deliberato e solo admin.
+  if (booking.status === "CANCELED" && !isAdmin) {
+    throw new AppError("La prenotazione è stata annullata: non è più modificabile.", 409);
+  }
+
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
   const nextPlayerCount = input.playerCount === undefined ? booking.playerCount : validatePlayerCount(input.playerCount);
@@ -761,10 +798,8 @@ export async function updateBooking(
         ? { cancelReason: null }
         : {};
   const nextGuestWaiverToken = requiresFreshWaivers ? createGuestWaiverToken() : undefined;
-  const guestSignersToNotify =
-    requiresFreshWaivers || isCancellation ? await activeGuestSignersForBooking(booking) : [];
 
-  const updated = await retryPrismaTransaction(() =>
+  const { updated, guestSignersToNotify } = await retryPrismaTransaction(() =>
     prisma.$transaction(
       async (tx) => {
         if (nextStatus === "CONFIRMED" || nextStatus === "PENDING_SIGNATURES") {
@@ -779,8 +814,15 @@ export async function updateBooking(
           });
         }
 
-        const saved = await tx.booking.update({
-          where: { id: booking.id },
+        // Tutte le decisioni (nextStatus, firme, notifiche) sono calcolate sullo snapshot letto
+        // fuori dalla transazione: la scrittura pretende quindi che la riga sia ANCORA quella
+        // dello snapshot (stato E updatedAt). Senza la guardia sullo stato, un annullamento
+        // concorrente (o un retry dopo un conflitto di serializzazione) farebbe "resuscitare"
+        // una prenotazione annullata; senza quella su updatedAt, due modifiche concorrenti che
+        // non cambiano stato si sovrascriverebbero in silenzio (lost update). La riattivazione
+        // admin resta possibile: parte da uno snapshot appena letto, quindi la guardia combacia.
+        const guard = await tx.booking.updateMany({
+          where: { id: booking.id, status: booking.status, updatedAt: booking.updatedAt },
           data: {
             start: nextStart,
             end: nextEnd,
@@ -809,6 +851,12 @@ export async function updateBooking(
                     autoCanceledAt: null,
                   }
               : {}),
+            // Ogni CONFIRMED forzato dall'admin rinnova l'istante di conferma: e' anche la
+            // componente della chiave di idempotenza Graph, che deve cambiare a ogni riconferma
+            // (altrimenti Graph dedupe restituirebbe un evento gia' cancellato in passato).
+            ...(input.status === "CONFIRMED"
+              ? { signatureConfirmedAt: new Date(), autoCanceledAt: null }
+              : {}),
             outlookSyncStatus:
               nextStatus === "CONFIRMED"
                 ? "PENDING"
@@ -820,6 +868,22 @@ export async function updateBooking(
           },
         });
 
+        if (guard.count === 0) {
+          throw new AppError(
+            "La prenotazione è stata modificata nel frattempo: ricarica la pagina e riprova.",
+            409,
+          );
+        }
+
+        const saved = await tx.booking.findUniqueOrThrow({ where: { id: booking.id } });
+
+        // La lista di chi avvisare va letta con la stessa transazione che ha vinto la guardia:
+        // letta prima, potrebbe appartenere a una revisione firme ormai superata.
+        const guestSigners =
+          requiresFreshWaivers || isCancellation
+            ? await activeGuestSignersForBooking(booking, tx)
+            : [];
+
         await audit(tx, actor, {
           action: nextStatus === "CONFIRMED" ? "BOOKING_UPDATED" : "BOOKING_STATUS_CHANGED",
           entityType: "Booking",
@@ -828,7 +892,7 @@ export async function updateBooking(
           after: saved,
         });
 
-        return saved;
+        return { updated: saved, guestSignersToNotify: guestSigners };
       },
       { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
     ),
@@ -912,15 +976,23 @@ export async function cancelBooking(
     return serializeManagedBooking(refreshed ?? booking, access.manageToken ?? undefined, access.baseUrl);
   }
 
-  const guestSignersToNotify = await activeGuestSignersForBooking(booking);
-
-  const canceled = await retryPrismaTransaction(() =>
+  const result = await retryPrismaTransaction(() =>
     prisma.$transaction(
       async (tx) => {
-        const saved = await tx.booking.update({
-          where: { id: booking.id },
+        // Due annullamenti in gara (referente su due dispositivi, o referente+admin): solo il
+        // primo deve scrivere audit e spedire le mail. La guardia sullo stato elegge il
+        // vincitore; il perdente rientra nel percorso idempotente "gia' annullata" qui sotto.
+        const guard = await tx.booking.updateMany({
+          where: { id: booking.id, status: { not: "CANCELED" } },
           data: { status: "CANCELED", cancelReason: normalizeCancelReason(input.cancelReason) },
         });
+
+        if (guard.count === 0) {
+          return null;
+        }
+
+        const saved = await tx.booking.findUniqueOrThrow({ where: { id: booking.id } });
+        const guestSigners = await activeGuestSignersForBooking(booking, tx);
 
         await audit(tx, actor, {
           action: "BOOKING_CANCELED",
@@ -930,11 +1002,25 @@ export async function cancelBooking(
           after: saved,
         });
 
-        return saved;
+        return { canceled: saved, guestSignersToNotify: guestSigners };
       },
       { isolationLevel: PrismaNamespace.TransactionIsolationLevel.Serializable },
     ),
   );
+
+  if (!result) {
+    // Qualcun altro ha annullato un attimo prima: stessa risposta del percorso "gia' CANCELED",
+    // senza audit doppio e senza mail doppie.
+    const current = await prisma.booking.findUnique({ where: { id: booking.id } });
+    if (current && shouldRetryOutlookDelete(current)) {
+      runAfterResponse(() => markOutlookDeleted(current));
+    }
+
+    const refreshed = await getBookingWithWaivers(booking.id);
+    return serializeManagedBooking(refreshed ?? booking, access.manageToken ?? undefined, access.baseUrl);
+  }
+
+  const { canceled, guestSignersToNotify } = result;
 
   runAfterResponse(async () => {
     const synced = await markOutlookDeleted(canceled);

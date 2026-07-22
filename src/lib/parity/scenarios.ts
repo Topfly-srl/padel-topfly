@@ -942,6 +942,47 @@ export function registerUpdateBookingParity(driver: ParityManagementDriver) {
       await settle();
     });
 
+    it("il referente non puo' riattivare una prenotazione annullata", async () => {
+      // Un tab rimasto aperto sulla pagina di gestione non deve far risorgere la partita: dopo
+      // l'annullo, qualsiasi salvataggio non-admin viene rifiutato con lo stesso messaggio.
+      const created = await driver.createBooking(createInput({ ...futureSlot(1), playerCount: 2 }));
+      await driver.cancelBooking({ manageToken: created.manageToken }, created.id, {});
+
+      await expectRejection(
+        driver.updateBooking({ manageToken: created.manageToken }, created.id, { ...futureSlot(2) }),
+        "La prenotazione è stata annullata: non è più modificabile.",
+      );
+
+      const snapshot = await driver.readBookingSnapshot(created.id);
+      expect(snapshot?.status).toBe("CANCELED");
+
+      await settle();
+    });
+
+    it("l'admin riattiva una prenotazione annullata e la causale si azzera", async () => {
+      // La riattivazione e' un gesto deliberato e SOLO admin: la guardia di concorrenza (che
+      // pretende lo stato dello snapshot) deve lasciarla passare, e il motivo dell'annullo non
+      // deve restare appeso a una prenotazione tornata valida.
+      const created = await driver.createBooking(createInput({ ...futureSlot(1), playerCount: 1 }));
+      await driver.cancelBooking(
+        { manageToken: created.manageToken },
+        created.id,
+        { cancelReason: "Maltempo" },
+      );
+
+      const revived = await driver.updateBooking(
+        { adminUser: driver.adminUser },
+        created.id,
+        { status: "CONFIRMED" },
+      );
+
+      expect(revived.status).toBe("CONFIRMED");
+      expect(revived.cancelReason).toBeNull();
+      expect(revived.signatureConfirmedAt).toBeTruthy();
+
+      await settle();
+    });
+
     it("blocca lo spostamento di una partita gia' iniziata per chi non e' admin", async () => {
       const seed = await driver.seedManagedBooking({
         ...pastStartedSlot(1),

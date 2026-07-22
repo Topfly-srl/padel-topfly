@@ -234,14 +234,44 @@ export async function syncConfirmedBooking(input: {
     input.manageUrl,
   );
 
-  return prisma.booking.update({
-    where: { id: input.booking.id },
+  // Questo task gira DOPO la risposta, su uno snapshot: se nel frattempo il referente ha
+  // annullato (o la prenotazione e' tornata in attesa firme), scrivere l'event id per solo id
+  // lascerebbe un invito Outlook vivo su una partita non piu' confermata. La scrittura pretende
+  // che lo stato sia ancora CONFIRMED; se non lo e', l'evento appena creato viene compensato.
+  const guard = await prisma.booking.updateMany({
+    where: { id: input.booking.id, status: "CONFIRMED" },
     data: {
       outlookEventId: result.eventId ?? input.booking.outlookEventId,
       outlookSyncStatus: result.status,
       outlookSyncError: result.error ?? null,
     },
   });
+
+  if (guard.count === 0 && result.eventId) {
+    // La prenotazione non e' piu' CONFIRMED: l'evento appena creato va tolto dal calendario col
+    // commento coerente allo stato reale (in attesa firme vs annullata). Se anche la
+    // compensazione fallisce, l'id orfano viene salvato sulla riga (soli campi Outlook, nessun
+    // tocco allo stato): cosi' shouldRetryOutlookDelete e il pannello admin lo vedono e i
+    // percorsi idempotenti di cancellazione possono ritentare, invece di perderlo per sempre.
+    const current = await prisma.booking.findUniqueOrThrow({ where: { id: input.booking.id } });
+    const cleanup = await deleteOutlookEvent(
+      { ...current, outlookEventId: result.eventId },
+      current.status === "PENDING_SIGNATURES" ? "pending" : "canceled",
+    );
+
+    if (cleanup.status === "FAILED") {
+      await prisma.booking.update({
+        where: { id: input.booking.id },
+        data: {
+          outlookEventId: result.eventId,
+          outlookSyncStatus: "FAILED",
+          outlookSyncError: cleanup.error ?? null,
+        },
+      });
+    }
+  }
+
+  return prisma.booking.findUniqueOrThrow({ where: { id: input.booking.id } });
 }
 
 export async function cancelOutlookEventForPendingBooking(booking: Booking) {

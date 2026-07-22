@@ -112,9 +112,17 @@ describe("ricevuta annullamento al referente", () => {
     h.deleteEvent.mockResolvedValue({ status: "SKIPPED" });
     h.bookingFindUnique.mockResolvedValue(bookingFixture());
     h.bookingUpdate.mockResolvedValue(bookingFixture({ status: "CANCELED" }));
+    // Il tx deve rispecchiare cio' che cancelBooking usa davvero: la guardia updateMany (vince
+    // il primo annullamento), la rilettura findUniqueOrThrow e la lista ospiti da avvisare.
+    // Niente `update` nel tx: se un refactor reintroducesse la scrittura cieca per id, il test
+    // deve diventare rosso, non accontentarla in silenzio.
     h.transaction.mockImplementation(async (run: (tx: unknown) => Promise<unknown>) =>
       run({
-        booking: { update: async () => bookingFixture({ status: "CANCELED" }) },
+        booking: {
+          updateMany: async () => ({ count: 1 }),
+          findUniqueOrThrow: async () => bookingFixture({ status: "CANCELED" }),
+        },
+        waiverSignature: { findMany: h.signatureFindMany },
         auditLog: { create: h.auditCreate },
       }),
     );

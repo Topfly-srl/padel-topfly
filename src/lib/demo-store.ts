@@ -494,6 +494,12 @@ export async function demoUpdateBooking(
     throw new AppError("Usa il comando cancella per annullare la prenotazione.", 403);
   }
 
+  // Come in produzione: una prenotazione annullata non e' riattivabile dal referente (un tab
+  // stantio non deve farla risorgere); la riattivazione resta un gesto deliberato e solo admin.
+  if (booking.status === "CANCELED" && !isAdmin) {
+    throw new AppError("La prenotazione è stata annullata: non è più modificabile.", 409);
+  }
+
   const nextStart = input.start ?? booking.start;
   const nextEnd = input.end ?? booking.end;
   const nextPlayerCount = input.playerCount === undefined
@@ -558,6 +564,12 @@ export async function demoUpdateBooking(
   } else if (canConfirmSinglePlayerWithCurrentSignature) {
     booking.signatureReminderSentAt = null;
     booking.signatureConfirmedAt = booking.signatureConfirmedAt ?? new Date();
+    booking.autoCanceledAt = null;
+  }
+  // Come in produzione: ogni CONFIRMED forzato dall'admin rinnova l'istante di conferma (che in
+  // produzione e' anche la componente della chiave di idempotenza dell'evento Outlook).
+  if (input.status === "CONFIRMED") {
+    booking.signatureConfirmedAt = new Date();
     booking.autoCanceledAt = null;
   }
   booking.updatedAt = new Date();
