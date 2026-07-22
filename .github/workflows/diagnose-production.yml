@@ -69,19 +69,6 @@ jobs:
           else
             echo "::warning::APP_WAIVER_RECIPIENT_EMAIL non allineato a padel@topflysolutions.com in .env.production"
           fi
-          for gk in MS_GRAPH_TENANT_ID MS_GRAPH_CLIENT_ID MS_GRAPH_CLIENT_SECRET MS_GRAPH_MAILBOX; do
-            if sudo grep -Eq "^${gk}=.+" .env.production; then
-              echo "${gk}: presente"
-            else
-              echo "::warning::${gk} assente o vuoto in .env.production"
-            fi
-          done
-          echo "::endgroup::"
-          echo "::group::TEMP email status ultima prenotazione (nessun dato personale)"
-          sudo docker compose -f docker-compose.production.yml exec -T postgres \
-            psql -U padel -d padel_topfly -c "SELECT b.id, b.status, b.\"outlookSyncStatus\", left(coalesce(b.\"outlookSyncError\",''),40) AS outlook_err, b.\"createdAt\" FROM \"Booking\" b ORDER BY b.\"createdAt\" DESC LIMIT 3;" < /dev/null
-          sudo docker compose -f docker-compose.production.yml exec -T postgres \
-            psql -U padel -d padel_topfly -c "SELECT w.\"signerRole\", w.\"emailStatus\", w.\"signerEmailStatus\", w.\"guestEmailStatus\", w.\"createdAt\" FROM \"WaiverSignature\" w ORDER BY w.\"createdAt\" DESC LIMIT 4;" < /dev/null
           echo "::endgroup::"
           echo "::group::db checks (nessun dato personale)"
           sudo docker compose -f docker-compose.production.yml exec -T postgres \
