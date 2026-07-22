@@ -37,11 +37,3 @@ export function toDateOrThrow(value: unknown, label: string) {
 
   return date;
 }
-
-export function formatDateTimeForApp(date: Date) {
-  return formatInTimeZone(date, appConfig.timeZone, "dd/MM/yyyy HH:mm");
-}
-
-export function formatTimeForApp(date: Date) {
-  return formatInTimeZone(date, appConfig.timeZone, "HH:mm");
-}

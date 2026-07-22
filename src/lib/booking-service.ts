@@ -6,7 +6,6 @@ import { AppError } from "@/lib/errors";
 import {
   bookingPolicy,
   isAlignedToSlot,
-  rangesOverlap,
   validateBookingPolicy,
 } from "@/lib/booking-policy";
 import { availabilityOrganizerLabel } from "@/lib/booking-copy";
@@ -1234,12 +1233,4 @@ export async function getAdminStats(now: Date = new Date()): Promise<AdminStats>
     byStatus,
     cancellations: summarizeCancellations(cancellations),
   };
-}
-
-export function hasRangeConflict(
-  start: Date,
-  end: Date,
-  ranges: Array<{ start: Date; end: Date }>,
-) {
-  return ranges.some((range) => rangesOverlap(start, end, range.start, range.end));
 }

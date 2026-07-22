@@ -41,11 +41,6 @@ export function resetOpportunisticSignatureThrottle() {
   lastOpportunisticRunMs = null;
 }
 
-type BookingWithSignatureDeadlineFields = Pick<
-  Booking,
-  "start" | "signatureDeadlineAt"
->;
-
 // Il reminder deve cadere a meta' della finestra, non a un anticipo fisso: con lead fisso una
 // prenotazione con finestra piu' corta del lead riceve il sollecito subito dopo la creazione,
 // quando non c'e' ancora nulla da sollecitare, e poi resta senza avvisi fino all'annullamento.
@@ -105,18 +100,6 @@ export function signatureReplacementDeadlineAt(start: Date, now = new Date()) {
   const replacement = minDate(new Date(now.getTime() + replacementWindowMs), start);
 
   return standard >= replacement ? standard : replacement;
-}
-
-export function isActiveBookingStatus(status: Booking["status"]) {
-  return status === "CONFIRMED" || status === "PENDING_SIGNATURES";
-}
-
-export function isBookingVisibleAsBusy(booking: BookingWithSignatureDeadlineFields & Pick<Booking, "status">, now = new Date()) {
-  return (
-    booking.status === "CONFIRMED" ||
-    (booking.status === "PENDING_SIGNATURES" &&
-      (!booking.signatureDeadlineAt || booking.signatureDeadlineAt > now))
-  );
 }
 
 function minDate(left: Date, right: Date) {
