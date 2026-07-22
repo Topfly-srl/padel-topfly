@@ -75,12 +75,13 @@ Una modifica e' produzione solo dopo push su `main`, workflow verde e smoke test
 - Avvio produzione fail-fast se mancano env critiche.
 - Checklist Bitwarden creata in `docs/bitwarden-checklist.md`.
 - Istruzioni operative per Codex/agenti create in `AGENTS.md`.
-- Report security audit creato in `docs/security-audit.md`.
+- Report security audit creato in `docs/security.md`.
 
 ## Cosa Non E' Ancora Fatto
 
-- Backup notturno del database configurato (cron `03:15`, vedi "Backup E Ripristino"); resta
-  da abilitare in console gli snapshot automatici Lightsail per una copia fuori dalla macchina.
+- Snapshot automatici Lightsail off-box da abilitare in console per una copia del disco fuori
+  dalla macchina. Il backup notturno del database su disco e' gia' attivo (cron `03:15`, vedi
+  "Backup E Ripristino"): qui resta solo la copia off-box.
 - Monitoraggio/alerting non ancora configurato.
 - Verifica che il permesso Graph `Mail.Send` sia limitato alla sola mailbox Padel.
 - Limitazione dei permessi Graph Application alla sola mailbox Padel tramite Exchange
@@ -319,12 +320,13 @@ congelare i deploy da `main`.
    `/api/availability`, verificando anche `Cache-Control: no-store`.
 
 Le migrazioni Prisma NON girano nel workflow: le applica `docker/entrypoint.sh` con
-`npx prisma migrate deploy` all'avvio del container, quindi la ricostruzione al passo 6
-porta in produzione ogni migrazione ancora da applicare. Questo deploy include
-`20260715093942_signature_window_started_at`, che aggiunge la colonna nullable
-`Booking.signatureWindowStartedAt` (inizio della finestra firme, usato dal sollecito dopo una
-rinuncia): e' additiva e retrocompatibile, i record esistenti restano a `NULL` e ricadono su
-`createdAt`.
+`npx prisma migrate deploy` all'avvio del container, quindi la ricostruzione al passo 7
+porta in produzione ogni migrazione ancora da applicare. Le migrazioni del progetto sono
+pensate additive e retrocompatibili (colonne nullable con fallback sui record esistenti), cosi'
+un deploy applica lo schema nuovo senza rompere i dati gia' presenti. Prisma 7: il client e'
+generato in `src/generated/prisma` e usa l'adapter `pg`; il bootstrap di un DB vuoto va fatto
+solo con `prisma migrate deploy` (mai `prisma db push`, che non crea l'unique index parziale
+sulle firme ACTIVE).
 
 ### Fallback Manuale
 
@@ -352,6 +354,40 @@ curl -I https://padel.topflysolutions.com
 
 I log di ogni servizio (app, postgres, caddy) usano il driver `json-file` con rotazione
 `max-size: 10m` e `max-file: 3`, quindi non riempiono il disco senza intervento manuale.
+
+## Workflow GitHub Actions
+
+Tutti i workflow vivono in `.github/workflows/` e si lanciano da GitHub Actions o con
+`gh workflow run "<Nome>" --ref main`.
+
+- **Deploy Production** (`deploy-production.yml`): CI (lint, test, integrazione, build, prisma
+  validate, audit) e, su `workflow_dispatch` o con `PRODUCTION_AUTO_DEPLOY=true`, deploy su
+  Lightsail. Vedi "Procedura Aggiornamento Codice".
+- **Signature Deadlines** (`signature-deadlines.yml`): ogni 10 minuti chiama
+  `POST /api/internal/signature-deadlines` col cron secret. Vedi "Scadenze firme".
+- **Health Check** (`health-check.yml`): ogni 15 minuti sonda home e `/api/availability`; tiene
+  anche vivo lo scheduling dei cron del repo. Vedi "Health check esterno".
+- **Provision Swap** (`provision-swap.yml`): idempotente, crea/riattiva 2 GB di swap persistente
+  sul box da 1 GB. Vedi "Trappola: swap e OOM in build" qui sotto.
+- **Diagnose Production** (`diagnose-production.yml`): manuale, raccoglie check di configurazione,
+  conteggi DB anonimizzati e log app/caddy per una diagnosi senza esporre dati personali.
+
+### Trappola: swap e OOM in build (box 1 GB)
+
+L'istanza Lightsail ha **1 GB di RAM** e `next build` gira SUL server durante il deploy. Senza
+swap la build esaurisce la memoria e **congela l'intera istanza**: sito e SSH irraggiungibili,
+recupero solo con `Reboot` dalla console Lightsail. E' gia' successo dopo un reboot che aveva
+perso lo swap non persistito in `/etc/fstab`.
+
+Regola operativa:
+
+- lo swap 2 GB deve essere attivo E persistito in `/etc/fstab`;
+- il workflow **Provision Swap** lo garantisce in modo idempotente:
+  `gh workflow run "Provision Swap" --ref main`;
+- dopo un reboot dell'istanza, se `free -h` non mostra piu' lo swap, rilanciare Provision Swap
+  PRIMA del deploy successivo;
+- il deploy SSH usa `ServerAliveInterval=30` come keepalive perche' la fase TypeScript della
+  build resta muta a lungo e senza probe la connessione cadrebbe ("Broken pipe").
 
 ## Procedura Aggiornamento Env
 
@@ -863,6 +899,111 @@ sudo docker compose -f docker-compose.staging.yml down -v
 
 Il `-v` qui e' sicuro perche' colpisce solo il volume staging dedicato, non quello di
 produzione. Verificare comunque sempre di aver passato `-f docker-compose.staging.yml`.
+
+## Provisioning Iniziale Del Server (Una Tantum)
+
+Riferimento per preparare da zero una nuova istanza. In esercizio normale non serve: il deploy
+gira su un'istanza gia' provisionata (`padel-topfly`, Frankfurt `eu-central-1`, 1 GB RAM / 2 vCPU
+/ 40 GB SSD, static IP `18.194.7.194`, path `/opt/padel-topfly`).
+
+### DNS
+
+Il DNS di `topflysolutions.com` e' gestito da cPanel/Serverplan. Record richiesto:
+
+```txt
+Tipo: A
+Nome: padel
+Valore: 18.194.7.194
+TTL: default oppure 300
+```
+
+Verifica: `dig +short A padel.topflysolutions.com` deve dare `18.194.7.194`; poi
+`curl -I https://padel.topflysolutions.com` (atteso `HTTP/2 200`) e
+`curl -I http://padel.topflysolutions.com` (atteso `308`).
+
+### Firewall Lightsail
+
+Aprire solo SSH `TCP 22`, HTTP `TCP 80`, HTTPS `TCP 443` (idem su IPv6 se attivo). Niente load
+balancer, CDN o database gestito.
+
+### Bootstrap Ubuntu
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl git tmux
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME:-$VERSION_CODENAME}) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Lo **swap 2 GB e' obbligatorio** su questo box (vedi "Trappola: swap e OOM in build"): usare il
+workflow Provision Swap, oppure a mano `fallocate -l 2G /swapfile`, `chmod 600`, `mkswap`,
+`swapon`, e la riga `/swapfile none swap sw 0 0` in `/etc/fstab` per la persistenza.
+
+### Struttura Docker
+
+`docker-compose.production.yml` avvia `app` (immagine Next.js dal `Dockerfile`), `postgres`
+(`postgres:16-alpine`, volume `padel_topfly_pgdata`) e `caddy` (`caddy:2-alpine`, porte 80/443).
+L'entrypoint dell'app esegue `npx prisma migrate deploy` e poi `npm start`. Il servizio `app` gira
+non-root con `no-new-privileges` e `cap_drop: ALL`; Caddy tiene i security header a livello proxy
+e riscrive `X-Real-IP`/`X-Forwarded-For` col client IP reale.
+
+### Creazione `.env.production`
+
+```bash
+cd /opt/padel-topfly
+cp .env.production.example .env.production
+chmod 600 .env.production
+openssl rand -base64 32   # AUTH_SECRET
+openssl rand -hex 24      # POSTGRES_PASSWORD (hex: niente URL-encoding in DATABASE_URL)
+```
+
+Valori attesi (i secret veri vanno in Bitwarden, mai in Git):
+
+```env
+APP_DOMAIN=padel.topflysolutions.com
+APP_ENV=production
+APP_PUBLIC_ORIGIN=https://padel.topflysolutions.com
+APP_ALLOWED_DOMAIN=topflysolutions.com
+APP_ADMIN_EMAILS=antony.buffone@topflysolutions.com
+APP_TIME_ZONE=Europe/Rome
+
+AUTH_DEV_MODE=false
+AUTH_TRUST_HOST=true
+AUTH_URL=https://padel.topflysolutions.com
+AUTH_SECRET=...
+
+POSTGRES_USER=padel
+POSTGRES_PASSWORD=...
+POSTGRES_DB=padel_topfly
+DATABASE_URL=postgresql://padel:...@postgres:5432/padel_topfly?schema=public
+
+MICROSOFT_ENTRA_ID_ID=...
+MICROSOFT_ENTRA_ID_SECRET=...
+MICROSOFT_ENTRA_ID_TENANT_ID=...
+
+MS_GRAPH_TENANT_ID=...
+MS_GRAPH_CLIENT_ID=...
+MS_GRAPH_CLIENT_SECRET=...
+MS_GRAPH_MAILBOX=padel@topflysolutions.com
+APP_WAIVER_RECIPIENT_EMAIL=padel@topflysolutions.com
+```
+
+`APP_DOMAIN` con dominio HTTPS non deve avere `:` davanti: corretto
+`APP_DOMAIN=padel.topflysolutions.com`, errato `APP_DOMAIN=:padel.topflysolutions.com`
+(`:80` vale solo per test temporanei via IP e HTTP).
+
+### Problemi Gia' Incontrati
+
+- **Build Docker lenta / ferma su `npm ci` o TypeScript**: quasi sempre memoria; assicurarsi che
+  lo swap 2 GB sia attivo (Provision Swap) e usare `tmux` per non perdere la sessione SSH.
+- **Caddy `invalid port 'padel.topflysolutions.com'`**: causato da `APP_DOMAIN` con `:` davanti;
+  correggere in `APP_DOMAIN=padel.topflysolutions.com` e `up -d`.
+- **HTTPS non parte**: verificare che il record `A` punti a `18.194.7.194`, che 80/443 siano
+  aperte su Lightsail, che `APP_DOMAIN` sia corretto e leggere i log Caddy.
 
 ## Comandi Di Emergenza
 

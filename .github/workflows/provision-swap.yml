@@ -3,7 +3,8 @@ name: Provision Swap
 # Aggiunge (in modo idempotente) 2 GB di swap persistente sul box Lightsail da 1 GB RAM. Senza
 # swap la build di produzione (next build) esaurisce la memoria e congela l'intera istanza: e'
 # gia' successo dopo un reboot che aveva perso lo swap non persistito. Procedura del runbook
-# (docs/aws-deploy.md). Lanciare a mano dopo un reboot se `free -h` non mostra piu' lo swap.
+# (docs/production-runbook.md, "Trappola: swap e OOM in build"). Lanciare a mano dopo un reboot
+# se `free -h` non mostra piu' lo swap.
 
 on:
   workflow_dispatch:

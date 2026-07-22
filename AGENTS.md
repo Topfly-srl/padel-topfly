@@ -197,9 +197,11 @@ manuale dello stesso workflow passa e restituisce `{"ok":true,...}`.
 
 - Aggiorna README e runbook quando cambia produzione, deploy, env, Graph, sicurezza o
   procedura operativa.
+- Runbook produzione (unico, include provisioning/deploy/backup/staging/Graph/workflow):
+  `docs/production-runbook.md`.
+- Security audit (snapshot): `docs/security.md`.
 - Checklist Bitwarden: `docs/bitwarden-checklist.md`.
-- Runbook produzione: `docs/production-runbook.md`.
-- Runbook AWS: `docs/aws-deploy.md`.
+- Backlog / migliorie future: `docs/backlog.md`.
 - Non descrivere funzionalita' solo pianificate come se fossero gia' attive.
 
 ## Git

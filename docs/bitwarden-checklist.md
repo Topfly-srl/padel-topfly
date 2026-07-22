@@ -64,7 +64,7 @@ Da salvare:
 - utente SSH: `ubuntu`;
 - host: `18.194.7.194`;
 - known hosts usato in `LIGHTSAIL_KNOWN_HOSTS`;
-- repository variable: `PRODUCTION_AUTO_DEPLOY=true`;
+- repository variable: `PRODUCTION_AUTO_DEPLOY` e valore corrente (`false` = deploy manuale);
 - repository secret: `APP_INTERNAL_CRON_SECRET`;
 - workflow: `.github/workflows/deploy-production.yml`;
 - workflow: `.github/workflows/signature-deadlines.yml`;
@@ -152,7 +152,7 @@ aziendali dedicati. Nella nota Padel basta indicare dove trovarle.
 ## Checklist Security Audit
 
 Da aggiornare quando si chiude un finding del report
-[`docs/security-audit.md`](security-audit.md):
+[`docs/security.md`](security.md):
 
 - verifica `Mail.Send` limitato alla sola mailbox Padel;
 - Application Access Policy/RBAC Exchange per Graph;

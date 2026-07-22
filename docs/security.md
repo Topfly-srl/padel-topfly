@@ -4,6 +4,11 @@ Audit applicativo e operativo per <https://padel.topflysolutions.com>.
 
 Data ultimo aggiornamento: 2026-06-21.
 
+> **Nota:** questo e' uno **snapshot datato**, non uno stato in tempo reale. Alcuni finding sono
+> stati chiusi o superati dopo la data qui sopra (es. SEC-08, SEC-16). Per lo stato operativo
+> corrente (deploy, workflow, swap, backup) fa fede sempre
+> [`docs/production-runbook.md`](production-runbook.md).
+
 ## Executive Summary
 
 La scelta architetturale resta confermata: sito pubblico ma non pubblicizzato, nessun login
@@ -276,7 +281,9 @@ Location:
 
 Evidence:
 
-- il deploy automatico e' attivo su push `main` con `PRODUCTION_AUTO_DEPLOY=true`;
+- stato corrente `PRODUCTION_AUTO_DEPLOY=false`: il push su `main` esegue solo CI e il deploy
+  Lightsail va lanciato manualmente (`workflow_dispatch`); l'auto-deploy si attiverebbe solo
+  ponendo la variabile a `true`;
 - i secrets SSH permettono aggiornamento produzione.
 
 Impact:
@@ -297,7 +304,8 @@ Fix raccomandati:
 - abilitare branch protection su `main`;
 - richiedere status check `lint/test/build` prima del merge, se si passa a PR;
 - ruotare la deploy key se e' mai stata incollata in chat/log;
-- tenere `PRODUCTION_AUTO_DEPLOY=true` consapevolmente, disattivarlo durante freeze.
+- mantenere `PRODUCTION_AUTO_DEPLOY=false` (deploy manuale) e alzarlo a `true` solo
+  consapevolmente se in futuro si vuole l'auto-deploy da `main`.
 
 Status:
 
@@ -476,18 +484,17 @@ Location:
 
 Evidence:
 
-- GitHub sta migrando le JavaScript Actions da Node 20 a Node 24;
-- il workflow usa ancora `actions/checkout@v4` e `actions/setup-node@v4`, ma il warning
-  puo' comparire sul runtime dell'action, non sul Node usato dall'app.
+- GitHub ha migrato le JavaScript Actions da Node 20 a Node 24.
 
 Impact:
 
 - possibile rumore nei log CI o incompatibilita' futura se il runtime GitHub cambia.
 
-Fix:
+Fix (applicato, superato):
 
-- aggiunto `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` a livello workflow;
-- il job CI continua a usare Node 22 per build/test applicativi.
+- i workflow usano `actions/checkout@v5` e `actions/setup-node@v5`, gia' sul runtime Node 24:
+  il vecchio workaround `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` non e' piu' presente in nessun `.yml`;
+- il job CI continua a usare Node 22 per build/test applicativi (`node-version: "22"`).
 
 ### SEC-17 - Rilevamento produzione robusto su deploy non-Vercel
 

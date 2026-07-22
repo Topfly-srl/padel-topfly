@@ -20,7 +20,7 @@ URL produzione:
 - Outlook/Graph: attivo in produzione con mailbox `padel@topflysolutions.com`.
 - Deploy: GitHub Actions `Deploy Production`; con `PRODUCTION_AUTO_DEPLOY=false` il push su
   `main` esegue CI e il deploy va lanciato manualmente da Actions.
-- Security audit: [`docs/security-audit.md`](docs/security-audit.md).
+- Security audit: [`docs/security.md`](docs/security.md).
 
 ## Funzionalita'
 
@@ -51,7 +51,7 @@ URL produzione:
 ## Stack
 
 - Next.js App Router + TypeScript.
-- Prisma + Postgres.
+- Prisma 7 + Postgres (client generato in `src/generated/prisma`, adapter `pg`).
 - Auth.js / NextAuth con Microsoft Entra ID solo per area admin.
 - Microsoft Graph per inviti Outlook, promemoria, cancellazioni native Outlook, invio PDF waiver
   e notifiche ospiti con allegati calendario quando servono.
@@ -150,11 +150,10 @@ Deploy consigliato:
 - al momento `PRODUCTION_AUTO_DEPLOY=false`, quindi dopo il push va controllata la run e,
   se il job deploy e' skipped, va lanciato manualmente `Deploy Production`.
 
-Il workflow esegue prima CI (`lint`, test, build, Prisma validate e audit npm), forza le
-JavaScript Actions sul runtime Node 24, crea un backup Postgres fuori dal repo in
-`/var/backups/padel-topfly` quando Postgres e' gia' attivo, aggiorna `/opt/padel-topfly`,
-ricostruisce Docker Compose ed esegue health check su <https://padel.topflysolutions.com>
-e su un'API pubblica con `Cache-Control: no-store`.
+Il workflow esegue prima CI (`lint`, test, build, Prisma validate e audit npm) su Node 22,
+crea un backup Postgres fuori dal repo in `/var/backups/padel-topfly` quando Postgres e' gia'
+attivo, aggiorna `/opt/padel-topfly`, ricostruisce Docker Compose ed esegue health check su
+<https://padel.topflysolutions.com> e su un'API pubblica con `Cache-Control: no-store`.
 
 La produzione usa hardening Docker per il container `app`: utente non-root,
 `no-new-privileges` e capabilities Linux rimosse.
@@ -423,8 +422,9 @@ cosi' l'admin ha una traccia datata dell'attivita'; le run a vuoto non scrivono 
 
 ## Documentazione Operativa
 
-- Runbook AWS/Lightsail: [`docs/aws-deploy.md`](docs/aws-deploy.md)
-- Stato produzione e checklist: [`docs/production-runbook.md`](docs/production-runbook.md)
-- Security audit: [`docs/security-audit.md`](docs/security-audit.md)
+- Runbook operativo (stato, deploy, provisioning, backup, staging, Graph, workflow):
+  [`docs/production-runbook.md`](docs/production-runbook.md)
+- Security audit (snapshot datato): [`docs/security.md`](docs/security.md)
 - Checklist Bitwarden: [`docs/bitwarden-checklist.md`](docs/bitwarden-checklist.md)
+- Backlog / migliorie future: [`docs/backlog.md`](docs/backlog.md)
 - Istruzioni agenti/Codex: [`AGENTS.md`](AGENTS.md)
