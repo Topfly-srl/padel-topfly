@@ -55,7 +55,9 @@ jobs:
 
           SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
 
-          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
+          ssh -i ~/.ssh/lightsail_deploy_key \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o ConnectTimeout=20 \
+            "${SSH_USER}@${LIGHTSAIL_HOST}" 'bash -s' <<'REMOTE'
           set -euo pipefail
 
           cd /opt/padel-topfly

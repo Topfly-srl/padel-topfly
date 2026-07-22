@@ -152,7 +152,12 @@ jobs:
           SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
           CRON_SECRET_FOR_SSH="$(printf '%q' "${APP_INTERNAL_CRON_SECRET}")"
 
-          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" \
+          # Keepalive: la fase TypeScript della build resta muta anche 10+ minuti e senza
+          # pacchetti la connessione cade ("Broken pipe", visto il 22/07): i probe ogni 30s
+          # tengono vivo il canale finche' il server risponde.
+          ssh -i ~/.ssh/lightsail_deploy_key \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            "${SSH_USER}@${LIGHTSAIL_HOST}" \
             "APP_INTERNAL_CRON_SECRET=${CRON_SECRET_FOR_SSH} bash -s" <<'REMOTE'
           set -euo pipefail
 
@@ -230,7 +235,9 @@ jobs:
           set -euo pipefail
 
           SSH_USER="${LIGHTSAIL_USER:-ubuntu}"
-          ssh -i ~/.ssh/lightsail_deploy_key "${SSH_USER}@${LIGHTSAIL_HOST}" \
+          ssh -i ~/.ssh/lightsail_deploy_key \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o ConnectTimeout=20 \
+            "${SSH_USER}@${LIGHTSAIL_HOST}" \
             'cd /opt/padel-topfly && sudo docker compose -f docker-compose.production.yml logs app --tail=120'
 
       - name: Production health check
