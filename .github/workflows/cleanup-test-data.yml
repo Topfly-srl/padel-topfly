@@ -3,7 +3,8 @@ name: Cleanup Test Data
 # One-off: rimuove le prenotazioni di TEST del committente (organizzate da
 # antony.buffone@topflysolutions.com o antonybuffone@gmail.com) cosi' da non comparire nelle
 # statistiche admin, ed elimina i relativi eventi calendario Outlook. Protegge SEMPRE la
-# prenotazione reale di gio 23/07/2026 22:00-23:45 (UTC 20:00-21:45).
+# prenotazione reale di gio 23/07/2026 22:00-00:00 Rome (UTC 20:00-22:00), esclusa per id
+# esatto (cmrsb5o4n005gn72bcoe9gjx2), verificato dal dry-run.
 #
 # Sicurezza: apply=false (default) fa solo un DRY-RUN in sola lettura che stampa cosa verrebbe
 # toccato. apply=true esegue davvero, ma prima fa un pg_dump di backup. WaiverSignature cascada
@@ -99,7 +100,7 @@ jobs:
           ${PSQL} <<'SQL'
           SELECT id, start, "end", status, "organizerEmail"
           FROM "Booking"
-          WHERE start = '2026-07-23 20:00:00+00' AND "end" = '2026-07-23 21:45:00+00';
+          WHERE id = 'cmrsb5o4n005gn72bcoe9gjx2';
           SQL
 
           echo ""
@@ -108,7 +109,7 @@ jobs:
           SELECT id, start, "end", status, "organizerEmail"
           FROM "Booking"
           WHERE "organizerEmail" IN ('antony.buffone@topflysolutions.com','antonybuffone@gmail.com')
-            AND NOT (start = '2026-07-23 20:00:00+00' AND "end" = '2026-07-23 21:45:00+00')
+            AND id <> 'cmrsb5o4n005gn72bcoe9gjx2'
           ORDER BY start;
           SQL
 
@@ -128,7 +129,7 @@ jobs:
 
           echo ""
           echo "== APPLY: annullo eventi calendario Outlook (annulla e notifica) =="
-          LIVE_EVENTS=$(${PSQL} -tA -c "SELECT \"outlookEventId\" FROM \"Booking\" WHERE \"organizerEmail\" IN ('antony.buffone@topflysolutions.com','antonybuffone@gmail.com') AND \"outlookEventId\" IS NOT NULL AND status IN ('CONFIRMED','PENDING_SIGNATURES') AND NOT (start = '2026-07-23 20:00:00+00' AND \"end\" = '2026-07-23 21:45:00+00');" < /dev/null)
+          LIVE_EVENTS=$(${PSQL} -tA -c "SELECT \"outlookEventId\" FROM \"Booking\" WHERE \"organizerEmail\" IN ('antony.buffone@topflysolutions.com','antonybuffone@gmail.com') AND \"outlookEventId\" IS NOT NULL AND status IN ('CONFIRMED','PENDING_SIGNATURES') AND id <> 'cmrsb5o4n005gn72bcoe9gjx2';" < /dev/null)
           if [ -z "${LIVE_EVENTS}" ]; then
             echo "Nessun evento calendario vivo da annullare."
           else
@@ -145,7 +146,7 @@ jobs:
             AND "entityId" IN (
               SELECT id FROM "Booking"
               WHERE "organizerEmail" IN ('antony.buffone@topflysolutions.com','antonybuffone@gmail.com')
-                AND NOT (start = '2026-07-23 20:00:00+00' AND "end" = '2026-07-23 21:45:00+00')
+                AND id <> 'cmrsb5o4n005gn72bcoe9gjx2'
             );
           SQL
 
@@ -154,7 +155,7 @@ jobs:
           ${PSQL} <<'SQL'
           DELETE FROM "Booking"
           WHERE "organizerEmail" IN ('antony.buffone@topflysolutions.com','antonybuffone@gmail.com')
-            AND NOT (start = '2026-07-23 20:00:00+00' AND "end" = '2026-07-23 21:45:00+00');
+            AND id <> 'cmrsb5o4n005gn72bcoe9gjx2';
           SQL
 
           echo ""
